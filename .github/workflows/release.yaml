@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create Release Pull Request or Publish to npm
+        id: changesets
+        uses: changesets/action@v2.0.0-next.2
+        with:
+          publish: pnpm release
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Deprecate @archildata/client (deprecated bridge)
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/.npmrc
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          VERSION="$(
+            node --input-type=module <<'NODE'
+          const packages = JSON.parse(process.env.PUBLISHED_PACKAGES ?? "[]");
+          const client = packages.find((pkg) => pkg.name === "@archildata/client");
+          process.stdout.write(client?.version ?? "");
+          NODE
+          )"
+
+          if [ -z "$VERSION" ]; then
+            echo "@archildata/client was not published; skipping deprecation."
+            exit 0
+          fi
+
+          printf "//registry.npmjs.org/:_authToken=%s\n" "$NODE_AUTH_TOKEN" > "$NPM_CONFIG_USERCONFIG"
+          pnpm deprecate "@archildata/client@${VERSION}" \
+            "Renamed — install 'disk' for the pure-JS API/CLI and '@archildata/native' for the FUSE binding."

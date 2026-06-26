@@ -1,0 +1,13 @@
+packages:
+  - 'packages/*'
+allowBuilds:
+  '@mongodb-js/zstd': true
+  esbuild: true
+  node-liblzma: true
+minimumReleaseAgeExclude:
+  - '@archildata/api-types@0.0.1'
+
+catalog:
+  typescript: ^6.0.3
+  tsdown: ^0.22.3
+  vitest: ^4.1.9

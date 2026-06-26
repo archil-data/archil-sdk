@@ -1,0 +1,87 @@
+{
+  "name": "disk",
+  "version": "0.8.18",
+  "description": "Pure-JS client and CLI for Archil disks",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./ai-sdk": {
+      "types": "./dist/ai-sdk.d.mts",
+      "import": "./dist/ai-sdk.mjs",
+      "require": "./dist/ai-sdk.cjs"
+    },
+    "./mastra": {
+      "types": "./dist/mastra.d.mts",
+      "import": "./dist/mastra.mjs",
+      "require": "./dist/mastra.cjs"
+    },
+    "./langchain": {
+      "types": "./dist/langchain.d.mts",
+      "import": "./dist/langchain.mjs",
+      "require": "./dist/langchain.cjs"
+    }
+  },
+  "bin": {
+    "disk": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@archildata/api-types": "^0.0.1",
+    "commander": "^14.0.3",
+    "fast-xml-parser": "^4.5.1",
+    "openapi-fetch": "^0.13.5",
+    "zod": "^3.25.0"
+  },
+  "peerDependencies": {
+    "@langchain/core": ">=0.3.0",
+    "@mastra/core": ">=0.10.0",
+    "ai": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    },
+    "@mastra/core": {
+      "optional": true
+    },
+    "@langchain/core": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@langchain/core": "^1.2.0",
+    "@mastra/core": "^1.45.0",
+    "@types/node": "^26.0.1",
+    "ai": "^6.0.0",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">= 22"
+  },
+  "keywords": [
+    "archil",
+    "disk",
+    "filesystem",
+    "cli"
+  ],
+  "license": "MIT"
+}

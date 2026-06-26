@@ -1,0 +1,49 @@
+{
+  "name": "@archildata/client",
+  "version": "0.8.18",
+  "description": "Deprecated — install `disk` (pure-JS API+CLI) and/or `@archildata/native` (low-level protocol client) instead.",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./api": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./native": {
+      "types": "./dist/native.d.mts",
+      "import": "./dist/native.mjs",
+      "require": "./dist/native.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "disk": "workspace:^"
+  },
+  "optionalDependencies": {
+    "@archildata/native": "^0.8.18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.33",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">= 22"
+  },
+  "license": "MIT"
+}

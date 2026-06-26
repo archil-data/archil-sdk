@@ -1,0 +1,45 @@
+{
+  "name": "@archildata/sqlite",
+  "version": "0.0.0",
+  "description": "serverless SQLite databases on Archil disks",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "disk": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.33",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">= 22"
+  },
+  "keywords": [
+    "archil",
+    "sqlite",
+    "serverless"
+  ],
+  "license": "MIT"
+}

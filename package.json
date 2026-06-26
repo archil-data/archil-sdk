@@ -1,0 +1,13 @@
+{
+  "name": "root",
+  "private": true,
+  "scripts": {
+    "typecheck": "pnpm -r --parallel run typecheck",
+    "test": "pnpm -r --parallel run test",
+    "build": "pnpm -r run build",
+    "release": "pnpm build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.0-next.5"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "ignoreDeprecations": "6.0",
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@archildata/native": ["../../rust-libs/archil-node"],
+      "@archildata/just-bash": ["./src/index.js"]
+    }
+  },
+  "include": ["src/**/*", "bin/**/*", "examples/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
