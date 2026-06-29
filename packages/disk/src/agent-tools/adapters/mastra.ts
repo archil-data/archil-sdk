@@ -1,9 +1,14 @@
-import { createTool } from "@mastra/core/tools";
+import { createTool, Tool } from "@mastra/core/tools";
 import type { Disk } from "../../disk.js";
 import type { Workspace } from "../../workspace.js";
-import { type AgentToolsOptions, bindTools } from "../specs.js";
+import { BoundSpecs, bindSpecs, inferSpecResult } from "../specs.js";
+import z from "zod";
 
 type MastraTool = ReturnType<typeof createTool>;
+
+type MastraTools = {
+  [Spec in BoundSpecs[number] as Spec["name"]]: Tool<z.infer<Spec["schema"]>, inferSpecResult<Spec>>;
+}
 
 /**
  * Filesystem tools for Mastra. Pass a single {@link Disk} or a
@@ -11,12 +16,12 @@ type MastraTool = ReturnType<typeof createTool>;
  * an `Agent`'s `tools`.
  *
  * ```ts
- * import { agentTools } from "disk/mastra";
- * const agent = new Agent({ name, model, tools: agentTools(workspace) });
+ * import { createDiskTools } from "disk/mastra";
+ * const agent = new Agent({ name, model, tools: createDiskTools(workspace) });
  * ```
  */
-export function agentTools(input: Disk | Workspace, opts: AgentToolsOptions = {}): Record<string, MastraTool> {
-  const bound = bindTools(input, opts.tools);
+export function createDiskTools(input: Disk | Workspace): MastraTools {
+  const bound = bindSpecs(input);
   const tools: Record<string, MastraTool> = {};
   for (const t of bound) {
     tools[t.name] = createTool({
@@ -30,9 +35,9 @@ export function agentTools(input: Disk | Workspace, opts: AgentToolsOptions = {}
           ctx && typeof ctx === "object" && "context" in ctx
             ? (ctx as { context: unknown }).context
             : ctx;
-        return t.invoke(input as Record<string, unknown>);
+        return t.invoke(input as any);
       },
     });
   }
-  return tools;
+  return tools as MastraTools;
 }

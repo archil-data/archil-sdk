@@ -1,7 +1,8 @@
-import { tool, type StructuredToolInterface } from "@langchain/core/tools";
+import { DynamicStructuredTool, tool, type StructuredToolInterface } from "@langchain/core/tools";
 import type { Disk } from "../../disk.js";
 import type { Workspace } from "../../workspace.js";
-import { type AgentToolsOptions, bindTools } from "../specs.js";
+import { AnyBoundSpec, BoundSpec, BoundSpecs, bindSpecs } from "../specs.js";
+import z from "zod";
 
 /**
  * Filesystem tools for LangChain / LangGraph. Pass a single {@link Disk} or a
@@ -9,20 +10,27 @@ import { type AgentToolsOptions, bindTools } from "../specs.js";
  * model or hand to a LangGraph agent.
  *
  * ```ts
- * import { agentTools } from "disk/langchain";
- * const agent = createReactAgent({ llm, tools: agentTools(disk) });
+ * import { createDiskTools } from "disk/langchain";
+ * const agent = createReactAgent({ llm, tools: createDiskTools(disk) });
  * ```
  */
-export function agentTools(
+type LangchainTool<T> = T extends BoundSpec<infer N, infer S, infer V> ? DynamicStructuredTool<S, z.output<S>, z.input<S>, V, unknown, N> : never;
+
+type CreateLangchainTools<Specs extends readonly AnyBoundSpec[], Accumulator extends LangchainTool<AnyBoundSpec>[]> = Specs extends readonly [infer Head extends AnyBoundSpec, ...infer Tail extends AnyBoundSpec[]]
+  ? CreateLangchainTools<Tail, [LangchainTool<Head>, ...Accumulator]>
+  : Accumulator;
+
+type LangchainTools = CreateLangchainTools<BoundSpecs, []>;
+
+export function createDiskTools(
   input: Disk | Workspace,
-  opts: AgentToolsOptions = {},
-): StructuredToolInterface[] {
-  const bound = bindTools(input, opts.tools);
+): LangchainTools {
+  const bound = bindSpecs(input);
   return bound.map((t) =>
-    tool((args: Record<string, unknown>) => t.invoke(args), {
+    tool((args: any) => t.invoke(args), {
       name: t.name,
       description: t.description,
       schema: t.schema,
     }),
-  );
+  ) as LangchainTools;
 }

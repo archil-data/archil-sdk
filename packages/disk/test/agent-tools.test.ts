@@ -6,21 +6,14 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { generateText, stepCountIs } from "ai";
-import * as indexMod from "../src/index.js";
-import * as aiSdkMod from "../src/ai-sdk.js";
-import * as mastraMod from "../src/mastra.js";
-import * as langchainMod from "../src/langchain.js";
+import { Archil, Workspace } from "../src/index.js";
+import * as aiSdk from "../src/ai-sdk.js";
+import * as mastra from "../src/mastra.js";
+import * as langchain from "../src/langchain.js";
 
 type Store = Record<string, string>;
 type Stores = Record<string, Store>;
 type JsonBody = Record<string, any>;
-type AnyTool = {
-  id?: string;
-  name?: string;
-  execute: (input: any, options?: any) => any;
-  invoke: (input: any) => any;
-};
-type AnyTools = Record<string, AnyTool>;
 
 const stores: Stores = { "dsk-1": {}, "dsk-2": {} };
 const names: Record<string, string> = { "dsk-1": "alpha", "dsk-2": "beta" };
@@ -28,9 +21,12 @@ let lastExec: any;
 let lastGrepBody: any;
 let grepStoppedReason = "completed";
 
-const aiTools = (fs: any): AnyTools => aiSdkMod.agentTools(fs) as unknown as AnyTools;
-const mastraTools = (fs: any): AnyTools => mastraMod.agentTools(fs) as unknown as AnyTools;
-const langchainTools = (fs: any): AnyTool[] => langchainMod.agentTools(fs) as unknown as AnyTool[];
+const mastraToolContext = {
+  observe: {
+    span: async <T>(_name: string, fn: () => T | Promise<T>) => fn(),
+    log: () => {},
+  },
+};
 
 function json(obj: JsonBody, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
@@ -105,58 +101,63 @@ globalThis.fetch = async (input, init = {}) => {
 };
 
 function newClient() {
-  return new indexMod.Archil({ apiKey: "key-test", region: "aws-us-east-1", baseUrl: "http://cp.test", s3BaseUrl: "http://s3.test" });
+  return new Archil({ apiKey: "key-test", region: "aws-us-east-1", baseUrl: "http://cp.test", s3BaseUrl: "http://s3.test" });
 }
 
 test("ai-sdk: single disk write then read, /mnt stripped to key", async () => {
   const archil = newClient();
   const disk = await archil.disks.get("dsk-1");
-  const tools = aiTools(disk);
+  const tools = aiSdk.createDiskTools(disk);
   assert.deepEqual(
     Object.keys(tools).sort(),
     ["delete_file", "grep", "list_files", "read_file", "run_bash", "write_file"],
   );
-  const wrote = await tools.write_file.execute({ path: "/notes/a.txt", content: "hello" }, {});
-  assert.match(wrote, /Wrote/);
+  const wrote = await tools.write_file.execute({ path: "/notes/a.txt", content: "hello" });
+  assert.deepEqual(wrote, { bytes: 5 });
   assert.equal(stores["dsk-1"]["notes/a.txt"], "hello");
-  assert.equal(await tools.read_file.execute({ path: "/notes/a.txt" }, {}), "hello");
+  assert.deepEqual(await tools.read_file.execute({ path: "/notes/a.txt" }), {
+    content: "hello",
+    bytes: 5,
+  });
 });
 
 test("ai-sdk: missing file returns a readable error", async () => {
   const disk = await newClient().disks.get("dsk-1");
-  const out = await aiTools(disk).read_file.execute({ path: "/nope.txt" }, {});
-  assert.match(out.toLowerCase(), /not found/);
+  const out = await aiSdk.createDiskTools(disk).read_file.execute({ path: "/nope.txt" });
+  assert.deepEqual(out, { error: { message: "file not found", status: 404, path: "/nope.txt" } });
 });
 
 test("workspace: an unknown disk in the path is rejected", async () => {
   const archil = newClient();
   const ws = archil.workspace({ data: await archil.disks.get("dsk-1") });
-  const out = await aiTools(ws).read_file.execute({ path: "/nope/x.txt" }, {});
-  assert.match(out.toLowerCase(), /no disk named/);
+  const out = await aiSdk.createDiskTools(ws).read_file.execute({ path: "/nope/x.txt" });
+  assert.match((out as any).error.message.toLowerCase(), /no disk named/);
 });
 
 test("langchain: tools invoke through the real handler", async () => {
   const disk = await newClient().disks.get("dsk-1");
-  const tools = Object.fromEntries(langchainTools(disk).map((t) => [t.name, t]));
+  const tools = Object.fromEntries(langchain.createDiskTools(disk).map((t) => [t.name, t])) as Record<string, any>;
   await tools.write_file.invoke({ path: "/lc.txt", content: "from lc" });
-  assert.equal(await tools.read_file.invoke({ path: "/lc.txt" }), "from lc");
+  assert.deepEqual(await tools.read_file.invoke({ path: "/lc.txt" }), {
+    content: "from lc",
+    bytes: 7,
+  });
 });
 
 test("workspace: writes route by path, grep fans out across disks", async () => {
   const archil = newClient();
   const ws = archil.workspace({ data: await archil.disks.get("dsk-1"), cache: await archil.disks.get("dsk-2") });
-  const tools = aiTools(ws);
+  const tools = aiSdk.createDiskTools(ws);
 
-  await tools.write_file.execute({ path: "/data/x.txt", content: "needle A" }, {});
-  await tools.write_file.execute({ path: "/cache/y.txt", content: "needle B" }, {});
+  await tools.write_file.execute({ path: "/data/x.txt", content: "needle A" });
+  await tools.write_file.execute({ path: "/cache/y.txt", content: "needle B" });
   assert.equal(stores["dsk-1"]["x.txt"], "needle A");
   assert.equal(stores["dsk-2"]["y.txt"], "needle B");
 
-  const grep = await tools.grep.execute({ pattern: "needle" }, {});
-  assert.match(grep, /\/data\/x\.txt/);
-  assert.match(grep, /\/cache\/y\.txt/);
+  const grep = await tools.grep.execute({ pattern: "needle" }) as any;
+  assert.deepEqual(grep.matches.map((m: any) => m.path).sort(), ["/cache/y.txt", "/data/x.txt"]);
 
-  await tools.run_bash.execute({ command: "ls" }, {});
+  await tools.run_bash.execute({ command: "ls" });
   assert.deepEqual(Object.keys(lastExec.disks).sort(), ["cache", "data"]);
 });
 
@@ -184,39 +185,44 @@ test("workspace: list_files at the root shows the disks, not their contents", as
   const archil = newClient();
   stores["dsk-1"]["deep/file.txt"] = "x";
   const ws = archil.workspace({ data: await archil.disks.get("dsk-1"), cache: await archil.disks.get("dsk-2") });
-  const out = await aiTools(ws).list_files.execute({ path: "/" }, {});
-  assert.match(out, /dir\s+\/data\//);
-  assert.match(out, /dir\s+\/cache\//);
+  const out = await aiSdk.createDiskTools(ws).list_files.execute({ path: "/" }) as any;
+  assert.deepEqual(out.entries, [
+    { type: "dir", path: "/cache/" },
+    { type: "dir", path: "/data/" },
+  ]);
   // A non-recursive root listing names the disks; it doesn't recurse into them.
-  assert.doesNotMatch(out, /file\.txt/);
+  assert.equal(out.entries.some((entry: any) => entry.path.includes("file.txt")), false);
 });
 
 test("mastra: builds a keyed tool record over the disk", async () => {
   const disk = await newClient().disks.get("dsk-1");
-  const tools = mastraTools(disk);
+  const tools = mastra.createDiskTools(disk);
   assert.deepEqual(Object.keys(tools).sort(), ["delete_file", "grep", "list_files", "read_file", "run_bash", "write_file"]);
   assert.equal(tools.read_file.id, "read_file");
-  assert.equal(typeof tools.write_file.execute, "function");
 
   // execute must forward the validated input to the handler. Mastra passes the
   // input directly (1.x); our adapter's defensive read also accepts the older
   // { context } shape.
-  const wrote = await tools.write_file.execute({ path: "/m.txt", content: "from mastra" });
-  assert.match(wrote, /Wrote/);
+  const wrote = await tools.write_file.execute!(
+    { path: "/m.txt", content: "from mastra" },
+    mastraToolContext,
+  );
+  assert.deepEqual(wrote, { bytes: 11 });
   assert.equal(stores["dsk-1"]["m.txt"], "from mastra");
 });
 
-test("grep: a string 'false' recursive flag is coerced, not rejected", async () => {
+test("grep: schema requires typed optional arguments", async () => {
   const disk = await newClient().disks.get("dsk-1");
-  const out = await aiTools(disk).grep.execute({ pattern: "x", recursive: "false" }, {});
-  assert.doesNotMatch(out, /invalid arguments/i);
-  assert.equal(lastGrepBody.recursive, false);
+  const schema = (aiSdk.createDiskTools(disk).grep as any).inputSchema;
+  assert.equal(schema.safeParse({ pattern: "x", recursive: "false" }).success, false);
+  assert.equal(schema.safeParse({ pattern: "x", maxResults: "50" }).success, false);
 });
 
-test("grep: a string 'maxResults' is coerced, not rejected", async () => {
+test("grep: typed optional arguments are forwarded", async () => {
   const disk = await newClient().disks.get("dsk-1");
-  const out = await aiTools(disk).grep.execute({ pattern: "x", maxResults: "50" }, {});
-  assert.doesNotMatch(out, /invalid arguments/i);
+  const out = await aiSdk.createDiskTools(disk).grep.execute({ pattern: "x", recursive: false, maxResults: 50 });
+  assert.equal("error" in out, false);
+  assert.equal(lastGrepBody.recursive, false);
   assert.equal(lastGrepBody.maxResults, 50);
 });
 
@@ -224,7 +230,7 @@ test("grep: a single-disk directory path is normalized like the other tools", as
   const disk = await newClient().disks.get("dsk-1");
   // "/reports" must reach the grep API as the disk-relative key "reports",
   // matching how read_file/write_file/list_files normalize the same path.
-  await aiTools(disk).grep.execute({ pattern: "x", path: "/reports" }, {});
+  await aiSdk.createDiskTools(disk).grep.execute({ pattern: "x", path: "/reports" });
   assert.equal(lastGrepBody.directory, "reports");
 });
 
@@ -245,20 +251,22 @@ test("list_files surfaces a partial-listing caveat when a workspace disk failed"
       isTruncated: true,
       keyCount: 1,
     }),
-  };
-  const out = await aiTools(fakeWs).list_files.execute({ path: "/" }, {});
-  assert.match(out, /\/data\/a\.txt/);
-  assert.match(out.toLowerCase(), /incomplete/);
+  } as unknown as Workspace;
+  const out = await aiSdk.createDiskTools(fakeWs).list_files.execute({ path: "/" });
+  assert.deepEqual(out, {
+    entries: [{ type: "file", path: "/data/a.txt", bytes: 1 }],
+    isTruncated: true,
+  });
 });
 
 test("grep: a failed listing surfaces a partial-results warning", async () => {
   grepStoppedReason = "list_failed";
   try {
-    stores["dsk-1"]["grep-hit.txt"] = "needle";
+    stores["dsk-1"]["grep-hit.txt"] = "partial-needle";
     const disk = await newClient().disks.get("dsk-1");
-    const out = await aiTools(disk).grep.execute({ pattern: "needle" }, {});
-    assert.match(out, /needle/);
-    assert.match(out.toLowerCase(), /partial|incomplete/);
+    const out = await aiSdk.createDiskTools(disk).grep.execute({ pattern: "partial-needle" }) as any;
+    assert.deepEqual(out.matches, [{ path: "/grep-hit.txt", line: 1, text: "partial-needle" }]);
+    assert.equal(out.status, "Listing failed for part of the tree; results may be partial.");
   } finally {
     grepStoppedReason = "completed";
   }
@@ -302,7 +310,7 @@ function mockToolThenText({
 test("ai-sdk: a mock model's tool call drives our tool through generateText", async () => {
   const archil = newClient();
   const disk = await archil.disks.get("dsk-1");
-  const tools = aiTools(disk);
+  const tools = aiSdk.createDiskTools(disk);
   const model = mockToolThenText({
     toolName: "write_file",
     input: { path: "/agent.txt", content: "written by the agent" },
@@ -318,7 +326,10 @@ test("ai-sdk: a mock model's tool call drives our tool through generateText", as
   assert.equal(res.text, "done");
   const toolResults = res.steps.flatMap((s) => s.toolResults ?? []);
   assert.ok(
-    toolResults.some((r) => /Wrote/.test(typeof r.output === "string" ? r.output : JSON.stringify(r.output))),
+    toolResults.some((r) => {
+      const output = r.output as any;
+      return output?.bytes === "written by the agent".length;
+    }),
     `expected a write_file tool result, got: ${JSON.stringify(toolResults)}`,
   );
 });
@@ -327,7 +338,7 @@ test("mastra: a mock model's tool call drives our tool through Agent.generate", 
   const { Agent } = await import("@mastra/core/agent");
   const archil = newClient();
   const disk = await archil.disks.get("dsk-1");
-  const tools = mastraTools(disk);
+  const tools = mastra.createDiskTools(disk);
   // Mastra 1.x runs its loop on AI SDK 5+, so it takes the same v2 mock.
   const model = mockToolThenText({
     toolName: "write_file",
@@ -351,7 +362,7 @@ test("workspace: nested mount names are rejected", async () => {
 test("workspace: run_bash preserves the conditional mount flag", async () => {
   const archil = newClient();
   const ws = archil.workspace({ data: { disk: await archil.disks.get("dsk-1"), conditional: true } });
-  await aiTools(ws).run_bash.execute({ command: "ls" }, {});
+  await aiSdk.createDiskTools(ws).run_bash.execute({ command: "ls" });
   assert.equal(lastExec.disks.data.conditional, true);
 });
 
@@ -364,7 +375,7 @@ test("workspace: run_bash preserves checkout mount options", async () => {
       queueMs: 250,
     },
   });
-  await aiTools(ws).run_bash.execute({ command: "ls" }, {});
+  await aiSdk.createDiskTools(ws).run_bash.execute({ command: "ls" });
   assert.deepEqual(lastExec.disks.data.checkoutPaths, ["src", "tmp/cache"]);
   assert.equal(lastExec.disks.data.queueMs, 250);
 });
@@ -372,6 +383,6 @@ test("workspace: run_bash preserves checkout mount options", async () => {
 test("workspace: read-only mount blocks writes", async () => {
   const archil = newClient();
   const ws = archil.workspace({ data: { disk: await archil.disks.get("dsk-1"), readOnly: true } });
-  const out = await aiTools(ws).write_file.execute({ path: "/data/z.txt", content: "z" }, {});
-  assert.match(out.toLowerCase(), /read-only/);
+  const out = await aiSdk.createDiskTools(ws).write_file.execute({ path: "/data/z.txt", content: "z" });
+  assert.match((out as any).error.message.toLowerCase(), /read-only/);
 });

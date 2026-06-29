@@ -11,8 +11,8 @@ that an actual model selects and calls the tools, against an **in-memory disk**
 ## Prerequisites
 
 ```bash
-npm run build                                    # the example imports ../dist
-npm install --no-save @ai-sdk/openai-compatible  # an OpenAI-compatible provider
+npm run build                                        # the example imports dist
+npm install --no-save @ai-sdk/openai-compatible tsx   # provider + TS runner
 ```
 
 Plus a model endpoint — either local Ollama (free, no key) or a free hosted
@@ -26,7 +26,7 @@ ollama pull qwen2.5:3b
 ## Run
 
 ```bash
-node examples/smoke-ai-sdk-ollama.mjs
+npx tsx examples/smoke-ai-sdk-ollama.ts
 ```
 
 Environment overrides: `OLLAMA_MODEL` (default `qwen2.5:3b`), `OLLAMA_BASE_URL`

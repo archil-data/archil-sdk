@@ -1,7 +1,8 @@
-import { tool, type ToolSet } from "ai";
+import { tool } from "ai";
 import type { Disk } from "../../disk.js";
 import type { Workspace } from "../../workspace.js";
-import { type AgentToolsOptions, bindTools } from "../specs.js";
+import { BoundSpecs, bindSpecs, inferSpecResult } from "../specs.js";
+import z from "zod";
 
 /**
  * Filesystem tools for the Vercel AI SDK. Pass a single {@link Disk} or a
@@ -9,19 +10,23 @@ import { type AgentToolsOptions, bindTools } from "../specs.js";
  * `streamText`, or an `Agent`'s `tools`.
  *
  * ```ts
- * import { agentTools } from "disk/ai-sdk";
- * const result = await generateText({ model, tools: agentTools(disk), prompt });
+ * import { createDiskTools } from "disk/ai-sdk";
+ * const result = await generateText({ model, tools: createDiskTools(disk), prompt });
  * ```
  */
-export function agentTools(input: Disk | Workspace, opts: AgentToolsOptions = {}): ToolSet {
-  const bound = bindTools(input, opts.tools);
-  const tools: ToolSet = {};
-  for (const t of bound) {
-    tools[t.name] = tool({
-      description: t.description,
-      inputSchema: t.schema,
-      execute: (args) => t.invoke(args as Record<string, unknown>),
-    });
+type AISDKTools = {
+  [Spec in BoundSpecs[number] as Spec["name"]]: {
+    description: Spec["description"];
+    inputSchema: Spec["schema"],
+    execute: (args: z.infer<Spec["schema"]>) => Promise<inferSpecResult<Spec>>;
   }
-  return tools;
+}
+
+export function createDiskTools(input: Disk | Workspace) {
+  const toolSpecs = bindSpecs(input);
+  return Object.fromEntries(toolSpecs.map((spec) => [spec.name, tool({
+    description: spec.description,
+    inputSchema: spec.schema as any,
+    execute: spec.invoke as any,
+  })])) as unknown as AISDKTools;
 }

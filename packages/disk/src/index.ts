@@ -50,7 +50,6 @@ export { VERSION, USER_AGENT } from "./version.js";
 
 export { Workspace } from "./workspace.js";
 export type { FileSystem } from "./filesystem.js";
-export type { AgentToolsOptions } from "./agent-tools/specs.js";
 
 export type {
   DiskResponse,
