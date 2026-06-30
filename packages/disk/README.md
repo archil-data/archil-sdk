@@ -1,6 +1,6 @@
 # disk
 
-Node.js client and CLI for [Archil](https://archil.com) disks. Create disks, list and inspect them, manage who can mount them, and run commands against them — all from scripts, CI, or an interactive terminal. It also ships **drop-in [agent tools](#agent-tools)** that turn a disk into a ready-made filesystem toolset for the Vercel AI SDK, Mastra, LangChain, and other frameworks.
+SDK and CLI for [Archil](https://archil.com) disks. Create disks, list and inspect them, manage who can mount them, and run commands against them — all from scripts, CI, or an interactive terminal. It also ships **drop-in [filesystem tools](#filesystem-tools)** for AI SDK, Mastra, and Langchain.
 
 `disk` talks to the Archil control plane over HTTPS and has no native dependencies. If you also want to mount a disk's data plane from Node (rare — most users want `disk exec` or the `archil` CLI), install [`@archildata/native`](https://www.npmjs.com/package/@archildata/native) alongside `disk`.
 
@@ -41,7 +41,7 @@ npx disk api-keys delete key-abc123
 
 ## Library
 
-The recommended pattern is a module-namespace import:
+Setup:
 
 ```ts
 import * as archil from "disk";
@@ -213,14 +213,6 @@ console.log(url); // https://control.…/api/shared/<token>
 const weekLink = await d.share("reports/2026-01/summary.pdf", { expiresIn: 604800 });
 ```
 
-### Named imports
-
-If you prefer named imports over the namespace style, they work the same way:
-
-```ts
-import { createDisk, getDisk, listDisks, configure } from "disk";
-```
-
 ### Multiple accounts or regions
 
 For multi-tenant scripts, instantiate `Archil` directly instead of using the module-level `configure`:
@@ -235,49 +227,68 @@ const prodDisks = await prod.disks.list();
 const stagingDisks = await staging.disks.list();
 ```
 
-## Agent tools
+## Filesystem tools
 
-Turn a disk — or a multi-disk **workspace** — into a ready-made filesystem
-toolset for popular agent frameworks, so you can hand an LLM a real filesystem
-to work in. The agent gets six tools: `read_file`, `write_file`,
-`delete_file`, `list_files`, `grep`, and `run_bash` (an arbitrary command in a
-container with the disk mounted). Import the adapter for your framework from a
-subpath, so you only pull in the framework you use:
+The AI SDK adapter turns an Archil disk into a native `ToolSet`, so a model can
+read, write, list, search, and delete files, plus run shell commands against a
+real filesystem.
 
 ```ts
-import * as archil from "disk";
-import { agentTools } from "disk/ai-sdk"; // Vercel AI SDK
 import { generateText } from "ai";
+import { Archil } from "disk";
+import { createDiskTools } from "disk/ai-sdk";
 
-const d = await archil.getDisk("dsk-abc123");
+const archil = new Archil();
+const disk = await archil.disks.get(process.env.ARCHIL_DISK_ID!);
 
-// Single disk → a ToolSet. The disk is the filesystem root (/).
-const result = await generateText({ model, prompt, tools: agentTools(d) });
+const result = await generateText({
+  model,
+  prompt: "Read /reports/q1.csv and write a summary to /reports/q1-summary.md.",
+  tools: createDiskTools(disk),
+});
 ```
 
-Or span several disks in one **workspace** (the same shape as `exec`'s mounts).
-Each disk is a top-level directory (e.g. `/data/…`, `/cache/…`); file operations
-route to the right disk by path, and `grep` / `listFiles` fan out across all of
-them. `run_bash` starts at the common root, so relative paths line up:
+`createDiskTools(disk)` gives the model an interface for interacting with the filesystem with six tools: `read_file`, `write_file`,
+`delete_file`, `list_files`, `grep`, and `run_bash`. A single disk is exposed as
+the filesystem root, so `/reports/q1.csv` maps to the disk key `reports/q1.csv`.
+
+For multiple disks, create a workspace and pass that to the same AI SDK adapter.
+Each mounted disk appears as a top-level directory:
 
 ```ts
-import { agentTools } from "disk/mastra";
+import { generateText } from "ai";
+import { Archil } from "disk";
+import { createDiskTools } from "disk/ai-sdk";
 
-const ws = archil.workspace({ data: diskA, cache: diskB });
-const tools = agentTools(ws); // hand to a Mastra Agent
+const archil = new Archil();
+const source = await archil.disks.get(process.env.ARCHIL_SOURCE_DISK_ID!);
+const output = await archil.disks.get(process.env.ARCHIL_OUTPUT_DISK_ID!);
+
+const workspace = archil.workspace({
+  source: { disk: source, readOnly: true },
+  output,
+});
+
+const result = await generateText({
+  model,
+  prompt: "Use /source/raw/events.json and write a report to /output/reports/events.md.",
+  tools: createDiskTools(workspace),
+});
 ```
 
-Multi-disk exec mounts can request delegations before the command starts:
+Workspace paths route to the right disk by their first segment. `readOnly` mounts
+return an error from `write_file` and `delete_file` instead of mutating the disk.
+`run_bash` starts at the common root, so relative shell paths line up with the
+file tool paths.
+
+Workspace mounts can also request delegations before `run_bash` starts:
 
 ```ts
-await archil.exec({
-  command: "npm test",
-  disks: {
-    data: {
-      disk: diskA,
-      checkoutPaths: ["src", "tmp/cache"],
-      queueMs: 5_000,
-    },
+const workspace = archil.workspace({
+  repo: {
+    disk: repoDisk,
+    checkoutPaths: ["src", "tmp/cache"],
+    queueMs: 5_000,
   },
 });
 ```
@@ -288,7 +299,7 @@ during mount setup instead.
 A `Workspace` is a full filesystem in its own right — it has the same object API
 a `Disk` does (`getObject` / `putObject` / `deleteObject` / `listObjects` /
 `grep` / `exec`; both implement the `FileSystem` interface), so you can use it
-directly without the agent tools, and add or remove disks at runtime. A
+directly without the tool adapter, and add or remove disks at runtime. A
 workspace's keys carry the disk name as their first segment:
 
 ```ts
@@ -296,21 +307,16 @@ const data = await ws.getObject("data/reports/q1.csv"); // routes to the "data" 
 ws.addDisk("scratch", diskTmp); // mount another disk live; ws.removeDisk("scratch")
 ```
 
-Pick the subpath for your framework — each returns that framework's native tool
-type:
+Pick the subpath for your framework:
 
-| Import | Framework | Returns |
-| --- | --- | --- |
-| `disk/ai-sdk` | Vercel AI SDK | `ToolSet` |
-| `disk/mastra` | Mastra | record of tools |
-| `disk/langchain` | LangChain / LangGraph | `StructuredToolInterface[]` |
+| Import | Framework |
+| --- | --- |
+| `disk/ai-sdk` | AI SDK |
+| `disk/mastra` | Mastra |
+| `disk/langchain` | LangChain / LangGraph |
 
 The frameworks are optional peer dependencies — install whichever you use
-(`npm install ai`, `@mastra/core`, or `@langchain/core`). Expose a subset of
-tools with `agentTools(d, { tools: ["read_file", "grep"] })`, and give an agent
-read-only access to a disk in a workspace by mounting it with `{ disk, readOnly:
-true }` — `write_file` / `delete_file` then return an error instead of mutating
-it.
+(`npm install ai`, `@mastra/core`, or `@langchain/core`).
 
 ## Connecting to a disk's data plane
 

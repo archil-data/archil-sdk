@@ -6,6 +6,7 @@ allowBuilds:
   node-liblzma: true
 minimumReleaseAgeExclude:
   - '@archildata/api-types@0.0.1'
+  - ai@7.0.5
 
 catalog:
   typescript: ^6.0.3

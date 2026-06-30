@@ -186,7 +186,7 @@ export class Archil {
    * Build an agent filesystem toolset spanning several disks at once. `mounts`
    * maps a relative path to a disk (or `ExecMountSpec`), exactly like
    * {@link exec}; each disk appears under `/mnt/archil/<path>`. Hand the result
-   * to a framework adapter (`agentTools(workspace)`) to get tools that route
+   * to a framework adapter (`createDiskTools(workspace)`) to get tools that route
    * file operations by path and fan `grep`/`list_files` out across the disks.
    */
   workspace(mounts: Record<string, ExecMount>): Workspace {

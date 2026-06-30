@@ -1,5 +1,5 @@
-import { z } from "zod";
-import type { GrepResult } from "../disk.js";
+import { z, type ZodType } from "zod";
+import type { GrepStoppedReason } from "../disk.js";
 import type { FileSystem } from "../filesystem.js";
 import { toSegments } from "../paths.js";
 
@@ -47,47 +47,6 @@ export function buildContext(fs: FileSystem): ToolContext {
   };
 }
 
-/** Coerce a tool argument to a boolean. A model may send a JSON string instead
- * of a real boolean; mirror the Python handlers and parse common string forms
- * rather than rejecting the call. */
-function asBool(value: unknown, fallback: boolean): boolean {
-  if (value === undefined || value === null) return fallback;
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
-  }
-  return Boolean(value);
-}
-
-/** Coerce a tool argument to an integer. A model may send a JSON string ("200")
- * instead of a number; mirror the Python `_as_int` and parse it rather than
- * rejecting the call. Rejects booleans and anything non-numeric. */
-function asInt(value: unknown, fallback: number): number {
-  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
-  if (typeof value === "string" && value.trim() !== "") {
-    const n = Number(value);
-    if (Number.isFinite(n)) return Math.trunc(n);
-  }
-  return fallback;
-}
-
-/** A note warning the model when grep results may be partial — distinguishing a
- * truncated result (more matches exist) from a search that couldn't complete. */
-function grepCaveat(result: GrepResult): string {
-  switch (result.stoppedReason) {
-    case "max_results":
-      return `… more matches exist; showing the first ${result.matches.length}.`;
-    case "deadline":
-      return "… search hit the time limit; results may be incomplete.";
-    case "incomplete":
-      return "… some files could not be searched; results may be incomplete.";
-    case "list_failed":
-      return "… listing failed for part of the tree; results may be partial.";
-    default:
-      return "";
-  }
-}
-
 /** Root a grep match path with a leading slash. A workspace already roots paths
  * by disk (`/data/...`); a single disk reports disk-relative keys (`reports/...`),
  * so prefix `/` to present both consistently. */
@@ -95,138 +54,103 @@ function rootMatchPath(file: string): string {
   return file.startsWith("/") ? file : `/${file}`;
 }
 
-// `recursive` accepts a boolean or a string boolean ("false"), coerced by
-// asBool — models don't always send a real JSON boolean.
-const recursiveFlag = z.union([z.boolean(), z.string()]).optional();
+function grepStatus(reason: GrepStoppedReason, matches: number): string {
+  switch (reason) {
+    case "completed":
+      return "Search completed.";
+    case "max_results":
+      return `More matches exist; returned ${matches}.`;
+    case "deadline":
+      return "Search hit the time limit; results may be incomplete.";
+    case "incomplete":
+      return "Some files could not be searched; results may be incomplete.";
+    case "list_failed":
+      return "Listing failed for part of the tree; results may be partial.";
+  }
+}
 
-export interface ToolSpec {
-  name: string;
+export interface ToolErrorResult {
+  error: {
+    message: string;
+    status?: number;
+    path?: string;
+  };
+}
+
+interface Spec<N extends string, T extends ZodType, V = unknown> {
+  name: N;
   description: string;
-  schema: z.ZodObject<z.ZodRawShape>;
-  handler: (ctx: ToolContext, args: Record<string, unknown>) => Promise<string>;
+  schema: T;
+  handler: (ctx: ToolContext, args: z.infer<T>) => Promise<V>;
 }
 
-export interface BoundTool {
-  name: string;
-  description: string;
-  schema: z.ZodObject<z.ZodRawShape>;
-  invoke: (args: Record<string, unknown>) => Promise<string>;
-}
+type AnySpec = Spec<string, any, unknown>;
 
-export interface AgentToolsOptions {
-  /** Select a subset of tools by name. Defaults to all six. */
-  tools?: string[];
-}
-
-// --- handlers --------------------------------------------------------------
-
-async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
-  const path = args.path as string;
-  const bytes = await ctx.fs.getObject(toKey(ctx, path));
-  try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return text || `${path} is empty.`;
-  } catch {
-    return `${path} is a binary file (${bytes.length} bytes) and cannot be shown as text.`;
-  }
-}
-
-async function writeFile(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
-  const path = args.path as string;
-  const content = args.content as string;
-  await ctx.fs.putObject(toKey(ctx, path), content);
-  return `Wrote ${new TextEncoder().encode(content).length} bytes to ${path}.`;
-}
-
-async function deleteFile(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
-  const path = args.path as string;
-  await ctx.fs.deleteObject(toKey(ctx, path));
-  return `Deleted ${path}.`;
-}
-
-async function listFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
-  const path = (args.path as string) || "/";
-  const recursive = asBool(args.recursive, false);
-  const dir = toKey(ctx, path);
-  const result = await ctx.fs.listObjects(dir ? `${dir}/` : undefined, { recursive });
-  const entries: string[] = [];
-  for (const cp of result.commonPrefixes) entries.push(`dir   /${cp.replace(/\/+$/, "")}/`);
-  for (const obj of result.objects) {
-    entries.push(`file  /${obj.key}  (${obj.size} bytes)`);
-  }
-  entries.sort();
-  // isTruncated here means part of the listing is missing — for a workspace, a
-  // disk that failed the fan-out. Warn so the agent doesn't read it as complete.
-  const caveat = result.isTruncated ? "… some files could not be listed; results may be incomplete." : "";
-  if (entries.length === 0) {
-    return caveat ? `${path}: ${caveat}` : `${path} is empty or does not exist.`;
-  }
-  return `Contents of ${path}:\n${entries.join("\n")}${caveat ? `\n${caveat}` : ""}`;
-}
-
-async function grep(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
-  const pattern = args.pattern as string;
-  const path = (args.path as string) || "/";
-  const recursive = asBool(args.recursive, true);
-  const maxResults = asInt(args.maxResults, 200);
-  const result = await ctx.fs.grep({ pattern, directory: toKey(ctx, path), recursive, maxResults });
-  const caveat = grepCaveat(result);
-  if (result.matches.length === 0) {
-    const msg = `No matches for /${pattern}/ under ${path} (${result.filesScanned} files scanned).`;
-    return caveat ? `${msg} ${caveat}` : msg;
-  }
-  const lines = result.matches.map((m) => `${rootMatchPath(m.file)}:${m.line}: ${m.text}`);
-  if (caveat) lines.push(caveat);
-  return lines.join("\n");
-}
-
-async function runBash(ctx: ToolContext, args: Record<string, unknown>): Promise<string> {
-  const command = args.command as string;
-  // Run from the mount root so a shell-relative path matches what the file tools
-  // see (the disks live under execRoot in the exec container).
-  const result = await ctx.fs.exec(`cd ${ctx.execRoot} && ${command}`);
-  const parts = [`exit code: ${result.exitCode}`];
-  if (result.stdout) parts.push(`stdout:\n${result.stdout}`);
-  if (result.stderr) parts.push(`stderr:\n${result.stderr}`);
-  return parts.join("\n");
+function defineSpec<N extends string, T extends ZodType, V>(spec: Spec<N, T, V>): Spec<N, T, V> {
+  return spec;
 }
 
 // --- specs -----------------------------------------------------------------
-
-export const SPECS: ToolSpec[] = [
-  {
+const SPECS = [
+  defineSpec({
     name: "read_file",
     description: "Read the contents of a text file and return them.",
     schema: z.object({ path: z.string().describe("Path to the file from the filesystem root, e.g. /reports/q1.csv.") }),
-    handler: readFile,
-  },
-  {
+    async handler(ctx, args) {
+      const path = args.path;
+      const bytes = await ctx.fs.getObject(toKey(ctx, path));
+      try {
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        return { content: text, bytes: bytes.length };
+      } catch {
+        return { binary: true as const, bytes: bytes.length };
+      }
+    },
+  }),
+  defineSpec({
     name: "write_file",
     description: "Create or overwrite a file with the given text content.",
     schema: z.object({
       path: z.string().describe("Path to the file from the filesystem root, e.g. /reports/q1.csv."),
       content: z.string().describe("Full contents to write."),
     }),
-    handler: writeFile,
-  },
-  {
+    async handler(ctx, args) {
+      await ctx.fs.putObject(toKey(ctx, args.path), args.content);
+      return { bytes: new TextEncoder().encode(args.content).length };
+    },
+  }),
+  defineSpec({
     name: "delete_file",
     description: "Delete a file. Succeeds even if the file does not exist.",
     schema: z.object({ path: z.string().describe("Path to the file from the filesystem root, e.g. /reports/q1.csv.") }),
-    handler: deleteFile,
-  },
-  {
+    async handler(ctx, args) {
+      await ctx.fs.deleteObject(toKey(ctx, args.path));
+      return {};
+    },
+  }),
+  defineSpec({
     name: "list_files",
     description:
       "List files and subdirectories. Omit 'path' to list from the root. " +
       "Set 'recursive' to list the whole subtree.",
     schema: z.object({
       path: z.string().optional().describe("Directory to list (optional)."),
-      recursive: recursiveFlag.describe("List the full subtree."),
+      recursive: z.boolean().optional().describe("List the full subtree."),
     }),
-    handler: listFiles,
-  },
-  {
+    async handler(ctx, args) {
+      const path = args.path || "/";
+      const recursive = args.recursive ?? false;
+      const dir = toKey(ctx, path);
+      const result = await ctx.fs.listObjects(dir ? `${dir}/` : undefined, { recursive });
+      const entries = [
+        ...result.commonPrefixes.map((cp) => ({ type: "dir" as const, path: `/${cp.replace(/\/+$/, "")}/` })),
+        ...result.objects.map((obj) => ({ type: "file" as const, path: `/${obj.key}`, bytes: obj.size })),
+      ];
+      entries.sort((a, b) => a.path.localeCompare(b.path) || a.type.localeCompare(b.type));
+      return result.isTruncated ? { entries, isTruncated: true as const } : { entries };
+    },
+  }),
+  defineSpec({
     name: "grep",
     description:
       "Search file contents for an extended regular expression and return " +
@@ -234,66 +158,90 @@ export const SPECS: ToolSpec[] = [
     schema: z.object({
       pattern: z.string().describe("Extended regex (grep -E)."),
       path: z.string().optional().describe("Directory to search (optional)."),
-      recursive: recursiveFlag.describe("Search subdirectories (default true)."),
-      maxResults: z
-        .union([z.number().int(), z.string()])
-        .optional()
-        .describe("Cap on matches (default 200)."),
+      recursive: z.boolean().optional().describe("Search subdirectories (default true)."),
+      maxResults: z.number().int().optional().describe("Cap on matches (default 200)."),
     }),
-    handler: grep,
-  },
-  {
+    async handler(ctx, args) {
+      const path = args.path || "/";
+      const recursive = args.recursive ?? true;
+      const maxResults = args.maxResults ?? 200;
+      const result = await ctx.fs.grep({ pattern: args.pattern, directory: toKey(ctx, path), recursive, maxResults });
+      return {
+        matches: result.matches.map((m) => ({ path: rootMatchPath(m.file), line: m.line, text: m.text })),
+        status: grepStatus(result.stoppedReason, result.matches.length),
+        filesScanned: result.filesScanned,
+      };
+    },
+  }),
+  defineSpec({
     name: "run_bash",
     description:
       "Run a bash command in an ephemeral sandbox with the filesystem mounted. " +
       "The working directory is the filesystem root, so paths match the other " +
       "tools. Returns the exit code, stdout, and stderr.",
     schema: z.object({ command: z.string().describe("The bash command to run.") }),
-    handler: runBash,
-  },
-];
+    async handler(ctx, args) {
+      // Run from the mount root so a shell-relative path matches what the file
+      // tools see (the disks live under execRoot in the exec container).
+      const result = await ctx.fs.exec(`cd ${ctx.execRoot} && ${args.command}`);
+      return {
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        timing: result.timing,
+      };
+    },
+  }),
+] as const;
 
-const SPEC_NAMES = SPECS.map((s) => s.name);
+export type ToolSpecs = typeof SPECS;
 
-function formatError(error: unknown, args: Record<string, unknown>): string {
+function formatError(error: unknown, args: Record<string, unknown>): ToolErrorResult {
   // Duck-type the status rather than `instanceof ArchilS3Error` so the check
   // survives across module boundaries (bundlers can give each entry its own
   // copy of the error classes).
   const status = (error as { status?: number } | null)?.status;
   if (status === 404 && typeof args.path === "string") {
-    return `Error: file not found: ${args.path}`;
+    return { error: { message: "file not found", status, path: args.path } };
   }
-  if (error instanceof z.ZodError) return `Error: invalid arguments: ${error.message}`;
-  return `Error: ${error instanceof Error ? error.message : String(error)}`;
+  return { error: { message: error instanceof Error ? error.message : String(error) } };
 }
 
+export interface BoundSpec<N extends string, T extends ZodType, V> {
+  name: N;
+  description: string;
+  schema: T;
+  invoke: (args: z.infer<T>) => Promise<V | ToolErrorResult>;
+}
+export type AnyBoundSpec = BoundSpec<string, any, unknown>;
+
+type BindSpec<T> = T extends Spec<infer N, infer S, infer V> ? BoundSpec<N, S, V> : never;
+
+type BindSpecs<Specs extends readonly AnySpec[], Accumulator extends BindSpec<AnySpec>[]> = Specs extends readonly [infer Head extends AnySpec, ...infer Tail extends AnySpec[]]
+  ? BindSpecs<Tail, [BindSpec<Head>, ...Accumulator]>
+  : Accumulator;
+
+export type BoundSpecs = BindSpecs<typeof SPECS, []>;
+export type inferSpecResult<T> = T extends BoundSpec<any, any, infer V> ? V | ToolErrorResult : never;
+
 /**
- * Bind the specs (optionally a subset, by name) to a filesystem. The layout hint
- * is appended to each description so the model knows where files live, and
- * `invoke` returns expected failures as text rather than throwing.
+ * Bind the specs to a filesystem. The layout hint is appended to each
+ * description so the model knows where files live, and `invoke` returns
+ * expected failures as structured error objects rather than throwing.
  */
-export function bindTools(fs: FileSystem, names?: string[]): BoundTool[] {
-  let chosen = SPECS;
-  if (names) {
-    const unknown = names.filter((n) => !SPEC_NAMES.includes(n));
-    if (unknown.length > 0) {
-      throw new Error(`unknown tool(s) ${JSON.stringify(unknown)}; available: ${JSON.stringify(SPEC_NAMES)}`);
-    }
-    chosen = SPECS.filter((s) => names.includes(s.name));
-  }
+export function bindSpecs(fs: FileSystem): BoundSpecs {
   const ctx = buildContext(fs);
-  return chosen.map((spec) => ({
+  return SPECS.map((spec) => ({
     name: spec.name,
     description: `${spec.description} ${ctx.layoutHint}`,
     schema: spec.schema,
-    invoke: async (args: Record<string, unknown>) => {
+    async invoke(args: any) {
       const input = args ?? {};
       try {
-        const parsed = spec.schema.parse(input) as Record<string, unknown>;
-        return await spec.handler(ctx, parsed);
+        return await spec.handler(ctx, input);
       } catch (error) {
-        return formatError(error, input);
+        return formatError(error, input as Record<string, unknown>);
       }
     },
-  }));
+  })) as unknown as BoundSpecs;
 }
