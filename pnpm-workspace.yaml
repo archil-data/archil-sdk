@@ -7,6 +7,7 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@archildata/api-types@0.0.1'
   - ai@7.0.5
+  - eve@0.17.1
 
 catalog:
   typescript: ^6.0.3

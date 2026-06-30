@@ -17,6 +17,11 @@
       "import": "./dist/ai-sdk.mjs",
       "require": "./dist/ai-sdk.cjs"
     },
+    "./internal/tools": {
+      "types": "./dist/internal/tools.d.mts",
+      "import": "./dist/internal/tools.mjs",
+      "require": "./dist/internal/tools.cjs"
+    },
     "./mastra": {
       "types": "./dist/mastra.d.mts",
       "import": "./dist/mastra.mjs",

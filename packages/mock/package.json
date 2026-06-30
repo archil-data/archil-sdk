@@ -1,0 +1,36 @@
+{
+  "name": "@archildata/mock",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared test mocks for Archil packages",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "disk": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.33",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">= 22"
+  },
+  "license": "MIT"
+}

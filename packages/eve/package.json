@@ -1,0 +1,50 @@
+{
+  "name": "@archildata/eve",
+  "version": "0.0.0",
+  "description": "Archil filesystem adapter for Eve",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "disk": "workspace:^",
+    "eve": "^0.17.1"
+  },
+  "devDependencies": {
+    "@archildata/mock": "workspace:^",
+    "@types/node": "^20.19.33",
+    "disk": "workspace:^",
+    "eve": "^0.17.1",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">= 22"
+  },
+  "keywords": [
+    "archil",
+    "eve",
+    "agent",
+    "filesystem"
+  ],
+  "license": "MIT"
+}
