@@ -14,6 +14,7 @@ const define = { __SDK_VERSION__: JSON.stringify(version) };
 const entries = {
   index: "src/index.ts",
   "ai-sdk": "src/ai-sdk.ts",
+  "internal/tools": "src/internal/tools.ts",
   mastra: "src/mastra.ts",
   langchain: "src/langchain.ts",
 };
@@ -21,7 +22,8 @@ const entries = {
 export default defineConfig({
   // Main entry plus the per-framework agent-tool adapters, each a subpath
   // export (disk/ai-sdk, disk/mastra, disk/langchain) so importing one pulls
-  // in only that framework.
+  // in only that framework. The internal spec entry is for first-party
+  // adapters and is intentionally not user-facing.
   entry: entries,
   format: {
     cjs: {},

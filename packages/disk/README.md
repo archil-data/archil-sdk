@@ -248,8 +248,8 @@ const result = await generateText({
 });
 ```
 
-`createDiskTools(disk)` gives the model an interface for interacting with the filesystem with six tools: `read_file`, `write_file`,
-`delete_file`, `list_files`, `grep`, and `run_bash`. A single disk is exposed as
+`createDiskTools(disk)` gives the model an interface for interacting with the filesystem with seven tools: `read_file`, `write_file`,
+`delete_file`, `list_files`, `glob`, `grep`, and `run_bash`. A single disk is exposed as
 the filesystem root, so `/reports/q1.csv` maps to the disk key `reports/q1.csv`.
 
 For multiple disks, create a workspace and pass that to the same AI SDK adapter.

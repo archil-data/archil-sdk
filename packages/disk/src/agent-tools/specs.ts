@@ -54,6 +54,130 @@ function rootMatchPath(file: string): string {
   return file.startsWith("/") ? file : `/${file}`;
 }
 
+const DEFAULT_GLOB_LIMIT = 100;
+const MAX_GLOB_LIMIT = 1000;
+const MAX_GLOB_OUTPUT_BYTES = 50 * 1024;
+
+function normalizeSearchPath(ctx: ToolContext, path: string): { key: string; path: string } {
+  const key = toKey(ctx, path);
+  return { key, path: rootMatchPath(key) };
+}
+
+function globLimit(limit: number | undefined): number {
+  return Math.min(Math.max(1, limit ?? DEFAULT_GLOB_LIMIT), MAX_GLOB_LIMIT);
+}
+
+function isGitPath(path: string): boolean {
+  return path.split("/").includes(".git");
+}
+
+function basename(path: string): string {
+  return path.split("/").pop() ?? path;
+}
+
+function relativeToSearchPath(key: string, searchKey: string): string {
+  if (!searchKey) return key;
+  return key.slice(searchKey.length).replace(/^\/+/, "");
+}
+
+function globMatcher(pattern: string): (path: string) => boolean {
+  const regexes = expandBraces(pattern).map((p) => globToRegExp(p));
+  return (path) => regexes.some((regex) => regex.test(path));
+}
+
+function expandBraces(pattern: string): string[] {
+  const start = pattern.indexOf("{");
+  if (start < 0) return [pattern];
+  const end = pattern.indexOf("}", start + 1);
+  if (end < 0) return [pattern];
+  const before = pattern.slice(0, start);
+  const after = pattern.slice(end + 1);
+  return pattern.slice(start + 1, end)
+    .split(",")
+    .flatMap((part) => expandBraces(`${before}${part}${after}`));
+}
+
+function globToRegExp(pattern: string): RegExp {
+  let source = "^";
+  for (let i = 0; i < pattern.length; i += 1) {
+    const char = pattern[i];
+    if (char === "*") {
+      if (pattern[i + 1] === "*") {
+        i += 1;
+        if (pattern[i + 1] === "/") {
+          i += 1;
+          source += "(?:[^/]+/)*";
+        } else {
+          source += ".*";
+        }
+      } else {
+        source += "[^/]*";
+      }
+      continue;
+    }
+    if (char === "?") {
+      source += "[^/]";
+      continue;
+    }
+    if (char === "[") {
+      const end = pattern.indexOf("]", i + 1);
+      if (end > i + 1) {
+        const raw = pattern.slice(i + 1, end);
+        const negated = raw.startsWith("!");
+        source += `[${negated ? "^" : ""}${escapeCharacterClass(negated ? raw.slice(1) : raw)}]`;
+        i = end;
+        continue;
+      }
+    }
+    source += escapeRegExp(char);
+  }
+  return new RegExp(`${source}$`);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function escapeCharacterClass(value: string): string {
+  return value.replace(/[\\\]]/g, "\\$&");
+}
+
+function matchesGlob(pattern: string, key: string, searchKey: string, absolute: boolean): boolean {
+  const matcher = globMatcher(pattern);
+  if (absolute) return matcher(key);
+  const relative = relativeToSearchPath(key, searchKey);
+  if (pattern.includes("/")) {
+    return matcher(relative) || matcher(key);
+  }
+  return matcher(basename(relative));
+}
+
+function formatGlobResult(paths: string[], limit: number, listingTruncated: boolean, path: string) {
+  const limited = paths.slice(0, limit);
+  const lines: string[] = [];
+  let bytes = 0;
+  let outputTruncated = false;
+  for (const line of limited) {
+    const lineBytes = new TextEncoder().encode(line).length + 1;
+    if (bytes + lineBytes > MAX_GLOB_OUTPUT_BYTES && lines.length > 0) {
+      outputTruncated = true;
+      break;
+    }
+    lines.push(line);
+    bytes += lineBytes;
+  }
+  if (lines.length === 0) {
+    return { content: "No files found", count: 0, path, truncated: listingTruncated };
+  }
+  const truncated = listingTruncated || paths.length > limit || outputTruncated;
+  const count = lines.length;
+  if (truncated) {
+    lines.push("");
+    lines.push(`(Results truncated: showing first ${count} results out of more. Use a more specific path or pattern to narrow results.)`);
+  }
+  return { content: lines.join("\n"), count, path, truncated };
+}
+
 function grepStatus(reason: GrepStoppedReason, matches: number): string {
   switch (reason) {
     case "completed":
@@ -151,6 +275,30 @@ const SPECS = [
     },
   }),
   defineSpec({
+    name: "glob",
+    description:
+      "Find files by glob pattern. Use this to look up filenames by pattern; " +
+      "use grep to search file contents.",
+    schema: z.object({
+      pattern: z.string().describe('Glob pattern to match, e.g. "**/*.ts" or "src/**/*.js".'),
+      path: z.string().optional().describe("Directory to search from (optional)."),
+      limit: z.number().int().optional().describe("Maximum number of results to return (default 100, max 1000)."),
+    }),
+    async handler(ctx, args) {
+      const search = normalizeSearchPath(ctx, args.path || "/");
+      const absolutePattern = args.pattern.startsWith("/");
+      const pattern = absolutePattern ? toKey(ctx, args.pattern) : args.pattern;
+      const limit = globLimit(args.limit);
+      const result = await ctx.fs.listObjects(search.key ? `${search.key}/` : undefined, { recursive: true });
+      const paths = result.objects
+        .map((obj) => obj.key)
+        .filter((key) => !isGitPath(key) && matchesGlob(pattern, key, search.key, absolutePattern))
+        .map(rootMatchPath)
+        .sort();
+      return formatGlobResult(paths, limit, result.isTruncated, search.path);
+    },
+  }),
+  defineSpec({
     name: "grep",
     description:
       "Search file contents for an extended regular expression and return " +
@@ -222,6 +370,7 @@ type BindSpecs<Specs extends readonly AnySpec[], Accumulator extends BindSpec<An
   : Accumulator;
 
 export type BoundSpecs = BindSpecs<typeof SPECS, []>;
+export type inferSpecInput<T> = T extends BoundSpec<any, infer S, any> ? z.infer<S> : never;
 export type inferSpecResult<T> = T extends BoundSpec<any, any, infer V> ? V | ToolErrorResult : never;
 
 /**

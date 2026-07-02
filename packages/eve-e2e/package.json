@@ -1,0 +1,24 @@
+{
+  "name": "@archildata/eve-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "eval": "eve eval"
+  },
+  "dependencies": {
+    "@archildata/eve": "workspace:^",
+    "ai": "^7.0.5",
+    "disk": "workspace:^",
+    "eve": "^0.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.33",
+    "typescript": "catalog:"
+  }
+}

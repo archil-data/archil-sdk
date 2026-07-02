@@ -110,7 +110,7 @@ test("ai-sdk: single disk write then read, /mnt stripped to key", async () => {
   const tools = aiSdk.createDiskTools(disk);
   assert.deepEqual(
     Object.keys(tools).sort(),
-    ["delete_file", "grep", "list_files", "read_file", "run_bash", "write_file"],
+    ["delete_file", "glob", "grep", "list_files", "read_file", "run_bash", "write_file"],
   );
   const wrote = await tools.write_file.execute({ path: "/notes/a.txt", content: "hello" });
   assert.deepEqual(wrote, { bytes: 5 });
@@ -161,6 +161,30 @@ test("workspace: writes route by path, grep fans out across disks", async () => 
   assert.deepEqual(Object.keys(lastExec.disks).sort(), ["cache", "data"]);
 });
 
+test("glob: finds files by pattern under a path", async () => {
+  const disk = await newClient().disks.get("dsk-1");
+  stores["dsk-1"]["glob/a.ts"] = "a";
+  stores["dsk-1"]["glob/nested/b.ts"] = "b";
+  stores["dsk-1"]["glob/nested/c.md"] = "c";
+
+  const out = await aiSdk.createDiskTools(disk).glob.execute({ path: "/glob", pattern: "**/*.ts" });
+
+  assert.deepEqual(out, {
+    content: "/glob/a.ts\n/glob/nested/b.ts",
+    count: 2,
+    path: "/glob",
+    truncated: false,
+  });
+
+  const fromMountedPath = await aiSdk.createDiskTools(disk).glob.execute({ pattern: "/mnt/glob/*.ts" });
+  assert.deepEqual(fromMountedPath, {
+    content: "/glob/a.ts",
+    count: 1,
+    path: "/",
+    truncated: false,
+  });
+});
+
 test("exec: multi-disk mount specs forward checkout paths", async () => {
   const archil = newClient();
   const disk = await archil.disks.get("dsk-1");
@@ -197,7 +221,7 @@ test("workspace: list_files at the root shows the disks, not their contents", as
 test("mastra: builds a keyed tool record over the disk", async () => {
   const disk = await newClient().disks.get("dsk-1");
   const tools = mastra.createDiskTools(disk);
-  assert.deepEqual(Object.keys(tools).sort(), ["delete_file", "grep", "list_files", "read_file", "run_bash", "write_file"]);
+  assert.deepEqual(Object.keys(tools).sort(), ["delete_file", "glob", "grep", "list_files", "read_file", "run_bash", "write_file"]);
   assert.equal(tools.read_file.id, "read_file");
 
   // execute must forward the validated input to the handler. Mastra passes the
