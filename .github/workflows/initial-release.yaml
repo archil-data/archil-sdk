@@ -1,0 +1,37 @@
+name: Initial Release
+
+on:
+  workflow_dispatch:
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  publish:
+    name: Publish 0.0.0 framework packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
+          registry-url: https://registry.npmjs.org
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Publish initial versions
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          pnpm --filter @archildata/ai-sdk publish --access public --no-git-checks
+          pnpm --filter @archildata/eve publish --access public --no-git-checks
+          pnpm --filter @archildata/mastra publish --access public --no-git-checks
+          pnpm --filter @archildata/langchain publish --access public --no-git-checks
