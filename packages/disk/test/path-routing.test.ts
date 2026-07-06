@@ -238,4 +238,7 @@ test("workspace: disks can be added and removed at runtime", async () => {
   assert.equal(w.removeDisk("extra"), true);
   assert.deepEqual(w.diskNames(), ["data"]);
   await assert.rejects(() => w.getObject("extra/f.txt"), /No disk named 'extra'/);
+
+  assert.throws(() => w.removeDisk("data"), /last disk/);
+  assert.deepEqual(w.diskNames(), ["data"]);
 });

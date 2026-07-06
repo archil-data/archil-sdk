@@ -1,4 +1,4 @@
-import { createDatabase, getDatabase } from '../../src/index.js'
+import { createDatabase, getDatabase } from '../src/index.js'
 import * as archil from "disk";
 
 if (!process.env.ARCHIL_API_KEY) {

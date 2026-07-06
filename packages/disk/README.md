@@ -229,36 +229,19 @@ const stagingDisks = await staging.disks.list();
 
 ## Filesystem tools
 
-The AI SDK adapter turns an Archil disk into a native `ToolSet`, so a model can
-read, write, list, search, and delete files, plus run shell commands against a
-real filesystem.
+Support for providing agents with a set of tools for using an Archil disk live in their own `@archildata/*` packages.
+| Package | Framework |
+| --- | --- |
+| `@archildata/ai-sdk` | AI SDK |
+| `@archildata/eve` | eve |
+| `@archildata/mastra` | Mastra |
+| `@archildata/langchain` | LangChain / LangGraph |
+
+## Workspaces
+For usage with multiple disks, you can create a workspace, which acts as a virtual disk where each mounted disk appears as a top-level directory:
 
 ```ts
-import { generateText } from "ai";
 import { Archil } from "disk";
-import { createDiskTools } from "disk/ai-sdk";
-
-const archil = new Archil();
-const disk = await archil.disks.get(process.env.ARCHIL_DISK_ID!);
-
-const result = await generateText({
-  model,
-  prompt: "Read /reports/q1.csv and write a summary to /reports/q1-summary.md.",
-  tools: createDiskTools(disk),
-});
-```
-
-`createDiskTools(disk)` gives the model an interface for interacting with the filesystem with seven tools: `read_file`, `write_file`,
-`delete_file`, `list_files`, `glob`, `grep`, and `run_bash`. A single disk is exposed as
-the filesystem root, so `/reports/q1.csv` maps to the disk key `reports/q1.csv`.
-
-For multiple disks, create a workspace and pass that to the same AI SDK adapter.
-Each mounted disk appears as a top-level directory:
-
-```ts
-import { generateText } from "ai";
-import { Archil } from "disk";
-import { createDiskTools } from "disk/ai-sdk";
 
 const archil = new Archil();
 const source = await archil.disks.get(process.env.ARCHIL_SOURCE_DISK_ID!);
@@ -268,20 +251,12 @@ const workspace = archil.workspace({
   source: { disk: source, readOnly: true },
   output,
 });
-
-const result = await generateText({
-  model,
-  prompt: "Use /source/raw/events.json and write a report to /output/reports/events.md.",
-  tools: createDiskTools(workspace),
-});
 ```
 
 Workspace paths route to the right disk by their first segment. `readOnly` mounts
-return an error from `write_file` and `delete_file` instead of mutating the disk.
-`run_bash` starts at the common root, so relative shell paths line up with the
-file tool paths.
+return an error from operations that mutate the disk.
 
-Workspace mounts can also request delegations before `run_bash` starts:
+Workspace mounts can also request delegations:
 
 ```ts
 const workspace = archil.workspace({
@@ -299,24 +274,13 @@ during mount setup instead.
 A `Workspace` is a full filesystem in its own right — it has the same object API
 a `Disk` does (`getObject` / `putObject` / `deleteObject` / `listObjects` /
 `grep` / `exec`; both implement the `FileSystem` interface), so you can use it
-directly without the tool adapter, and add or remove disks at runtime. A
+directly, and add or remove disks at runtime. A
 workspace's keys carry the disk name as their first segment:
 
 ```ts
 const data = await ws.getObject("data/reports/q1.csv"); // routes to the "data" disk
 ws.addDisk("scratch", diskTmp); // mount another disk live; ws.removeDisk("scratch")
 ```
-
-Pick the subpath for your framework:
-
-| Import | Framework |
-| --- | --- |
-| `disk/ai-sdk` | AI SDK |
-| `disk/mastra` | Mastra |
-| `disk/langchain` | LangChain / LangGraph |
-
-The frameworks are optional peer dependencies — install whichever you use
-(`npm install ai`, `@mastra/core`, or `@langchain/core`).
 
 ## Connecting to a disk's data plane
 

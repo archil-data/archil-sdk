@@ -1,7 +1,7 @@
 {
-  "name": "@archildata/eve",
+  "name": "@archildata/mastra",
   "version": "0.0.0",
-  "description": "Archil filesystem adapter for eve",
+  "description": "Archil filesystem adapter for Mastra",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -25,14 +25,17 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "disk": "workspace:^",
-    "eve": ">=0.20.0"
+    "@mastra/core": ">=1.0.0",
+    "disk": "workspace:^"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@archildata/mock": "workspace:^",
+    "@mastra/core": "^1.49.0",
     "@types/node": "^20.19.33",
     "disk": "workspace:^",
-    "eve": "^0.20.0",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
@@ -42,7 +45,7 @@
   },
   "keywords": [
     "archil",
-    "eve",
+    "mastra",
     "agent",
     "filesystem"
   ],

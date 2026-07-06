@@ -1,7 +1,7 @@
 {
-  "name": "@archildata/eve",
+  "name": "@archildata/langchain",
   "version": "0.0.0",
-  "description": "Archil filesystem adapter for eve",
+  "description": "Archil filesystem adapter for LangChain",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -25,14 +25,14 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "disk": "workspace:^",
-    "eve": ">=0.20.0"
+    "@langchain/core": ">=1.0.0",
+    "disk": "workspace:^"
   },
   "devDependencies": {
     "@archildata/mock": "workspace:^",
+    "@langchain/core": "^1.2.1",
     "@types/node": "^20.19.33",
     "disk": "workspace:^",
-    "eve": "^0.20.0",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
@@ -42,9 +42,12 @@
   },
   "keywords": [
     "archil",
-    "eve",
+    "langchain",
     "agent",
     "filesystem"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
 }
