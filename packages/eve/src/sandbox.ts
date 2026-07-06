@@ -125,7 +125,7 @@ class ArchilBackend implements SandboxBackend {
         },
         sessionKey: input.sessionKey,
       }),
-      dispose: async () => {},
+      shutdown: async () => {},
     };
   }
 
