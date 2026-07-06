@@ -33,9 +33,9 @@
   },
   "devDependencies": {
     "@archildata/mock": "workspace:^",
+    "@mastra/core": "^1.49.0",
     "@types/node": "^20.19.33",
     "disk": "workspace:^",
-    "eve": "^0.20.0",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@archildata/mock": "workspace:^",
+    "@langchain/core": "^1.2.1",
     "@types/node": "^20.19.33",
     "disk": "workspace:^",
     "tsdown": "catalog:",
