@@ -229,28 +229,13 @@ const stagingDisks = await staging.disks.list();
 
 ## Filesystem tools
 
-The AI SDK adapter turns an Archil disk into a native `ToolSet`, so a model can
-read, write, list, search, and delete files, plus run shell commands against a
-real filesystem.
-
-```ts
-import { generateText } from "ai";
-import { Archil } from "disk";
-import { createDiskTools } from "disk/ai-sdk";
-
-const archil = new Archil();
-const disk = await archil.disks.get(process.env.ARCHIL_DISK_ID!);
-
-const result = await generateText({
-  model,
-  prompt: "Read /reports/q1.csv and write a summary to /reports/q1-summary.md.",
-  tools: createDiskTools(disk),
-});
-```
-
-`createDiskTools(disk)` gives the model an interface for interacting with the filesystem with seven tools: `read_file`, `write_file`,
-`delete_file`, `list_files`, `glob`, `grep`, and `run_bash`. A single disk is exposed as
-the filesystem root, so `/reports/q1.csv` maps to the disk key `reports/q1.csv`.
+Support for providing agents with a set of tools for using an Archil disk live in their own `@archildata` packages.
+| Package | Framework |
+| --- | --- |
+| `@archildata/ai-sdk` | AI SDK |
+| `@archildata/eve` | eve |
+| `@archildata/mastra` | Mastra |
+| `@archildata/langchain` | LangChain / LangGraph |
 
 For multiple disks, create a workspace and pass that to the same AI SDK adapter.
 Each mounted disk appears as a top-level directory:

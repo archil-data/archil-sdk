@@ -1,7 +1,6 @@
-import { DynamicStructuredTool, tool, type StructuredToolInterface } from "@langchain/core/tools";
-import type { Disk } from "../../disk.js";
-import type { Workspace } from "../../workspace.js";
-import { AnyBoundSpec, BoundSpec, BoundSpecs, bindSpecs } from "../specs.js";
+import { DynamicStructuredTool, tool } from "@langchain/core/tools";
+import type { Disk, Workspace } from "disk";
+import { AnyBoundSpec, BoundSpec, BoundSpecs, bindSpecs } from "disk/internal/tools";
 import z from "zod";
 
 /**

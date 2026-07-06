@@ -12,25 +12,10 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
     },
-    "./ai-sdk": {
-      "types": "./dist/ai-sdk.d.mts",
-      "import": "./dist/ai-sdk.mjs",
-      "require": "./dist/ai-sdk.cjs"
-    },
     "./internal/tools": {
       "types": "./dist/internal/tools.d.mts",
       "import": "./dist/internal/tools.mjs",
       "require": "./dist/internal/tools.cjs"
-    },
-    "./mastra": {
-      "types": "./dist/mastra.d.mts",
-      "import": "./dist/mastra.mjs",
-      "require": "./dist/mastra.cjs"
-    },
-    "./langchain": {
-      "types": "./dist/langchain.d.mts",
-      "import": "./dist/langchain.mjs",
-      "require": "./dist/langchain.cjs"
     }
   },
   "bin": {
@@ -54,27 +39,8 @@
     "openapi-fetch": "^0.13.5",
     "zod": "^4.4.3"
   },
-  "peerDependencies": {
-    "@langchain/core": ">=1.0.0",
-    "@mastra/core": ">=1.0.0",
-    "ai": ">=7.0.0"
-  },
-  "peerDependenciesMeta": {
-    "ai": {
-      "optional": true
-    },
-    "@mastra/core": {
-      "optional": true
-    },
-    "@langchain/core": {
-      "optional": true
-    }
-  },
   "devDependencies": {
-    "@langchain/core": "^1.2.1",
-    "@mastra/core": "^1.47.0",
     "@types/node": "^26.0.1",
-    "ai": "^7.0.5",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

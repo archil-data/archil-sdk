@@ -1,7 +1,6 @@
 import { tool } from "ai";
-import type { Disk } from "../../disk.js";
-import type { Workspace } from "../../workspace.js";
-import { BoundSpecs, bindSpecs, inferSpecResult } from "../specs.js";
+import type { Disk, Workspace } from "disk";
+import { BoundSpecs, bindSpecs, inferSpecResult } from "disk/internal/tools";
 import z from "zod";
 
 /**

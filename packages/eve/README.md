@@ -1,6 +1,6 @@
 # @archildata/eve
 
-Archil integration for [eve](https://www.npmjs.com/package/eve).
+Archil integration for [eve](https://eve.dev/).
 
 This package provides different functionality depending on your use case.
 
@@ -11,7 +11,7 @@ If you want a sandbox backed by an Archil disk and serverless execution use `arc
 ## Install
 
 ```sh
-npm install @archildata/eve disk
+npm install disk @archildata/eve
 ```
 
 `disk` is a peer dependency. The Archil client reads standard Archil environment
@@ -29,22 +29,13 @@ import * as archil from "disk";
 import { createDiskTools } from "@archildata/eve";
 
 const disk = await archil.getDisk(process.env.ARCHIL_DISK_ID!);
-export default createDiskTools(disk);
-```
-
-For multiple disks, pass a workspace:
-
-```ts
-import * as archil from "disk";
-import { createDiskTools } from "@archildata/eve";
-
-const archil = new Archil();
-const workspace = archil.workspace({
-  app: await archil.getDisk(process.env.ARCHIL_APP_DISK_ID!),
-  data: await archil.getDisk(process.env.ARCHIL_DATA_DISK_ID!),
+// or mount multiple disks as a workspace...
+const disk = archil.workspace({
+  source: { disk: await archil.getDisk(process.env.SOURCE_DISK_ID!), readOnly: true },
+  reports: await archil.getDisk(process.env.REPORTS_DISK_ID!),
 });
 
-export default createDiskTools(workspace);
+export default createDiskTools(disk);
 ```
 
 `createDiskTools` returns an eve `defineDynamic(...)` export that is ready to

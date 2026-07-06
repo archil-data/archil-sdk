@@ -13,10 +13,7 @@ const { version } = JSON.parse(
 const define = { __SDK_VERSION__: JSON.stringify(version) };
 const entries = {
   index: "src/index.ts",
-  "ai-sdk": "src/ai-sdk.ts",
-  "internal/tools": "src/internal/tools.ts",
-  mastra: "src/mastra.ts",
-  langchain: "src/langchain.ts",
+  "internal/tools": "src/internal/tools.ts"
 };
 
 export default defineConfig({

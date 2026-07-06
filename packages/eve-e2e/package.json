@@ -15,7 +15,7 @@
     "@archildata/eve": "workspace:^",
     "ai": "^7.0.5",
     "disk": "workspace:^",
-    "eve": "^0.17.1"
+    "eve": "^0.20.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.33",
