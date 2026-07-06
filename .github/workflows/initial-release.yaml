@@ -2,12 +2,17 @@ name: Initial Release
 
 on:
   workflow_dispatch:
+    inputs:
+      packages:
+        description: Packages to publish, separated by spaces.
+        required: true
+        type: string
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   publish:
-    name: Publish 0.0.0 framework packages
+    name: Publish initial package versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -30,8 +35,17 @@ jobs:
       - name: Publish initial versions
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGES: ${{ inputs.packages }}
         run: |
-          pnpm --filter @archildata/ai-sdk publish --access public --no-git-checks
-          pnpm --filter @archildata/eve publish --access public --no-git-checks
-          pnpm --filter @archildata/mastra publish --access public --no-git-checks
-          pnpm --filter @archildata/langchain publish --access public --no-git-checks
+          packages="$(printf "%s" "$PACKAGES" | xargs)"
+          if [ -z "$packages" ]; then
+            echo "No packages requested."
+            exit 1
+          fi
+
+          echo "Publishing packages:"
+          printf "  %s\n" $packages
+
+          for package in $packages; do
+            pnpm --filter "$package" publish --access public --no-git-checks
+          done
