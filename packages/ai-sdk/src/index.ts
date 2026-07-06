@@ -9,7 +9,7 @@ import z from "zod";
  * `streamText`, or an `Agent`'s `tools`.
  *
  * ```ts
- * import { createDiskTools } from "disk/ai-sdk";
+ * import { createDiskTools } from "@archildata/ai-sdk";
  * const result = await generateText({ model, tools: createDiskTools(disk), prompt });
  * ```
  */

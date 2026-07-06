@@ -9,7 +9,7 @@ import z from "zod";
  * model or hand to a LangGraph agent.
  *
  * ```ts
- * import { createDiskTools } from "disk/langchain";
+ * import { createDiskTools } from "@archildata/langchain";
  * const agent = createReactAgent({ llm, tools: createDiskTools(disk) });
  * ```
  */

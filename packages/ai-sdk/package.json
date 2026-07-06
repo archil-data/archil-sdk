@@ -32,8 +32,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.5",
     "@archildata/mock": "workspace:^",
-    "@types/node": "^20.19.33",
+    "@types/node": "^20.19.43",
     "ai": "^7.0.15",
     "disk": "workspace:^",
     "tsdown": "catalog:",

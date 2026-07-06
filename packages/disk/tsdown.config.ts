@@ -17,10 +17,6 @@ const entries = {
 };
 
 export default defineConfig({
-  // Main entry plus the per-framework agent-tool adapters, each a subpath
-  // export (disk/ai-sdk, disk/mastra, disk/langchain) so importing one pulls
-  // in only that framework. The internal spec entry is for first-party
-  // adapters and is intentionally not user-facing.
   entry: entries,
   format: {
     cjs: {},

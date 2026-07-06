@@ -19,7 +19,7 @@ Use `createDiskTools` when the agent should have direct tools for an Archil disk
 ```ts
 import { createAgent } from "langchain";
 import * as archil from "disk";
-import { createDiskTools } from "disk/langchain";
+import { createDiskTools } from "@archildata/langchain";
  
 const disk = await archil.getDisk(process.env.ARCHIL_DISK_ID!);
 // or mount multiple disks as a workspace...

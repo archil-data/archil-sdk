@@ -17,7 +17,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { generateText, stepCountIs } from "ai";
 import { Archil } from "disk";
-import { createDiskTools } from "disk/ai-sdk";
+import { createDiskTools } from "../src/index.js";
 
 const MODEL = process.env.OLLAMA_MODEL ?? "qwen2.5:3b";
 const BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434/v1";

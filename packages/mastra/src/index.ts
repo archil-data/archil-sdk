@@ -15,7 +15,7 @@ type MastraTools = {
  * an `Agent`'s `tools`.
  *
  * ```ts
- * import { createDiskTools } from "disk/mastra";
+ * import { createDiskTools } from "@archildata/mastra";
  * const agent = new Agent({ name, model, tools: createDiskTools(workspace) });
  * ```
  */
