@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@archildata/native": "^0.8.18",
-    "disk": "workspace:^",
+    "disk": "workspace:*",
     "commander": "^14.0.3",
     "debug": "^4.3.4",
     "just-bash": "^2.7.0"

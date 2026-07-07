@@ -25,13 +25,13 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "disk": "workspace:^",
+    "disk": "workspace:*",
     "eve": ">=0.20.0"
   },
   "devDependencies": {
-    "@archildata/mock": "workspace:^",
+    "@archildata/mock": "workspace:*",
     "@types/node": "^20.19.33",
-    "disk": "workspace:^",
+    "disk": "workspace:*",
     "eve": "^0.20.0",
     "tsdown": "catalog:",
     "typescript": "catalog:",
