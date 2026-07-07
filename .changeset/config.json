@@ -8,5 +8,8 @@
   "format": "auto",
   "updateInternalDependencies": "patch",
   "commit": false,
-  "changelog": "@changesets/cli/changelog"
+  "changelog": "@changesets/cli/changelog",
+  "privatePackages": {
+    "version": false
+  }
 }
