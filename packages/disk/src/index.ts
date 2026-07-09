@@ -1,6 +1,6 @@
 import { Archil, type ArchilOptions, type ExecMount, type ExecOptions } from "./archil.js";
 import type { CreateDiskRequest, ApiTokenResponse, CreateApiTokenRequest, ExecDiskResult } from "./types.js";
-import type { CreateDiskResult, ListDisksOptions } from "./disks.js";
+import type { CreateDiskResult, DiskListPage, ListDisksOptions } from "./disks.js";
 import type { Disk } from "./disk.js";
 import type { ListTokensOptions } from "./tokens.js";
 import { Workspace } from "./workspace.js";
@@ -9,7 +9,7 @@ export { Archil } from "./archil.js";
 export type { ArchilOptions, ExecMount, ExecMountSpec, ExecOptions } from "./archil.js";
 
 export { Disks } from "./disks.js";
-export type { ListDisksOptions, CreateDiskResult } from "./disks.js";
+export type { ListDisksOptions, CreateDiskResult, DiskListPage } from "./disks.js";
 
 export { Tokens } from "./tokens.js";
 export type { ListTokensOptions } from "./tokens.js";
@@ -99,6 +99,11 @@ export function createDisk(req: CreateDiskRequest): Promise<CreateDiskResult> {
 
 export function listDisks(opts?: ListDisksOptions): Promise<Disk[]> {
   return archil().disks.list(opts);
+}
+
+/** Fetch a single page of disks. See {@link Disks.listPage}. */
+export function listDiskPage(opts?: ListDisksOptions): Promise<DiskListPage> {
+  return archil().disks.listPage(opts);
 }
 
 export function getDisk(id: string): Promise<Disk> {

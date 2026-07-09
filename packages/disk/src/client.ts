@@ -64,6 +64,38 @@ export async function unwrap<T>(
 }
 
 /**
+ * Unwrap a paginated list envelope: like {@link unwrap}, but also surface the
+ * envelope's `nextCursor` (undefined on the last page or from a server that
+ * doesn't paginate).
+ */
+export async function unwrapPage<T>(
+  promise: Promise<{
+    data?: { success: boolean; data?: T; error?: string; nextCursor?: string };
+    error?: unknown;
+    response: Response;
+  }>,
+): Promise<{ data: T; nextCursor?: string }> {
+  const { data: body, error, response } = await promise;
+
+  if (error || !body) {
+    const errBody = error as { error?: string } | undefined;
+    throw new ArchilApiError(
+      errBody?.error ?? `API request failed with status ${response.status}`,
+      response.status,
+    );
+  }
+
+  if (!body.success) {
+    throw new ArchilApiError(
+      (body as unknown as { error?: string }).error ?? "Unknown API error",
+      response.status,
+    );
+  }
+
+  return { data: body.data as T, nextCursor: body.nextCursor };
+}
+
+/**
  * Unwrap an API response that has no data payload (e.g., delete operations).
  */
 export async function unwrapEmpty(
