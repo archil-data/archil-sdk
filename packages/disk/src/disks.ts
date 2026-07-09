@@ -1,13 +1,27 @@
 import type { ApiClient } from "./client.js";
-import { unwrap } from "./client.js";
+import { unwrap, unwrapPage } from "./client.js";
 import { Disk } from "./disk.js";
 import type { AuthorizedUser, CreateDiskRequest, DiskResponse } from "./types.js";
 
 export interface ListDisksOptions {
+  /** Cap on the total number of disks returned. */
   limit?: number;
+  /** Resume listing from a previous page's `nextCursor`. */
   cursor?: string;
   name?: string;
 }
+
+export interface DiskListPage {
+  disks: Disk[];
+  /**
+   * Set when more disks remain beyond this page; pass it back as `cursor` to
+   * fetch the next one. Undefined on the last page.
+   */
+  nextCursor?: string;
+}
+
+/** Server-side maximum page size for GET /api/disks. */
+const DISK_PAGE_LIMIT = 100;
 
 export interface CreateDiskResult {
   disk: Disk;
@@ -31,15 +45,53 @@ export class Disks {
     this._s3BaseUrl = s3BaseUrl;
   }
 
+  /**
+   * List the account's disks. Fetches in cursor-driven pages (bounded server
+   * work per request) and follows `nextCursor` until exhausted, so the result
+   * is complete even for very large accounts. Use `limit` to cap the total, or
+   * {@link listPage} to walk pages yourself.
+   */
   async list(opts?: ListDisksOptions): Promise<Disk[]> {
-    const data = await unwrap(
+    if (opts?.name !== undefined) {
+      return (await this.listPage(opts)).disks;
+    }
+
+    const limit = opts?.limit;
+    let cursor = opts?.cursor;
+    const disks: Disk[] = [];
+    for (;;) {
+      const remaining = limit === undefined ? undefined : limit - disks.length;
+      if (remaining !== undefined && remaining <= 0) {
+        return disks;
+      }
+      const pageLimit = remaining === undefined ? DISK_PAGE_LIMIT : Math.min(remaining, DISK_PAGE_LIMIT);
+      const page = await this.listPage({ limit: pageLimit, cursor });
+      // A server that predates pagination ignores `limit` and returns the full
+      // list; slice so the cap still holds.
+      disks.push(...(remaining === undefined ? page.disks : page.disks.slice(0, remaining)));
+      // A repeated cursor means no forward progress — never loop forever.
+      if (!page.nextCursor || page.nextCursor === cursor) {
+        return disks;
+      }
+      cursor = page.nextCursor;
+    }
+  }
+
+  /**
+   * Fetch a single page of disks. `nextCursor` on the result resumes the
+   * listing (it can also be persisted, e.g. across requests of a paginated UI).
+   */
+  async listPage(opts?: ListDisksOptions): Promise<DiskListPage> {
+    const { data, nextCursor } = await unwrapPage(
       this._client.GET("/api/disks", {
         params: { query: { limit: opts?.limit, cursor: opts?.cursor, name: opts?.name } },
       }),
     );
-    return (data as DiskResponse[]).map(
+    // `?? []`: an empty account serializes as JSON null (Go nil slice).
+    const disks = ((data ?? []) as DiskResponse[]).map(
       (d) => new Disk(d, this._client, this._region, this._s3BaseUrl),
     );
+    return nextCursor ? { disks, nextCursor } : { disks };
   }
 
   async get(id: string): Promise<Disk> {
