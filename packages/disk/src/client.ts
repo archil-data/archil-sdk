@@ -43,6 +43,21 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
 export async function unwrap<T>(
   promise: Promise<{ data?: { success: boolean; data?: T; error?: string }; error?: unknown; response: Response }>,
 ): Promise<T> {
+  return (await unwrapPage(promise)).data;
+}
+
+/**
+ * Unwrap a paginated list envelope: like {@link unwrap}, but also surface the
+ * envelope's `nextCursor` (undefined on the last page or from a server that
+ * doesn't paginate).
+ */
+export async function unwrapPage<T>(
+  promise: Promise<{
+    data?: { success: boolean; data?: T; error?: string; nextCursor?: string };
+    error?: unknown;
+    response: Response;
+  }>,
+): Promise<{ data: T; nextCursor?: string }> {
   const { data: body, error, response } = await promise;
 
   if (error || !body) {
@@ -60,7 +75,7 @@ export async function unwrap<T>(
     );
   }
 
-  return body.data as T;
+  return { data: body.data as T, nextCursor: body.nextCursor };
 }
 
 /**
