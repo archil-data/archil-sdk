@@ -302,6 +302,58 @@ export interface PutObjectOptions {
   partSize?: number;
   /** Max parts uploaded in parallel on the multipart path. Default 4. */
   concurrency?: number;
+  /**
+   * POSIX permission mode for the published file (e.g. `0o640`). Sent as the
+   * `x-archil-mode` header (octal). Defaults to the server default (`0644`,
+   * owner root) when omitted.
+   */
+  mode?: number;
+  /**
+   * POSIX owner uid for the published file (e.g. `1000` for a non-root sandbox
+   * user). Sent as `x-archil-uid`. Defaults to `0` (root) when omitted.
+   */
+  uid?: number;
+  /**
+   * POSIX group gid for the published file. Sent as `x-archil-gid`. Defaults
+   * to `0` when omitted.
+   */
+  gid?: number;
+}
+
+/** Options for {@link Disk.appendObject}. */
+export interface AppendObjectOptions {
+  /** MIME type, applied only when the object is newly created. */
+  contentType?: string;
+  /**
+   * POSIX mode/uid/gid applied only when the object is newly created (same
+   * headers as {@link PutObjectOptions}). Ignored when appending to an
+   * existing object.
+   */
+  mode?: number;
+  uid?: number;
+  gid?: number;
+}
+
+/** Options for {@link DiskMultipart.create}. */
+export interface CreateMultipartOptions {
+  contentType?: string;
+  /** POSIX create attrs for the completed object (see {@link PutObjectOptions}). */
+  mode?: number;
+  uid?: number;
+  gid?: number;
+}
+
+/** Build `x-archil-*` headers for S3 create paths. @internal */
+export function posixCreateHeaders(opts: {
+  mode?: number;
+  uid?: number;
+  gid?: number;
+}): Record<string, string> | undefined {
+  const headers: Record<string, string> = {};
+  if (opts.mode !== undefined) headers["x-archil-mode"] = opts.mode.toString(8);
+  if (opts.uid !== undefined) headers["x-archil-uid"] = String(opts.uid);
+  if (opts.gid !== undefined) headers["x-archil-gid"] = String(opts.gid);
+  return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
 /**
@@ -317,6 +369,8 @@ type S3RequestFn = (
     contentType?: string;
     query?: Record<string, string | number>;
     retry?: boolean;
+    /** Extra request headers (e.g. x-archil-mode/uid/gid). */
+    headers?: Record<string, string>;
   },
 ) => Promise<{ ok: boolean; status: number; statusText: string; headers: Headers; body: Uint8Array }>;
 
@@ -595,8 +649,10 @@ export class Disk implements FileSystem {
    * @param body     Contents as a string, Uint8Array/Buffer, or ArrayBuffer
    * @param options  Either a content-type string, or {@link PutObjectOptions}
    *                 (`contentType`, `multipartThreshold`, `partSize`,
-   *                 `concurrency`). Content type defaults to
-   *                 "application/octet-stream".
+   *                 `concurrency`, `mode`, `uid`, `gid`). Content type defaults
+   *                 to "application/octet-stream". Optional `mode`/`uid`/`gid`
+   *                 set the published file's POSIX attributes (e.g. for a
+   *                 non-root agent sandbox: `{ mode: 0o640, uid: 1000, gid: 1000 }`).
    */
   async putObject(
     key: string,
@@ -608,9 +664,14 @@ export class Disk implements FileSystem {
     const partSize = Math.max(opts.partSize ?? DEFAULT_PART_SIZE, MIN_PART_SIZE);
     const threshold = opts.multipartThreshold ?? partSize;
     const bytes = toBytes(body);
+    const posixHeaders = posixCreateHeaders(opts);
 
     if (bytes.length <= threshold) {
-      const resp = await this._s3Request("PUT", key, { body, contentType });
+      const resp = await this._s3Request("PUT", key, {
+        body,
+        contentType,
+        headers: posixHeaders,
+      });
       if (!resp.ok) {
         throw parseS3Error("PutObject", resp.status, resp.statusText, decodeText(resp.body));
       }
@@ -620,7 +681,7 @@ export class Disk implements FileSystem {
     return this._putMultipart(
       key,
       bytes,
-      contentType,
+      { contentType, mode: opts.mode, uid: opts.uid, gid: opts.gid },
       partSize,
       Math.max(1, opts.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY),
     );
@@ -634,7 +695,7 @@ export class Disk implements FileSystem {
   private async _putMultipart(
     key: string,
     bytes: Uint8Array,
-    contentType: string,
+    createOpts: CreateMultipartOptions,
     partSize: number,
     concurrency: number,
   ): Promise<PutObjectResult> {
@@ -642,7 +703,9 @@ export class Disk implements FileSystem {
     // 10,000-part cap — otherwise the upload would fail at `complete`.
     const effectivePartSize = effectiveUploadPartSize(bytes.length, partSize);
     const mp = this.multipart;
-    const upload = await mp.create(key, contentType);
+    // CreateMultipartUpload carries mode/uid/gid; they stick on the data inode
+    // through complete/rename.
+    const upload = await mp.create(key, createOpts);
     try {
       const partCount = Math.ceil(bytes.length / effectivePartSize);
       const parts: UploadPart[] = new Array(partCount);
@@ -681,20 +744,26 @@ export class Disk implements FileSystem {
    * would duplicate the bytes. On a transient failure, re-append yourself only
    * after confirming the object's size.
    *
-   * @param key          Path on the disk (e.g. "logs/app.log")
-   * @param body         Bytes to append (string, Uint8Array/Buffer, or ArrayBuffer)
-   * @param contentType  MIME type, applied only when the object is newly created.
+   * @param key      Path on the disk (e.g. "logs/app.log")
+   * @param body     Bytes to append (string, Uint8Array/Buffer, or ArrayBuffer)
+   * @param options  Content-type string, or {@link AppendObjectOptions}. MIME
+   *                 type and optional `mode`/`uid`/`gid` apply only when the
+   *                 object is newly created.
    */
   async appendObject(
     key: string,
     body: string | Uint8Array | ArrayBuffer,
-    contentType = "application/octet-stream",
+    options: string | AppendObjectOptions = "application/octet-stream",
   ): Promise<PutObjectResult> {
+    const opts: AppendObjectOptions =
+      typeof options === "string" ? { contentType: options } : options ?? {};
+    const contentType = opts.contentType ?? "application/octet-stream";
     const resp = await this._s3Request("PUT", key, {
       body,
       contentType,
       query: { append: "true" },
       retry: false,
+      headers: posixCreateHeaders(opts),
     });
     if (!resp.ok) {
       throw parseS3Error("AppendObject", resp.status, resp.statusText, decodeText(resp.body));
@@ -875,6 +944,7 @@ export class Disk implements FileSystem {
       // for non-idempotent ops (CompleteMultipartUpload), where a retry after a
       // successful-but-unacknowledged completion returns a spurious NoSuchUpload.
       retry?: boolean;
+      headers?: Record<string, string>;
     } = {},
   ): Promise<{ ok: boolean; status: number; statusText: string; headers: Headers; body: Uint8Array }> {
     if (!this._s3BaseUrl) {
@@ -898,6 +968,8 @@ export class Disk implements FileSystem {
       .map(encodeURIComponent)
       .join("/");
     const path = encodedKey ? `/${this.id}/${encodedKey}` : `/${this.id}`;
+    const headers: Record<string, string> = { ...(opts.headers ?? {}) };
+    if (opts.contentType) headers["Content-Type"] = opts.contentType;
     const init: Record<string, unknown> = {
       baseUrl: this._s3BaseUrl,
       parseAs: "stream",
@@ -906,7 +978,7 @@ export class Disk implements FileSystem {
       // through unchanged (no Node Buffer in the data path). Bodies are fully
       // buffered (never streams), so re-sending one on a retry is safe.
       ...(opts.body !== undefined ? { body: opts.body, bodySerializer: (b: unknown) => b } : {}),
-      ...(opts.contentType ? { headers: { "Content-Type": opts.contentType } } : {}),
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
     };
 
     // GET (object reads, listings) and POST (multipart Initiate/Complete,
@@ -1023,11 +1095,19 @@ export class DiskMultipart {
   /**
    * Start a multipart upload (CreateMultipartUpload) and return its `uploadId`.
    *
-   * @param key          Path on the disk the finished object will live at.
-   * @param contentType  MIME type to store the object with.
+   * @param key      Path on the disk the finished object will live at.
+   * @param options  Content-type string, or {@link CreateMultipartOptions}
+   *                 including optional POSIX `mode`/`uid`/`gid` for the
+   *                 completed object.
    */
-  async create(key: string, contentType?: string): Promise<MultipartUpload> {
-    const resp = await this.s3Request("POST", key, { query: { uploads: "" }, contentType });
+  async create(key: string, options?: string | CreateMultipartOptions): Promise<MultipartUpload> {
+    const opts: CreateMultipartOptions =
+      typeof options === "string" ? { contentType: options } : options ?? {};
+    const resp = await this.s3Request("POST", key, {
+      query: { uploads: "" },
+      contentType: opts.contentType,
+      headers: posixCreateHeaders(opts),
+    });
     if (!resp.ok) {
       throw parseS3Error("CreateMultipartUpload", resp.status, resp.statusText, decodeText(resp.body));
     }

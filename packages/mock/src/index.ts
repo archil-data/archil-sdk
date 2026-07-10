@@ -16,7 +16,7 @@ import type {
 
 export interface MockDiskCallLog {
   getObject: string[];
-  putObject: Array<{ key: string; contentType?: string }>;
+  putObject: Array<{ key: string; contentType?: string; mode?: number; uid?: number; gid?: number }>;
   deleteObject: string[];
   listObjects: Array<{ prefix?: string; opts: ListObjectsOptions }>;
   grep: GrepOptions[];
@@ -118,10 +118,17 @@ class MockDiskImpl implements FileSystem {
   async putObject(
     key: string,
     body: string | Uint8Array | ArrayBuffer,
-    contentType?: string,
+    options?: string | { contentType?: string; mode?: number; uid?: number; gid?: number },
   ): Promise<PutObjectResult> {
+    const opts = typeof options === "string" ? { contentType: options } : options ?? {};
     const normalized = normalizeKey(key);
-    this.calls.putObject.push({ key: normalized, contentType });
+    this.calls.putObject.push({
+      key: normalized,
+      contentType: opts.contentType,
+      mode: opts.mode,
+      uid: opts.uid,
+      gid: opts.gid,
+    });
     this.files.set(normalized, toBytes(body));
     return { etag: '"mock"' };
   }

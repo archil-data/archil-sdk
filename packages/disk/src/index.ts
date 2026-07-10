@@ -14,7 +14,7 @@ export type { ListDisksOptions, CreateDiskResult } from "./disks.js";
 export { Tokens } from "./tokens.js";
 export type { ListTokensOptions } from "./tokens.js";
 
-export { Disk, DiskMultipart, effectiveUploadPartSize } from "./disk.js";
+export { Disk, DiskMultipart, effectiveUploadPartSize, posixCreateHeaders } from "./disk.js";
 export type {
   MountOptions,
   ExecResult,
@@ -30,6 +30,8 @@ export type {
   ShareUrlOptions,
   ShareUrlResult,
   PutObjectOptions,
+  AppendObjectOptions,
+  CreateMultipartOptions,
   UploadPart,
   MultipartUpload,
   CompletedMultipartUpload,

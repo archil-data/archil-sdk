@@ -4,6 +4,7 @@ import type {
   GrepResult,
   ListObjectsOptions,
   ListObjectsResult,
+  PutObjectOptions,
   PutObjectResult,
 } from "./disk.js";
 
@@ -26,11 +27,11 @@ import type {
 export interface FileSystem {
   /** Read an object's full contents. Throws `ArchilS3Error` (404) if absent. */
   getObject(key: string): Promise<Uint8Array>;
-  /** Create or overwrite an object. */
+  /** Create or overwrite an object. Optional `mode`/`uid`/`gid` set POSIX attrs. */
   putObject(
     key: string,
     body: string | Uint8Array | ArrayBuffer,
-    contentType?: string,
+    options?: string | PutObjectOptions,
   ): Promise<PutObjectResult>;
   /** Delete an object (idempotent). */
   deleteObject(key: string): Promise<void>;

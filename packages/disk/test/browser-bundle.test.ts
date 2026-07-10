@@ -23,7 +23,7 @@ const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const ENTRY = "src/index.ts";
 
 type BundleFormat = "esm" | "iife";
-type BrowserCall = { url: string; method: string; body?: any };
+type BrowserCall = { url: string; method: string; body?: any; headers?: Record<string, string> };
 type BrowserSandbox = Record<string, any> & {
   globalThis?: BrowserSandbox;
   ArchilSDK?: any;
@@ -139,7 +139,27 @@ function routingFetch(calls: BrowserCall[]): FetchMock {
     // openapi-fetch calls fetch(Request, ...) — the verb is on the Request, not
     // in init — while raw fetches pass (url, init). Read whichever applies.
     const method = (typeof input === "string" ? init?.method : input.method) ?? "GET";
-    calls.push({ url: raw, method });
+    // Capture request headers so tests can assert x-archil-* create attrs.
+    let headers: Record<string, string> | undefined;
+    const rawHeaders =
+      typeof input === "string"
+        ? init?.headers
+        : input instanceof Request
+          ? input.headers
+          : init?.headers;
+    if (rawHeaders) {
+      headers = {};
+      if (typeof rawHeaders.forEach === "function") {
+        rawHeaders.forEach((v: string, k: string) => {
+          headers![k.toLowerCase()] = v;
+        });
+      } else {
+        for (const [k, v] of Object.entries(rawHeaders)) {
+          headers[k.toLowerCase()] = String(v);
+        }
+      }
+    }
+    calls.push({ url: raw, method, headers });
 
     if (u.hostname.startsWith("control.") && u.pathname === "/api/disks") {
       const body = JSON.stringify({
@@ -390,6 +410,41 @@ test("SDK runs in a browser sandbox: putObject stays a single PUT for small bodi
   const puts = calls.filter((c) => c.method === "PUT");
   assert.equal(puts.length, 1, "small body is exactly one PUT");
   assert.ok(!puts[0].url.includes("partNumber"), "small body PUT is a plain PutObject");
+});
+
+test("SDK runs in a browser sandbox: putObject sends x-archil mode/uid/gid headers", async () => {
+  const calls: BrowserCall[] = [];
+  const { sdk } = await loadSdkInBrowserSandbox(routingFetch(calls));
+  const archil = new sdk.Archil({ apiKey: "key-test", region: "aws-us-east-1" });
+  const [disk] = await archil.disks.list();
+
+  await disk.putObject("agent.txt", "hi", { mode: 0o640, uid: 1000, gid: 1000 });
+  const put = calls.find((c) => c.method === "PUT" && c.url.includes("agent.txt"));
+  assert.ok(put, "expected a PutObject call");
+  assert.equal(put.headers?.["x-archil-mode"], "640");
+  assert.equal(put.headers?.["x-archil-uid"], "1000");
+  assert.equal(put.headers?.["x-archil-gid"], "1000");
+});
+
+test("SDK runs in a browser sandbox: multipart create forwards posix attrs", async () => {
+  const calls: BrowserCall[] = [];
+  const { sdk } = await loadSdkInBrowserSandbox(routingFetch(calls));
+  const archil = new sdk.Archil({ apiKey: "key-test", region: "aws-us-east-1" });
+  const [disk] = await archil.disks.list();
+
+  const body = new Uint8Array(6 * 1024 * 1024);
+  await disk.putObject("big-posix.bin", body, {
+    multipartThreshold: 5 * 1024 * 1024,
+    partSize: 5 * 1024 * 1024,
+    mode: 0o600,
+    uid: 1000,
+    gid: 1000,
+  });
+  const initiate = calls.find((c) => c.method === "POST" && c.url.includes("uploads"));
+  assert.ok(initiate, "expected CreateMultipartUpload");
+  assert.equal(initiate.headers?.["x-archil-mode"], "600");
+  assert.equal(initiate.headers?.["x-archil-uid"], "1000");
+  assert.equal(initiate.headers?.["x-archil-gid"], "1000");
 });
 
 test("SDK runs in a browser sandbox: putObject multipartThreshold forces multipart below partSize", async () => {
