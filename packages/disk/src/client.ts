@@ -24,8 +24,17 @@ export interface ApiClientOptions {
 }
 
 export function createApiClient(opts: ApiClientOptions): ApiClient {
+  return createTypedApiClient<paths>(opts);
+}
+
+/**
+ * Same client construction as {@link createApiClient} but for a caller-supplied
+ * paths type — used for surfaces (e.g. /api/sandboxes) not yet specced in
+ * @archildata/api-types.
+ */
+export function createTypedApiClient<P extends {}>(opts: ApiClientOptions): Client<P> {
   const baseUrl = opts.baseUrl ?? resolveBaseUrl(opts.region);
-  return createClient<paths>({
+  return createClient<P>({
     baseUrl,
     headers: {
       Authorization: `key-${opts.apiKey.replace(/^key-/, '')}`,
