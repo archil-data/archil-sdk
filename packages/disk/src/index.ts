@@ -63,6 +63,7 @@ export type {
   SandboxInfo,
   SandboxPort,
   SandboxResources,
+  SandboxRunCodeOptions,
   SandboxRunOptions,
   SandboxStatus,
   SandboxWaitOptions,

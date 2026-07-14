@@ -255,6 +255,21 @@ const resumed = await sdk.sandbox.start({ id: sandboxes[0].id });
 
 `create`, `start`, and `stop` wait for the sandbox to reach the target state by default (pass `wait: false` to just submit). `run` submits the command and polls until it finishes; a non-zero exit code is reported in the result, not thrown. Module-level equivalents (`createSandbox`, `getSandbox`, `listSandboxes`, `startSandbox`) use the `configure`d client.
 
+### Running code in a persistent kernel
+
+`runCode` executes snippets in the sandbox's persistent Python or Node kernel. The kernel keeps interpreter state between calls, so consecutive snippets behave like one REPL session:
+
+```ts
+await sandbox.runCode("import pandas as pd; df = pd.DataFrame({'a': [1, 2]})");
+const out = await sandbox.runCode("df['a'].sum()");
+console.log(out.stdout); // "3\n"
+
+const js = await sandbox.runCode("6 * 7", { language: "node" });
+console.log(js.stdout); // "42\n"
+```
+
+The trailing expression's value is printed REPL-style; an exception puts its traceback on `stderr` with a non-zero `exitCode`. Kernels ship in the default base image only (custom docker-image sandboxes may not have them).
+
 ## Filesystem tools
 
 Support for providing agents with a set of tools for using an Archil disk live in their own `@archildata/*` packages.

@@ -287,3 +287,44 @@ test("api errors surface status and message", async () => {
     },
   );
 });
+
+test("runCode drives the kernel through exec with base64 code in env", async () => {
+  await withStub(
+    (call) => {
+      if (call.path === "/api/sandboxes/sb-1") return envelope(sandboxWire());
+      if (call.method === "POST") {
+        return envelope(
+          {
+            sandbox_id: "sb-1",
+            exec_id: "ex-1",
+            command: "archil-kernel run node",
+            status: "running",
+            started_at: "2026-07-14T00:00:00Z",
+          },
+          202,
+        );
+      }
+      return envelope({
+        sandbox_id: "sb-1",
+        exec_id: "ex-1",
+        command: "archil-kernel run node",
+        status: "completed",
+        exit_code: 0,
+        stdout: "42\n",
+        stderr: "",
+        started_at: "2026-07-14T00:00:00Z",
+      });
+    },
+    async (archil, calls) => {
+      const sandbox = await archil.sandbox.get("sb-1");
+      const result = await sandbox.runCode("6 * 7", { language: "node", ...fastPoll });
+      const submit = calls.find((c) => c.method === "POST");
+      assert.deepEqual(submit?.body, {
+        command: "archil-kernel run node",
+        env: { ARCHIL_KERNEL_CODE: Buffer.from("6 * 7", "utf8").toString("base64") },
+      });
+      assert.equal(result.stdout, "42\n");
+      assert.equal(result.exitCode, 0);
+    },
+  );
+});
