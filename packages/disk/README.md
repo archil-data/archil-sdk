@@ -227,6 +227,49 @@ const prodDisks = await prod.disks.list();
 const stagingDisks = await staging.disks.list();
 ```
 
+## Sandboxes
+
+Sandboxes are long-lived microVMs that run commands with Archil disks mounted. Unlike `exec` (one container per command), a sandbox stays up between commands, keeps its filesystem and processes, and can be stopped and later resumed — from a memory snapshot when one is available, so it continues exactly where it paused.
+
+```ts
+import { Archil } from "disk";
+
+const sdk = new Archil();
+
+const sandbox = await sdk.sandbox.create({
+  disks: [{ disk: "dsk-abc123", path: "data" }],
+  ports: [{ port: 8080 }],
+  resources: { vcpus: 2, memoryMiB: 4096 },
+  ttlMs: 8 * 60 * 60 * 1000, // shut down after 8h
+});
+
+const result = await sandbox.run("ls /mnt/archil/data");
+console.log(result.exitCode, result.stdout);
+
+// Stop keeps the sandbox resumable.
+await sandbox.stop();
+
+const sandboxes = await sdk.sandbox.list();
+const resumed = await sdk.sandbox.start({ id: sandboxes[0].id });
+```
+
+`create`, `start`, and `stop` wait for the sandbox to reach the target state by default (pass `wait: false` to just submit). `run` submits the command and polls until it finishes; a non-zero exit code is reported in the result, not thrown. Module-level equivalents (`createSandbox`, `getSandbox`, `listSandboxes`, `startSandbox`) use the `configure`d client.
+
+### Running code in a persistent kernel
+
+`runCode` executes snippets in the sandbox's persistent Python or Node kernel. The kernel keeps interpreter state between calls, so consecutive snippets behave like one REPL session:
+
+```ts
+await sandbox.runCode("import pandas as pd; df = pd.DataFrame({'a': [1, 2]})");
+const out = await sandbox.runCode("df['a'].sum()");
+console.log(out.stdout); // "3\n"
+
+const js = await sandbox.runCode("6 * 7", { language: "node" });
+console.log(js.stdout); // "42\n"
+```
+
+The trailing expression's value is printed REPL-style; an exception puts its traceback on `stderr` with a non-zero `exitCode`. Kernels ship in the default base image only (custom docker-image sandboxes may not have them).
+
 ## Filesystem tools
 
 Support for providing agents with a set of tools for using an Archil disk live in their own `@archildata/*` packages.

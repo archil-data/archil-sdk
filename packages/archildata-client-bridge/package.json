@@ -1,6 +1,6 @@
 {
   "name": "@archildata/client",
-  "version": "0.8.18",
+  "version": "0.8.19",
   "description": "Deprecated — install `disk` (pure-JS API+CLI) and/or `@archildata/native` (low-level protocol client) instead.",
   "type": "module",
   "main": "dist/index.cjs",
@@ -32,7 +32,7 @@
     "build": "tsdown"
   },
   "dependencies": {
-    "disk": "workspace:^"
+    "disk": "workspace:*"
   },
   "optionalDependencies": {
     "@archildata/native": "^0.8.18"

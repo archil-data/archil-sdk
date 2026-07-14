@@ -1,6 +1,6 @@
 {
   "name": "@archildata/sqlite",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "serverless SQLite databases on Archil disks",
   "type": "module",
   "main": "dist/index.cjs",
@@ -25,10 +25,11 @@
     "test": "vitest run"
   },
   "peerDependencies": {
-    "disk": "workspace:^"
+    "disk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.33",
+    "disk": "workspace:*",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

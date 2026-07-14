@@ -1,5 +1,7 @@
 import { Archil, type ArchilOptions, type ExecMount, type ExecOptions } from "./archil.js";
 import type { CreateDiskRequest, ApiTokenResponse, CreateApiTokenRequest, ExecDiskResult } from "./types.js";
+import type { CreateSandboxOptions, ListSandboxesOptions, StartSandboxOptions } from "./sandboxes.js";
+import type { Sandbox } from "./sandbox.js";
 import type { CreateDiskResult, ListDisksOptions } from "./disks.js";
 import type { Disk } from "./disk.js";
 import type { ListTokensOptions } from "./tokens.js";
@@ -44,7 +46,28 @@ export type {
   DeleteObjectsResult,
 } from "./disk.js";
 
-export { ArchilError, ArchilApiError, ArchilS3Error } from "./errors.js";
+export { ArchilError, ArchilApiError, ArchilS3Error, ArchilTimeoutError } from "./errors.js";
+
+export { Sandboxes } from "./sandboxes.js";
+export type {
+  CreateSandboxOptions,
+  ListSandboxesOptions,
+  SandboxMount,
+  StartSandboxOptions,
+} from "./sandboxes.js";
+
+export { Sandbox } from "./sandbox.js";
+export type {
+  SandboxExecResult,
+  SandboxExecStatus,
+  SandboxInfo,
+  SandboxPort,
+  SandboxResources,
+  SandboxRunCodeOptions,
+  SandboxRunOptions,
+  SandboxStatus,
+  SandboxWaitOptions,
+} from "./sandbox.js";
 
 export { VERSION, USER_AGENT } from "./version.js";
 
@@ -134,4 +157,21 @@ export function exec(opts: ExecOptions): Promise<ExecDiskResult> {
  */
 export function workspace(mounts: Record<string, ExecMount>): Workspace {
   return archil().workspace(mounts);
+}
+
+export function createSandbox(opts?: CreateSandboxOptions): Promise<Sandbox> {
+  return archil().sandbox.create(opts);
+}
+
+export function getSandbox(id: string): Promise<Sandbox> {
+  return archil().sandbox.get(id);
+}
+
+export function listSandboxes(opts?: ListSandboxesOptions): Promise<Sandbox[]> {
+  return archil().sandbox.list(opts);
+}
+
+/** Start (or resume) a stopped sandbox by id, using the module-level client. */
+export function startSandbox(opts: StartSandboxOptions): Promise<Sandbox> {
+  return archil().sandbox.start(opts);
 }

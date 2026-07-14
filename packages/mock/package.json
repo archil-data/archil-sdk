@@ -22,7 +22,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "disk": "workspace:^"
+    "disk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.19.33",

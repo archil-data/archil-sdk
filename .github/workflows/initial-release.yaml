@@ -1,0 +1,51 @@
+name: Initial Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: Packages to publish, separated by spaces.
+        required: true
+        type: string
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  publish:
+    name: Publish initial package versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
+          registry-url: https://registry.npmjs.org
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Publish initial versions
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          packages="$(printf "%s" "$PACKAGES" | xargs)"
+          if [ -z "$packages" ]; then
+            echo "No packages requested."
+            exit 1
+          fi
+
+          echo "Publishing packages:"
+          printf "  %s\n" $packages
+
+          for package in $packages; do
+            pnpm --filter "$package" publish --access public --no-git-checks
+          done

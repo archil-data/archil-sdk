@@ -12,9 +12,9 @@
     "eval": "eve eval"
   },
   "dependencies": {
-    "@archildata/eve": "workspace:^",
+    "@archildata/eve": "workspace:*",
     "ai": "^7.0.5",
-    "disk": "workspace:^",
+    "disk": "workspace:*",
     "eve": "^0.20.0"
   },
   "devDependencies": {

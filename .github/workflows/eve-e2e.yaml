@@ -17,7 +17,7 @@ jobs:
       ARCHIL_E2E_DISK_ID: ${{ secrets.ARCHIL_E2E_DISK_ID }}
       ARCHIL_E2E_ROOT_PREFIX: archil-e2e/github/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:

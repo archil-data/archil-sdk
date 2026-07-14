@@ -1,6 +1,6 @@
 {
   "name": "@archildata/ai-sdk",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Archil filesystem adapter for AI SDK",
   "type": "module",
   "main": "dist/index.cjs",
@@ -26,17 +26,17 @@
   },
   "peerDependencies": {
     "ai": "^7.0.0",
-    "disk": "workspace:^"
+    "disk": "workspace:*"
   },
   "dependencies": {
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@ai-sdk/openai-compatible": "^3.0.5",
-    "@archildata/mock": "workspace:^",
+    "@archildata/mock": "workspace:*",
     "@types/node": "^20.19.43",
     "ai": "^7.0.15",
-    "disk": "workspace:^",
+    "disk": "workspace:*",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
