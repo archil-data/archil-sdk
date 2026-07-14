@@ -9,7 +9,7 @@ export { Archil } from "./archil.js";
 export type { ArchilOptions, ExecMount, ExecMountSpec, ExecOptions } from "./archil.js";
 
 export { Disks } from "./disks.js";
-export type { ListDisksOptions, CreateDiskResult } from "./disks.js";
+export type { ListDisksOptions, CreateDiskResult, DiskListPage } from "./disks.js";
 
 export { Tokens } from "./tokens.js";
 export type { ListTokensOptions } from "./tokens.js";
