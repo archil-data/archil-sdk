@@ -1,5 +1,11 @@
 # disk
 
+## 0.8.20
+
+### Patch Changes
+
+- a60afde: update dependencies and add pagination for disks.list()
+
 ## 0.8.19
 
 ### Patch Changes

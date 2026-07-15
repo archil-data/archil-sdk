@@ -1,6 +1,6 @@
 {
   "name": "@archildata/eve",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Archil filesystem adapter for eve",
   "type": "module",
   "main": "dist/index.cjs",

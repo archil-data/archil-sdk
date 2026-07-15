@@ -1,6 +1,6 @@
 {
   "name": "@archildata/just-bash",
-  "version": "0.8.19",
+  "version": "0.8.20",
   "description": "Archil filesystem adapter for just-bash",
   "type": "module",
   "main": "dist/index.cjs",
