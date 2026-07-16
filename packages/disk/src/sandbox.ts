@@ -81,6 +81,15 @@ export interface SandboxRunOptions {
   pollIntervalMs?: number;
 }
 
+export interface SandboxRunCodeOptions {
+  /** Kernel to execute in. Defaults to "python". */
+  language?: "python" | "node";
+  /** See {@link SandboxRunOptions.timeoutMs}. */
+  timeoutMs?: number;
+  /** Base interval between result polls in milliseconds. Defaults to 50. */
+  pollIntervalMs?: number;
+}
+
 const DEFAULT_WAIT_TIMEOUT_MS = 120_000;
 // Polling is the fallback (the CP usually answers with the final state): start fast, back off toward the cap.
 const DEFAULT_POLL_INTERVAL_MS = 50;
@@ -128,6 +137,18 @@ function toExecResult(w: SandboxExecWire): SandboxExecResult {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Buffer in Node, TextEncoder+btoa when bundled for the browser.
+function utf8ToBase64(text: string): string {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(text, "utf8").toString("base64");
+  }
+  let binary = "";
+  for (const byte of new TextEncoder().encode(text)) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
 }
 
 /**
@@ -208,6 +229,24 @@ export class Sandbox {
       await sleep(interval);
       interval = Math.min(interval * 1.5, MAX_POLL_INTERVAL_MS);
     }
+  }
+
+  /**
+   * Run a code snippet in the sandbox's persistent Python or Node kernel and
+   * wait for it to finish. The kernel keeps interpreter state (variables,
+   * imports, definitions) between calls, so consecutive snippets behave like
+   * one REPL session: snippet stdout/stderr land in the result's
+   * stdout/stderr, the trailing expression's value is printed to stdout
+   * REPL-style, and an exception puts its traceback on stderr with a non-zero
+   * exit code (reported in the result, not thrown). Requires a sandbox on the
+   * default base image (custom docker-image sandboxes don't ship the kernels).
+   */
+  async runCode(code: string, opts: SandboxRunCodeOptions = {}): Promise<SandboxExecResult> {
+    return this.run(`archil-kernel run ${opts.language ?? "python"}`, {
+      env: { ARCHIL_KERNEL_CODE: utf8ToBase64(code) },
+      timeoutMs: opts.timeoutMs,
+      pollIntervalMs: opts.pollIntervalMs,
+    });
   }
 
   /**
