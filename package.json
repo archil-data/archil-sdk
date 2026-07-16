@@ -1,11 +1,12 @@
 {
   "name": "root",
   "private": true,
+  "packageManager": "pnpm@11.13.1",
   "scripts": {
-    "typecheck": "pnpm -r --parallel run typecheck",
-    "test": "pnpm -r --parallel run test",
-    "build": "pnpm -r run build",
-    "release": "pnpm build && changeset publish"
+    "typecheck": "npx -y pnpm@11 -r --parallel run typecheck",
+    "test": "npx -y pnpm@11 -r --parallel run test",
+    "build": "npx -y pnpm@11 -r run build",
+    "release": "npx -y pnpm@11 run build && changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.0-next.5"
