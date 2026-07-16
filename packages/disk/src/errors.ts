@@ -61,6 +61,19 @@ export class ArchilS3Error extends ArchilError {
   }
 }
 
+/**
+ * Thrown when a client-side wait exceeds its deadline: waiting for a sandbox
+ * to reach a target state, or polling a sandbox exec past its timeout. The
+ * operation may still complete server-side; re-fetch to observe its state.
+ * `status` is always 408 — no HTTP response is involved.
+ */
+export class ArchilTimeoutError extends ArchilError {
+  constructor(message: string) {
+    super(message, 408);
+    this.name = "ArchilTimeoutError";
+  }
+}
+
 function tagString(obj: Record<string, unknown>, tag: string): string | undefined {
   const value = obj[tag];
   return value === undefined || value === null ? undefined : String(value);
