@@ -123,12 +123,14 @@ class MockDiskImpl implements FileSystem {
   ): Promise<PutObjectResult> {
     const opts: PutObjectOptions = typeof options === "string" ? { contentType: options } : options ?? {};
     const normalized = normalizeKey(key);
+    // Record mode/uid/gid only when set — an own property with value undefined
+    // would break callers' deepEqual assertions on `{ key, contentType }` logs.
     this.calls.putObject.push({
       key: normalized,
       contentType: opts.contentType,
-      mode: opts.mode,
-      uid: opts.uid,
-      gid: opts.gid,
+      ...(opts.mode !== undefined ? { mode: opts.mode } : {}),
+      ...(opts.uid !== undefined ? { uid: opts.uid } : {}),
+      ...(opts.gid !== undefined ? { gid: opts.gid } : {}),
     });
     this.files.set(normalized, toBytes(body));
     return { etag: '"mock"' };
