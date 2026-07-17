@@ -285,7 +285,21 @@ export interface DeleteObjectsResult {
   errors: DeleteObjectsError[];
 }
 
-export interface PutObjectOptions {
+/**
+ * POSIX attributes to set on a newly created object, sent to the S3 gateway as
+ * `x-archil-*` headers. All optional — anything omitted falls back to the
+ * server-side defaults (currently `root:root`, mode `0644`).
+ */
+export interface PosixCreateAttrs {
+  /** POSIX mode bits for the created file, e.g. `0o644`. Sent in octal. */
+  mode?: number;
+  /** Owning user id, e.g. `1000`. */
+  uid?: number;
+  /** Owning group id, e.g. `1000`. */
+  gid?: number;
+}
+
+export interface PutObjectOptions extends PosixCreateAttrs {
   /** MIME type to store the object with. Default "application/octet-stream". */
   contentType?: string;
   /**
@@ -304,6 +318,14 @@ export interface PutObjectOptions {
   concurrency?: number;
 }
 
+export interface AppendObjectOptions extends PosixCreateAttrs {
+  /**
+   * MIME type, applied only when the object is newly created. Default
+   * "application/octet-stream".
+   */
+  contentType?: string;
+}
+
 /**
  * The S3 transport function {@link DiskMultipart} uses, supplied by the owning
  * {@link Disk} so the namespace shares the disk's credential and endpoint.
@@ -317,6 +339,7 @@ type S3RequestFn = (
     contentType?: string;
     query?: Record<string, string | number>;
     retry?: boolean;
+    extraHeaders?: Record<string, string>;
   },
 ) => Promise<{ ok: boolean; status: number; statusText: string; headers: Headers; body: Uint8Array }>;
 
@@ -591,12 +614,16 @@ export class Disk implements FileSystem {
    * limits. Returns the entity tag the server assigned (a multipart upload's tag
    * is S3's `md5(concat(partMd5s))-N` form rather than a plain MD5).
    *
+   * Optional `mode` / `uid` / `gid` set the POSIX attributes of the published
+   * file (e.g. `{ mode: 0o644, uid: 1000, gid: 1000 }` for a non-root agent
+   * sandbox). Defaults are server-side (currently `root:root` mode `0644`).
+   *
    * @param key      Path on the disk (e.g. "reports/2026-01/data.json")
    * @param body     Contents as a string, Uint8Array/Buffer, or ArrayBuffer
    * @param options  Either a content-type string, or {@link PutObjectOptions}
    *                 (`contentType`, `multipartThreshold`, `partSize`,
-   *                 `concurrency`). Content type defaults to
-   *                 "application/octet-stream".
+   *                 `concurrency`, `mode`, `uid`, `gid`). Content type defaults
+   *                 to "application/octet-stream".
    */
   async putObject(
     key: string,
@@ -610,7 +637,11 @@ export class Disk implements FileSystem {
     const bytes = toBytes(body);
 
     if (bytes.length <= threshold) {
-      const resp = await this._s3Request("PUT", key, { body, contentType });
+      const resp = await this._s3Request("PUT", key, {
+        body,
+        contentType,
+        extraHeaders: posixCreateHeaders(opts),
+      });
       if (!resp.ok) {
         throw parseS3Error("PutObject", resp.status, resp.statusText, decodeText(resp.body));
       }
@@ -623,6 +654,7 @@ export class Disk implements FileSystem {
       contentType,
       partSize,
       Math.max(1, opts.concurrency ?? DEFAULT_UPLOAD_CONCURRENCY),
+      opts,
     );
   }
 
@@ -637,12 +669,13 @@ export class Disk implements FileSystem {
     contentType: string,
     partSize: number,
     concurrency: number,
+    attrs: PosixCreateAttrs = {},
   ): Promise<PutObjectResult> {
     // Grow the part size if the body would otherwise need more than the server's
     // 10,000-part cap — otherwise the upload would fail at `complete`.
     const effectivePartSize = effectiveUploadPartSize(bytes.length, partSize);
     const mp = this.multipart;
-    const upload = await mp.create(key, contentType);
+    const upload = await mp.create(key, contentType, attrs);
     try {
       const partCount = Math.ceil(bytes.length / effectivePartSize);
       const parts: UploadPart[] = new Array(partCount);
@@ -681,20 +714,29 @@ export class Disk implements FileSystem {
    * would duplicate the bytes. On a transient failure, re-append yourself only
    * after confirming the object's size.
    *
-   * @param key          Path on the disk (e.g. "logs/app.log")
-   * @param body         Bytes to append (string, Uint8Array/Buffer, or ArrayBuffer)
-   * @param contentType  MIME type, applied only when the object is newly created.
+   * When the object does not yet exist, optional `mode` / `uid` / `gid` set the
+   * POSIX attributes of the newly created file (same headers as
+   * {@link putObject}); they have no effect on an append to an existing object.
+   *
+   * @param key      Path on the disk (e.g. "logs/app.log")
+   * @param body     Bytes to append (string, Uint8Array/Buffer, or ArrayBuffer)
+   * @param options  Either a content-type string, or {@link AppendObjectOptions}
+   *                 (`contentType`, `mode`, `uid`, `gid`). Content type defaults
+   *                 to "application/octet-stream" and applies only when the
+   *                 object is newly created.
    */
   async appendObject(
     key: string,
     body: string | Uint8Array | ArrayBuffer,
-    contentType = "application/octet-stream",
+    options?: string | AppendObjectOptions,
   ): Promise<PutObjectResult> {
+    const opts: AppendObjectOptions = typeof options === "string" ? { contentType: options } : options ?? {};
     const resp = await this._s3Request("PUT", key, {
       body,
-      contentType,
+      contentType: opts.contentType ?? "application/octet-stream",
       query: { append: "true" },
       retry: false,
+      extraHeaders: posixCreateHeaders(opts),
     });
     if (!resp.ok) {
       throw parseS3Error("AppendObject", resp.status, resp.statusText, decodeText(resp.body));
@@ -875,6 +917,9 @@ export class Disk implements FileSystem {
       // for non-idempotent ops (CompleteMultipartUpload), where a retry after a
       // successful-but-unacknowledged completion returns a spurious NoSuchUpload.
       retry?: boolean;
+      // Additional request headers (e.g. the x-archil-* POSIX-attribute
+      // headers), merged over Content-Type and the client defaults.
+      extraHeaders?: Record<string, string>;
     } = {},
   ): Promise<{ ok: boolean; status: number; statusText: string; headers: Headers; body: Uint8Array }> {
     if (!this._s3BaseUrl) {
@@ -906,7 +951,14 @@ export class Disk implements FileSystem {
       // through unchanged (no Node Buffer in the data path). Bodies are fully
       // buffered (never streams), so re-sending one on a retry is safe.
       ...(opts.body !== undefined ? { body: opts.body, bodySerializer: (b: unknown) => b } : {}),
-      ...(opts.contentType ? { headers: { "Content-Type": opts.contentType } } : {}),
+      ...(opts.contentType || opts.extraHeaders
+        ? {
+            headers: {
+              ...(opts.contentType ? { "Content-Type": opts.contentType } : {}),
+              ...opts.extraHeaders,
+            },
+          }
+        : {}),
     };
 
     // GET (object reads, listings) and POST (multipart Initiate/Complete,
@@ -1025,9 +1077,15 @@ export class DiskMultipart {
    *
    * @param key          Path on the disk the finished object will live at.
    * @param contentType  MIME type to store the object with.
+   * @param attrs        Optional POSIX `mode` / `uid` / `gid` for the completed
+   *                     object (see {@link PosixCreateAttrs}).
    */
-  async create(key: string, contentType?: string): Promise<MultipartUpload> {
-    const resp = await this.s3Request("POST", key, { query: { uploads: "" }, contentType });
+  async create(key: string, contentType?: string, attrs: PosixCreateAttrs = {}): Promise<MultipartUpload> {
+    const resp = await this.s3Request("POST", key, {
+      query: { uploads: "" },
+      contentType,
+      extraHeaders: posixCreateHeaders(attrs),
+    });
     if (!resp.ok) {
       throw parseS3Error("CreateMultipartUpload", resp.status, resp.statusText, decodeText(resp.body));
     }
@@ -1166,6 +1224,27 @@ export class DiskMultipart {
     }
     return parseListMultipartUploadsResult(decodeText(resp.body));
   }
+}
+
+/**
+ * Headers the S3 gateway accepts to set POSIX mode/owner on newly created
+ * objects (see fshandler `x-archil-*` PutObject attrs).
+ */
+const ARCHIL_MODE_HEADER = "x-archil-mode";
+const ARCHIL_UID_HEADER = "x-archil-uid";
+const ARCHIL_GID_HEADER = "x-archil-gid";
+
+/**
+ * Build the `x-archil-*` headers for {@link PosixCreateAttrs}. `mode` is sent
+ * in octal (`0o640` → "640"), matching the gateway's parser and the Python SDK.
+ * Returns undefined when no attribute is set, so no headers are added.
+ */
+function posixCreateHeaders(attrs: PosixCreateAttrs): Record<string, string> | undefined {
+  const headers: Record<string, string> = {};
+  if (attrs.mode !== undefined) headers[ARCHIL_MODE_HEADER] = attrs.mode.toString(8);
+  if (attrs.uid !== undefined) headers[ARCHIL_UID_HEADER] = String(attrs.uid);
+  if (attrs.gid !== undefined) headers[ARCHIL_GID_HEADER] = String(attrs.gid);
+  return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
 /** S3's per-request cap on DeleteObjects keys; larger inputs are batched. */
