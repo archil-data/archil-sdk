@@ -1,6 +1,6 @@
 {
   "name": "@archildata/langchain",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Archil filesystem adapter for LangChain",
   "type": "module",
   "main": "dist/index.cjs",

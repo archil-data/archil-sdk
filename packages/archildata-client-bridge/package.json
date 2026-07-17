@@ -1,6 +1,6 @@
 {
   "name": "@archildata/client",
-  "version": "0.8.20",
+  "version": "0.8.21",
   "description": "Deprecated — install `disk` (pure-JS API+CLI) and/or `@archildata/native` (low-level protocol client) instead.",
   "type": "module",
   "main": "dist/index.cjs",

@@ -1,6 +1,6 @@
 {
   "name": "@archildata/sqlite",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "serverless SQLite databases on Archil disks",
   "type": "module",
   "main": "dist/index.cjs",
