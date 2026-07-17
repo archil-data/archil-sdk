@@ -4,6 +4,7 @@ import type {
   GrepResult,
   ListObjectsOptions,
   ListObjectsResult,
+  PutObjectOptions,
   PutObjectResult,
 } from "./disk.js";
 
@@ -30,7 +31,7 @@ export interface FileSystem {
   putObject(
     key: string,
     body: string | Uint8Array | ArrayBuffer,
-    contentType?: string,
+    options?: string | PutObjectOptions,
   ): Promise<PutObjectResult>;
   /** Delete an object (idempotent). */
   deleteObject(key: string): Promise<void>;

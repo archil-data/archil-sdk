@@ -30,6 +30,8 @@ export type {
   ShareUrlOptions,
   ShareUrlResult,
   PutObjectOptions,
+  AppendObjectOptions,
+  PosixCreateAttrs,
   UploadPart,
   MultipartUpload,
   CompletedMultipartUpload,

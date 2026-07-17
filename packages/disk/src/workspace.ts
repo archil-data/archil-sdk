@@ -6,6 +6,7 @@ import type {
   GrepResult,
   ListObjectsOptions,
   ListObjectsResult,
+  PutObjectOptions,
   PutObjectResult,
   S3Object,
 } from "./disk.js";
@@ -179,11 +180,11 @@ export class Workspace implements FileSystem {
   async putObject(
     key: string,
     body: string | Uint8Array | ArrayBuffer,
-    contentType?: string,
+    options?: string | PutObjectOptions,
   ): Promise<PutObjectResult> {
     const { entry, diskKey } = this.route(key);
     if (entry.readOnly) throw new Error(`${key} is on a read-only disk and cannot be written.`);
-    return entry.disk.putObject(diskKey, body, contentType);
+    return entry.disk.putObject(diskKey, body, options);
   }
 
   async deleteObject(key: string): Promise<void> {

@@ -1,5 +1,6 @@
 packages:
   - 'packages/*'
+  - 'examples/*'
 allowBuilds:
   '@mongodb-js/zstd': true
   esbuild: true
@@ -9,6 +10,7 @@ minimumReleaseAgeExclude:
   - ai@7.0.5
   - eve@0.17.1
   - eve@0.20.0
+  - e2b@2.35.0
 
 catalog:
   typescript: ^6.0.3
