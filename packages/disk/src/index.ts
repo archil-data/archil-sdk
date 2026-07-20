@@ -58,6 +58,7 @@ export type {
   MountConfigResponse,
   DiskMetrics,
   ConnectedClient,
+  Delegation,
   AuthorizedUser,
   CreateDiskRequest,
   MountConfig,

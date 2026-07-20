@@ -10,6 +10,7 @@ import type {
   MountResponse,
   DiskMetrics,
   ConnectedClient,
+  Delegation,
   DiskStatus,
   ExecDiskResult,
   ExecTiming as ExecTimingSchema,
@@ -426,6 +427,47 @@ export class Disk implements FileSystem {
 
   async removeTokenUser(identifier: string): Promise<void> {
     await this.removeUser("token", identifier);
+  }
+
+  /**
+   * List all delegations currently held on this disk. A delegation grants a
+   * client exclusive write access to an inode; it has no ID of its own and is
+   * identified by the (clientId, inodeId) pair — pass those to
+   * `revokeDelegation` to release one. Entries with `isOrphaned: true` are
+   * held by clients no longer connected to the disk (disconnected without
+   * checking in). `path` is resolved best-effort by the server and may be
+   * absent.
+   */
+  async listDelegations(): Promise<Delegation[]> {
+    const data = await unwrap(
+      this._client.GET("/api/disks/{id}/delegations", {
+        params: { path: { id: this.id } },
+      }),
+    );
+    return data.delegations;
+  }
+
+  /**
+   * Forcibly revoke a delegation, reclaiming write access from a client that
+   * is unreachable or crashed without checking its delegations in.
+   *
+   * Takes the `(clientId, inodeId)` pair identifying the delegation — pass an
+   * entry from `listDelegations` directly:
+   *
+   * ```ts
+   * for (const d of await disk.listDelegations()) {
+   *   if (d.isOrphaned) await disk.revokeDelegation(d);
+   * }
+   * ```
+   */
+  async revokeDelegation(delegation: Pick<Delegation, "clientId" | "inodeId">): Promise<void> {
+    const { clientId, inodeId } = delegation;
+    await unwrap(
+      this._client.POST("/api/disks/{id}/revoke-delegation", {
+        params: { path: { id: this.id } },
+        body: { clientId, inodeId },
+      }),
+    );
   }
 
   async getAllowedIPs(): Promise<string[]> {

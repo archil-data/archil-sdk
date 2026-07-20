@@ -15,6 +15,8 @@ export type R2Mount = components["schemas"]["R2Mount"];
 export type S3CompatibleMount = components["schemas"]["S3CompatibleMount"];
 export type AzureBlobMount = components["schemas"]["AzureBlobMount"];
 
+export type Delegation = components["schemas"]["DelegationEntry"];
+
 export type DiskUser = components["schemas"]["DiskUser"];
 export type TokenUser = components["schemas"]["TokenUser"];
 export type AwsStsUser = components["schemas"]["AwsStsUser"];

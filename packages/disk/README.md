@@ -271,6 +271,29 @@ const workspace = archil.workspace({
 When `queueMs` is set without `checkoutPaths`, the mount root is acquired
 during mount setup instead.
 
+## Delegations
+
+A delegation grants a client exclusive write access to an inode on a shared
+disk. List the delegations currently held on a disk and forcibly revoke one —
+useful for reclaiming write access from a client that crashed or lost
+connectivity without checking its delegations in:
+
+```ts
+const disk = await archil.disks.get("dsk-0123456789abcdef");
+
+for (const d of await disk.listDelegations()) {
+  // { clientId, inodeId, path?, isPending, isOrphaned }
+  if (d.isOrphaned) {
+    await disk.revokeDelegation(d);
+  }
+}
+```
+
+A delegation has no ID of its own — it is identified by the
+`(clientId, inodeId)` pair. `isOrphaned` entries are held by clients no longer
+connected to the disk. `path` is resolved best-effort by the server and may be
+absent.
+
 A `Workspace` is a full filesystem in its own right — it has the same object API
 a `Disk` does (`getObject` / `putObject` / `deleteObject` / `listObjects` /
 `grep` / `exec`; both implement the `FileSystem` interface), so you can use it
