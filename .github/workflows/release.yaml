@@ -14,6 +14,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      id-token: write # required for npm trusted publishing
     steps:
       - uses: actions/checkout@v7
         with:
@@ -35,8 +36,6 @@ jobs:
         uses: changesets/action@v2.0.0-next.2
         with:
           publish: pnpm release
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Deprecate @archildata/client (deprecated bridge)
         if: steps.changesets.outputs.published == 'true'
