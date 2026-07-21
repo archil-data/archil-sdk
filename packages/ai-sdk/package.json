@@ -1,6 +1,6 @@
 {
   "name": "@archildata/ai-sdk",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Archil filesystem adapter for AI SDK",
   "type": "module",
   "main": "dist/index.cjs",
