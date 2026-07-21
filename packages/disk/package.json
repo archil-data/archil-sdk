@@ -1,6 +1,6 @@
 {
   "name": "disk",
-  "version": "0.8.21",
+  "version": "0.8.22",
   "description": "Pure-JS client and CLI for Archil disks",
   "type": "module",
   "main": "dist/index.cjs",

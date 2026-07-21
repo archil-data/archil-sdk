@@ -1,5 +1,11 @@
 # disk
 
+## 0.8.22
+
+### Patch Changes
+
+- 6250abe: Add `Disk.listDelegations()` and `Disk.revokeDelegation(delegation)` for inspecting and forcibly releasing the delegations held on a disk, plus the exported `Delegation` type. `revokeDelegation` takes the `{ clientId, inodeId }` pair identifying a delegation, so entries from `listDelegations()` can be passed directly.
+
 ## 0.8.21
 
 ### Patch Changes

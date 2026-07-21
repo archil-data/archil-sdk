@@ -1,6 +1,6 @@
 {
   "name": "@archildata/mastra",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Archil filesystem adapter for Mastra",
   "type": "module",
   "main": "dist/index.cjs",
