@@ -2,6 +2,18 @@
   "name": "@archildata/just-bash",
   "version": "0.8.22",
   "description": "Archil filesystem adapter for just-bash",
+  "keywords": [
+    "archil",
+    "just-bash",
+    "filesystem",
+    "bash",
+    "ai-agents"
+  ],
+  "homepage": "https://archil.com",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/archil-data/archil-sdk"
+  },
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -40,13 +52,5 @@
     "tsdown": "catalog:",
     "tsx": "^4.21.0",
     "typescript": "catalog:"
-  },
-  "keywords": [
-    "archil",
-    "just-bash",
-    "filesystem",
-    "bash",
-    "ai-agents"
-  ],
-  "license": "MIT"
+  }
 }
