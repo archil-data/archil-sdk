@@ -2,6 +2,17 @@
   "name": "@archildata/langchain",
   "version": "0.0.4",
   "description": "Archil filesystem adapter for LangChain",
+  "keywords": [
+    "archil",
+    "langchain",
+    "agent",
+    "filesystem"
+  ],
+  "homepage": "https://archil.com",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/archil-data/archil-sdk"
+  },
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -28,6 +39,9 @@
     "@langchain/core": ">=1.0.0",
     "disk": "workspace:*"
   },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
   "devDependencies": {
     "@archildata/mock": "workspace:*",
     "@langchain/core": "^1.2.1",
@@ -39,15 +53,5 @@
   },
   "engines": {
     "node": ">= 22"
-  },
-  "keywords": [
-    "archil",
-    "langchain",
-    "agent",
-    "filesystem"
-  ],
-  "license": "MIT",
-  "dependencies": {
-    "zod": "^4.4.3"
   }
 }

@@ -2,6 +2,16 @@
   "name": "@archildata/sqlite",
   "version": "0.0.4",
   "description": "serverless SQLite databases on Archil disks",
+  "keywords": [
+    "archil",
+    "sqlite",
+    "serverless"
+  ],
+  "homepage": "https://archil.com",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/archil-data/archil-sdk"
+  },
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -36,11 +46,5 @@
   },
   "engines": {
     "node": ">= 22"
-  },
-  "keywords": [
-    "archil",
-    "sqlite",
-    "serverless"
-  ],
-  "license": "MIT"
+  }
 }

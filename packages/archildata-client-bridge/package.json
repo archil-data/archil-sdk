@@ -2,6 +2,11 @@
   "name": "@archildata/client",
   "version": "0.8.22",
   "description": "Deprecated — install `disk` (pure-JS API+CLI) and/or `@archildata/native` (low-level protocol client) instead.",
+  "homepage": "https://archil.com",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/archil-data/archil-sdk"
+  },
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -44,6 +49,5 @@
   },
   "engines": {
     "node": ">= 22"
-  },
-  "license": "MIT"
+  }
 }

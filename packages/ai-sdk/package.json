@@ -2,6 +2,17 @@
   "name": "@archildata/ai-sdk",
   "version": "0.0.4",
   "description": "Archil filesystem adapter for AI SDK",
+  "keywords": [
+    "archil",
+    "ai sdk",
+    "agent",
+    "filesystem"
+  ],
+  "homepage": "https://archil.com",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/archil-data/archil-sdk"
+  },
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -43,12 +54,5 @@
   },
   "engines": {
     "node": ">= 22"
-  },
-  "keywords": [
-    "archil",
-    "ai sdk",
-    "agent",
-    "filesystem"
-  ],
-  "license": "MIT"
+  }
 }

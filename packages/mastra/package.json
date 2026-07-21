@@ -2,6 +2,17 @@
   "name": "@archildata/mastra",
   "version": "0.0.4",
   "description": "Archil filesystem adapter for Mastra",
+  "keywords": [
+    "archil",
+    "mastra",
+    "agent",
+    "filesystem"
+  ],
+  "homepage": "https://archil.com",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/archil-data/archil-sdk"
+  },
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
@@ -42,12 +53,5 @@
   },
   "engines": {
     "node": ">= 22"
-  },
-  "keywords": [
-    "archil",
-    "mastra",
-    "agent",
-    "filesystem"
-  ],
-  "license": "MIT"
+  }
 }
