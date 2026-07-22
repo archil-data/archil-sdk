@@ -74,6 +74,60 @@ await d.removeUser("token", user.identifier!);
 await d.delete();
 ```
 
+### Sandboxes
+
+Sandboxes are persistent VMs with their own lifecycle and command history. Account-level
+operations live on `Archil.sandboxes`; lifecycle and exec operations live on the returned
+`Sandbox` object:
+
+```ts
+const archil = new Archil({
+  apiKey: process.env.ARCHIL_API_KEY,
+  region: "aws-us-east-1",
+});
+
+const sandbox = await archil.sandboxes.create({
+  vcpuCount: 2,
+  memSizeMiB: 4096,
+  env: { NODE_ENV: "development" },
+});
+
+const result = await sandbox.exec("uname -a");
+console.log(result.status, result.stdout);
+
+const stopped = await sandbox.stop();
+const runningAgain = await stopped.start();
+```
+
+Sandbox and exec timestamps are exposed as JavaScript `Date` objects.
+
+`create`, `start`, `stop`, and `exec` wait by default. Lifecycle transitions and command
+completion each have a 30-second SDK-side wait budget, including the control plane's initial
+wait. Customize or disable it explicitly:
+
+```ts
+await stopped.start({ waitForStart: true, waitUpToMs: 60_000 });
+const stopping = await runningAgain.stop({ waitForStop: false });
+const submitted = await runningAgain.exec("long-job", { waitForCompletion: false });
+const current = await submitted.refresh();
+const cancelled = await current.cancel();
+```
+
+If the budget expires, the SDK throws `SandboxWaitTimeoutError`. The lifecycle transition or
+execution continues remotely; the error's `latest` field contains the newest observed
+`Sandbox` or `SandboxExec` snapshot. Both objects have `refresh()` methods for continued
+polling; sandbox execs also have `cancel()`. The equivalent `Sandbox.getExec()` and
+`Sandbox.cancelExec()` methods remain available.
+Command failures, cancellation, and server-side execution timeouts are returned as terminal
+exec statuses and are not thrown as SDK errors.
+
+List all sandboxes, or filter to sandboxes mounting a particular disk:
+
+```ts
+const all = await archil.sandboxes.list();
+const usingDisk = await archil.sandboxes.list({ disk: "dsk-0123456789abcdef" });
+```
+
 API keys live at the account level, so those helpers are top-level:
 
 ```ts

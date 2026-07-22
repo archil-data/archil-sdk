@@ -2,6 +2,8 @@ import { Archil, type ArchilOptions, type ExecMount, type ExecOptions } from "./
 import type { CreateDiskRequest, ApiTokenResponse, CreateApiTokenRequest, ExecDiskResult } from "./types.js";
 import type { CreateDiskResult, ListDisksOptions } from "./disks.js";
 import type { Disk } from "./disk.js";
+import type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
+import type { Sandbox, WaitForStartOptions } from "./sandbox.js";
 import type { ListTokensOptions } from "./tokens.js";
 import { Workspace } from "./workspace.js";
 
@@ -13,6 +15,22 @@ export type { ListDisksOptions, CreateDiskResult, DiskListPage } from "./disks.j
 
 export { Tokens } from "./tokens.js";
 export type { ListTokensOptions } from "./tokens.js";
+
+export { Sandboxes } from "./sandboxes.js";
+export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
+
+export { Sandbox, SandboxExec, SandboxWaitTimeoutError } from "./sandbox.js";
+export type {
+  SandboxEndpoint,
+  SandboxExecOptions,
+  SandboxExecResponse,
+  SandboxExecStatus,
+  SandboxResponse,
+  SandboxStatus,
+  WaitForCompletionOptions,
+  WaitForStartOptions,
+  WaitForStopOptions,
+} from "./sandbox.js";
 
 export { Disk, DiskMultipart, effectiveUploadPartSize } from "./disk.js";
 export type {
@@ -106,6 +124,21 @@ export function listDisks(opts?: ListDisksOptions): Promise<Disk[]> {
 
 export function getDisk(id: string): Promise<Disk> {
   return archil().disks.get(id);
+}
+
+export function createSandbox(
+  req: CreateSandboxRequest = {},
+  opts: WaitForStartOptions = {},
+): Promise<Sandbox> {
+  return archil().sandboxes.create(req, opts);
+}
+
+export function listSandboxes(opts?: ListSandboxesOptions): Promise<Sandbox[]> {
+  return archil().sandboxes.list(opts);
+}
+
+export function getSandbox(id: string): Promise<Sandbox> {
+  return archil().sandboxes.get(id);
 }
 
 export function listApiKeys(opts?: ListTokensOptions): Promise<ApiTokenResponse[]> {
