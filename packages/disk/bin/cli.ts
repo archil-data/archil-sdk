@@ -114,7 +114,7 @@ function printDisk(d: Disk): void {
     ["region", d.region],
     ["created", d.createdAt],
     ["last accessed", d.lastAccessed],
-    ["data size", formatBytes(d.dataSize)],
+    ["active data", formatBytes(d.activeDataBytes)],
     ["monthly usage", d.monthlyUsage],
   ];
   const visible = kv

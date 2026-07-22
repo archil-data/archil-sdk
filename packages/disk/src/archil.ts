@@ -1,6 +1,7 @@
 import { type ApiClient, createApiClient, unwrap } from "./client.js";
 import { Disk } from "./disk.js";
 import { Disks } from "./disks.js";
+import { Sandboxes } from "./sandboxes.js";
 import { Tokens } from "./tokens.js";
 import { Workspace } from "./workspace.js";
 import { deriveS3BaseUrl, resolveBaseUrl } from "./regions.js";
@@ -106,6 +107,8 @@ function diskIdFromMount(m: Disk | string): string {
 export class Archil {
   readonly disks: Disks;
   readonly tokens: Tokens;
+  /** Long-lived microVMs with persistent root disks. */
+  readonly sandbox: Sandboxes;
   /** @internal */
   private readonly _client: ApiClient;
 
@@ -139,6 +142,7 @@ export class Archil {
     this._client = client;
     this.disks = new Disks(client, region, s3BaseUrl);
     this.tokens = new Tokens(client);
+    this.sandbox = new Sandboxes(client);
   }
 
   /**
