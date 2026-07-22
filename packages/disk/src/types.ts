@@ -27,6 +27,14 @@ export type ExecDiskResult = components["schemas"]["ExecDiskResult"];
 export type ExecTiming = components["schemas"]["ExecTiming"];
 export type ExecRequest = components["schemas"]["ExecRequest"];
 
+export type SandboxResponse = components["schemas"]["Sandbox"];
+export type SandboxState = components["schemas"]["SandboxState"];
+export type SandboxExecResponse = components["schemas"]["SandboxExec"];
+export type SandboxExecState = components["schemas"]["SandboxExecState"];
+export type SandboxPortMapping = components["schemas"]["SandboxPortMapping"];
+export type CreateSandboxRequest = components["schemas"]["CreateSandboxRequest"];
+export type SandboxExecRequest = components["schemas"]["SandboxExecRequest"];
+
 export type GrepDiskRequest = components["schemas"]["GrepDiskRequest"];
 export type GrepDiskResult = components["schemas"]["GrepDiskResult"];
 export type GrepMatch = components["schemas"]["GrepMatch"];

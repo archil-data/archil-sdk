@@ -227,6 +227,33 @@ const prodDisks = await prod.disks.list();
 const stagingDisks = await staging.disks.list();
 ```
 
+## Sandboxes
+
+Sandboxes are long-lived microVMs with a dedicated persistent Archil root disk. Unlike `exec` (one container per command), a sandbox stays up between commands and keeps its filesystem across cold starts.
+
+```ts
+import { Archil } from "disk";
+
+const sdk = new Archil();
+
+const sandbox = await sdk.sandbox.create({
+  ports: [{ port: 8080 }],
+  resources: { vcpus: 2, memoryMiB: 4096 },
+  ttlMs: 8 * 60 * 60 * 1000, // shut down after 8h
+});
+
+const result = await sandbox.run("pwd && ls -la");
+console.log(result.exitCode, result.stdout);
+
+// Stop preserves the root disk; start cold-boots from it later.
+await sandbox.stop();
+
+const sandboxes = await sdk.sandbox.list();
+const restarted = await sdk.sandbox.start({ id: sandboxes[0].id });
+```
+
+`create`, `start`, and `stop` wait for the sandbox to reach the target state by default (pass `wait: false` to just submit). `run` waits until the command finishes; a non-zero exit code is reported in the result, not thrown. Module-level equivalents (`createSandbox`, `getSandbox`, `listSandboxes`, `startSandbox`) use the `configure`d client.
+
 ## Filesystem tools
 
 Support for providing agents with a set of tools for using an Archil disk live in their own `@archildata/*` packages.
