@@ -99,9 +99,6 @@ const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 change the limit, or disable waiting with `waitForStart`, `waitForStop`, or
 `waitForCompletion`. A `SandboxWaitTimeoutError` includes the latest resource state.
 
-`Sandbox` lifecycle methods and `SandboxExec.refresh()` and `.cancel()` update their objects
-in place. Timestamps are `Date` objects.
-
 API keys live at the account level, so those helpers are top-level:
 
 ```ts
