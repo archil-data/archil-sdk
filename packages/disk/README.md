@@ -74,6 +74,31 @@ await d.removeUser("token", user.identifier!);
 await d.delete();
 ```
 
+### Sandboxes
+
+Use `Archil.sandboxes` to manage persistent VMs:
+
+```ts
+const client = new archil.Archil({
+  apiKey: process.env.ARCHIL_API_KEY,
+  region: "aws-us-east-1",
+});
+const sandbox = await client.sandboxes.create({ vcpuCount: 2, memSizeMiB: 4096 });
+
+const result = await sandbox.exec("uname -a");
+console.log(result.stdout);
+
+await sandbox.stop();
+await sandbox.start();
+
+const all = await client.sandboxes.list();
+const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
+```
+
+`create`, `start`, `stop`, and `exec` wait up to 30 seconds by default. Set `waitUpToMs` to
+change the limit, or disable waiting with `waitForStart`, `waitForStop`, or
+`waitForCompletion`. A `SandboxWaitTimeoutError` includes the latest resource state.
+
 API keys live at the account level, so those helpers are top-level:
 
 ```ts
