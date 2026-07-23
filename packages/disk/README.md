@@ -95,9 +95,15 @@ const sandbox = await archil.sandboxes.create({
 const result = await sandbox.exec("uname -a");
 console.log(result.status, result.stdout);
 
-const stopped = await sandbox.stop();
-const runningAgain = await stopped.start();
+await sandbox.stop(); // sandbox.status is now "stopped"
+await sandbox.start(); // sandbox.status is now "running" again
 ```
+
+`refresh`, `start`, and `stop` update the `Sandbox` **in place** and return the same object,
+so there's no stale snapshot to track — after `await sandbox.stop()`, `sandbox.status`
+already reflects the new state. (`exec` is the exception: it creates a new command, so it
+returns a fresh `SandboxExec`.) `SandboxExec.refresh()` and `SandboxExec.cancel()` likewise
+mutate the exec in place.
 
 Sandbox and exec timestamps are exposed as JavaScript `Date` objects.
 
@@ -106,18 +112,18 @@ completion each have a 30-second SDK-side wait budget, including the control pla
 wait. Customize or disable it explicitly:
 
 ```ts
-await stopped.start({ waitForStart: true, waitUpToMs: 60_000 });
-const stopping = await runningAgain.stop({ waitForStop: false });
-const submitted = await runningAgain.exec("long-job", { waitForCompletion: false });
-const current = await submitted.refresh();
-const cancelled = await current.cancel();
+await sandbox.start({ waitForStart: true, waitUpToMs: 60_000 });
+await sandbox.stop({ waitForStop: false }); // returns as soon as it's "stopping"
+const job = await sandbox.exec("long-job", { waitForCompletion: false });
+await job.refresh(); // updates job in place
+await job.cancel(); // updates job in place
 ```
 
 If the budget expires, the SDK throws `SandboxWaitTimeoutError`. The lifecycle transition or
-execution continues remotely; the error's `latest` field contains the newest observed
-`Sandbox` or `SandboxExec` snapshot. Both objects have `refresh()` methods for continued
-polling; sandbox execs also have `cancel()`. The equivalent `Sandbox.getExec()` and
-`Sandbox.cancelExec()` methods remain available.
+execution continues remotely; the error's `latest` field is the same `Sandbox` or
+`SandboxExec` you called the operation on, updated to its newest observed state. Both objects
+have `refresh()` methods for continued polling; sandbox execs also have `cancel()`. The
+equivalent `Sandbox.getExec()` and `Sandbox.cancelExec()` methods remain available.
 Command failures, cancellation, and server-side execution timeouts are returned as terminal
 exec statuses and are not thrown as SDK errors.
 

@@ -82,7 +82,8 @@ export function validateWaitUpToMs(waitUpToMs: number): void {
 
 /**
  * The requested SDK-side wait expired. The remote sandbox operation continues;
- * `latest` is the last state observed before the deadline.
+ * `latest` is the same `Sandbox`/`SandboxExec` the operation was called on,
+ * updated in place to the last state observed before the deadline.
  */
 export class SandboxWaitTimeoutError extends ArchilError {
   readonly operation: "start" | "stop" | "exec";
@@ -100,23 +101,29 @@ export class SandboxWaitTimeoutError extends ArchilError {
 }
 
 export class SandboxExec {
-  readonly sandboxId: string;
-  readonly id: string;
-  readonly command: string;
-  readonly status: SandboxExecStatus;
-  readonly exitCode?: number;
-  readonly stdout?: string;
-  readonly stderr?: string;
-  readonly exitReason?: string;
-  readonly executeTimeMs?: number;
-  readonly startedAt: Date;
-  readonly finishedAt?: Date;
+  sandboxId!: string;
+  id!: string;
+  command!: string;
+  status!: SandboxExecStatus;
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  exitReason?: string;
+  executeTimeMs?: number;
+  startedAt!: Date;
+  finishedAt?: Date;
 
   /** @internal */
   private readonly _client: ApiClient;
 
   /** @internal */
   constructor(data: SandboxExecWire, client: ApiClient) {
+    this._client = client;
+    this._apply(data);
+  }
+
+  /** @internal Overwrite this exec's fields in place from a fresh wire snapshot. */
+  private _apply(data: SandboxExecWire): this {
     this.sandboxId = data.sandbox_id;
     this.id = data.exec_id;
     this.command = data.command;
@@ -128,7 +135,7 @@ export class SandboxExec {
     this.executeTimeMs = data.execute_time_ms;
     this.startedAt = new Date(data.started_at);
     this.finishedAt = data.finished_at ? new Date(data.finished_at) : undefined;
-    this._client = client;
+    return this;
   }
 
   toJSON(): SandboxExecResponse {
@@ -147,45 +154,53 @@ export class SandboxExec {
     };
   }
 
+  /** Re-fetch this exec and update it in place, returning the same object. */
   async refresh(): Promise<SandboxExec> {
     const data = await unwrap(
       this._client.GET("/api/sandboxes/{sid}/execs/{eid}", {
         params: { path: { sid: this.sandboxId, eid: this.id } },
       }),
     );
-    return new SandboxExec(data as SandboxExecWire, this._client);
+    return this._apply(data as SandboxExecWire);
   }
 
+  /** Cancel this exec and update it in place, returning the same object. */
   async cancel(): Promise<SandboxExec> {
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/execs/{eid}/cancel", {
         params: { path: { sid: this.sandboxId, eid: this.id } },
       }),
     );
-    return new SandboxExec(data as SandboxExecWire, this._client);
+    return this._apply(data as SandboxExecWire);
   }
 }
 
 export class Sandbox {
-  readonly id: string;
-  readonly status: SandboxStatus;
-  readonly vcpuCount: number;
-  readonly memSizeMiB: number;
-  readonly maxTtlSeconds: number;
-  readonly maxConcurrentExecs: number;
-  readonly endpoints?: SandboxEndpoint[];
-  readonly createdAt: Date;
-  readonly runningAt?: Date;
-  readonly finishedAt?: Date;
-  readonly lastActiveAt: Date;
-  readonly expiresAt?: Date;
-  readonly exitReason?: string;
+  id!: string;
+  status!: SandboxStatus;
+  vcpuCount!: number;
+  memSizeMiB!: number;
+  maxTtlSeconds!: number;
+  maxConcurrentExecs!: number;
+  endpoints?: SandboxEndpoint[];
+  createdAt!: Date;
+  runningAt?: Date;
+  finishedAt?: Date;
+  lastActiveAt!: Date;
+  expiresAt?: Date;
+  exitReason?: string;
 
   /** @internal */
   private readonly _client: ApiClient;
 
   /** @internal */
   constructor(data: SandboxWire, client: ApiClient) {
+    this._client = client;
+    this._apply(data);
+  }
+
+  /** @internal Overwrite this sandbox's fields in place from a fresh wire snapshot. */
+  private _apply(data: SandboxWire): this {
     this.id = data.sandbox_id;
     this.status = data.status;
     this.vcpuCount = data.vcpu_count;
@@ -199,7 +214,7 @@ export class Sandbox {
     this.lastActiveAt = new Date(data.last_active_at);
     this.expiresAt = data.expires_at ? new Date(data.expires_at) : undefined;
     this.exitReason = data.exit_reason;
-    this._client = client;
+    return this;
   }
 
   toJSON(): SandboxResponse {
@@ -220,15 +235,17 @@ export class Sandbox {
     };
   }
 
+  /** Re-fetch this sandbox and update it in place, returning the same object. */
   async refresh(): Promise<Sandbox> {
     const data = await unwrap(
       this._client.GET("/api/sandboxes/{sid}", {
         params: { path: { sid: this.id } },
       }),
     );
-    return new Sandbox(data as SandboxWire, this._client);
+    return this._apply(data as SandboxWire);
   }
 
+  /** Start this sandbox and update it in place, returning the same object. */
   async start(options: WaitForStartOptions = {}): Promise<Sandbox> {
     const waitForStart = options.waitForStart ?? true;
     const waitUpToMs = options.waitUpToMs ?? DEFAULT_SANDBOX_WAIT_UP_TO_MS;
@@ -240,12 +257,11 @@ export class Sandbox {
         params: { path: { sid: this.id }, query: { wait: waitForStart } },
       }),
     );
-    const sandbox = new Sandbox(data as SandboxWire, this._client);
-    return waitForStart
-      ? waitForSandboxStart(sandbox, this._client, deadline, waitUpToMs)
-      : sandbox;
+    this._apply(data as SandboxWire);
+    return waitForStart ? waitForSandboxStart(this, deadline, waitUpToMs) : this;
   }
 
+  /** Stop this sandbox and update it in place, returning the same object. */
   async stop(options: WaitForStopOptions = {}): Promise<Sandbox> {
     const waitForStop = options.waitForStop ?? true;
     const waitUpToMs = options.waitUpToMs ?? DEFAULT_SANDBOX_WAIT_UP_TO_MS;
@@ -257,14 +273,14 @@ export class Sandbox {
         params: { path: { sid: this.id } },
       }),
     );
-    let latest = new Sandbox(data as SandboxWire, this._client);
-    if (!waitForStop) return latest;
+    this._apply(data as SandboxWire);
+    if (!waitForStop) return this;
 
     for (;;) {
-      if (["stopped", "exited", "failed"].includes(latest.status)) return latest;
-      if (latest.status !== "stopping") {
+      if (["stopped", "exited", "failed"].includes(this.status)) return this;
+      if (this.status !== "stopping") {
         throw new ArchilError(
-          `Sandbox entered ${latest.status} before it stopped`,
+          `Sandbox entered ${this.status} before it stopped`,
           409,
           "SANDBOX_STOP_FAILED",
         );
@@ -272,10 +288,10 @@ export class Sandbox {
 
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        throw new SandboxWaitTimeoutError("stop", waitUpToMs, latest);
+        throw new SandboxWaitTimeoutError("stop", waitUpToMs, this);
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
-      latest = await latest.refresh();
+      await this.refresh();
     }
   }
 
@@ -299,17 +315,17 @@ export class Sandbox {
         },
       }),
     );
-    let latest = new SandboxExec(data as SandboxExecWire, this._client);
-    if (!waitForCompletion || latest.status !== "running") return latest;
+    const exec = new SandboxExec(data as SandboxExecWire, this._client);
+    if (!waitForCompletion || exec.status !== "running") return exec;
 
     for (;;) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        throw new SandboxWaitTimeoutError("exec", waitUpToMs, latest);
+        throw new SandboxWaitTimeoutError("exec", waitUpToMs, exec);
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
-      latest = await latest.refresh();
-      if (latest.status !== "running") return latest;
+      await exec.refresh();
+      if (exec.status !== "running") return exec;
     }
   }
 
@@ -343,20 +359,18 @@ export class Sandbox {
   }
 }
 
-/** @internal */
+/** @internal Poll `sandbox` in place until it is running (or the deadline passes). */
 export async function waitForSandboxStart(
-  initial: Sandbox,
-  client: ApiClient,
+  sandbox: Sandbox,
   deadline: number,
   timeoutMs: number,
 ): Promise<Sandbox> {
-  let latest = initial;
   for (;;) {
-    if (latest.status === "running") return latest;
-    if (latest.status !== "pending") {
-      const detail = latest.exitReason ? `: ${latest.exitReason}` : "";
+    if (sandbox.status === "running") return sandbox;
+    if (sandbox.status !== "pending") {
+      const detail = sandbox.exitReason ? `: ${sandbox.exitReason}` : "";
       throw new ArchilError(
-        `Sandbox entered ${latest.status} before it started${detail}`,
+        `Sandbox entered ${sandbox.status} before it started${detail}`,
         409,
         "SANDBOX_START_FAILED",
       );
@@ -364,14 +378,9 @@ export async function waitForSandboxStart(
 
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
-      throw new SandboxWaitTimeoutError("start", timeoutMs, latest);
+      throw new SandboxWaitTimeoutError("start", timeoutMs, sandbox);
     }
     await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
-    const data = await unwrap(
-      client.GET("/api/sandboxes/{sid}", {
-        params: { path: { sid: latest.id } },
-      }),
-    );
-    latest = new Sandbox(data as SandboxWire, client);
+    await sandbox.refresh();
   }
 }

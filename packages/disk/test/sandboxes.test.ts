@@ -209,7 +209,8 @@ test("stop polls stopping sandboxes until they are stopped", async () => {
   const resultPromise = sandbox.stop();
   await vi.advanceTimersByTimeAsync(500);
   const result = await resultPromise;
-  assert.equal(result.status, "stopped");
+  assert.equal(result, sandbox); // mutates and returns the same object
+  assert.equal(sandbox.status, "stopped");
   assert.equal(gets, 1);
 });
 
@@ -298,12 +299,12 @@ test("sandbox exec objects refresh and cancel themselves", async () => {
   const execution = new SandboxExec(execWire() as any, client);
 
   const refreshed = await execution.refresh();
-  const cancelled = await refreshed.cancel();
+  assert.equal(refreshed, execution); // mutates and returns the same object
+  assert.equal(execution.status, "completed");
 
-  assert.ok(refreshed instanceof SandboxExec);
-  assert.equal(refreshed.status, "completed");
-  assert.ok(cancelled instanceof SandboxExec);
-  assert.equal(cancelled.status, "cancelled");
+  const cancelled = await execution.cancel();
+  assert.equal(cancelled, execution); // mutates and returns the same object
+  assert.equal(execution.status, "cancelled");
   assert.deepEqual(calls, [
     {
       method: "GET",

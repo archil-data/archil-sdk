@@ -84,7 +84,7 @@ export class Sandboxes {
     );
     const sandbox = new Sandbox(data as SandboxWire, this._client);
     return waitForStart
-      ? waitForSandboxStart(sandbox, this._client, deadline, waitUpToMs)
+      ? waitForSandboxStart(sandbox, deadline, waitUpToMs)
       : sandbox;
   }
 }
