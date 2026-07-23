@@ -266,7 +266,7 @@ export class Sandbox {
 
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/start", {
-        params: { path: { sid: this.id }, query: { wait: waitForStart } },
+        params: { path: { sid: this.id }, query: { wait: false } },
       }),
     );
     this._apply(data as SandboxWire);
@@ -317,7 +317,7 @@ export class Sandbox {
       this._client.POST("/api/sandboxes/{sid}/execs", {
         params: {
           path: { sid: this.id },
-          query: { wait: waitForCompletion },
+          query: { wait: false },
         },
         body: {
           command,

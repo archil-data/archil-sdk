@@ -78,7 +78,7 @@ export class Sandboxes {
     };
     const data = await unwrap(
       this._client.POST("/api/sandboxes", {
-        params: { query: { wait: waitForStart } },
+        params: { query: { wait: false } },
         body: body as components["schemas"]["CreateSandboxRequest"],
       }),
     );

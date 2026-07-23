@@ -149,8 +149,12 @@ test("sandbox snapshots expose API timestamps as Date objects", () => {
 test("create polls pending sandboxes until they are running", async () => {
   vi.useFakeTimers();
   let gets = 0;
+  let postOptions: unknown;
   const client = {
-    POST: async () => ok(sandboxWire()),
+    POST: async (_path: string, options: unknown) => {
+      postOptions = options;
+      return ok(sandboxWire());
+    },
     GET: async () => {
       gets++;
       return ok(sandboxWire("running"));
@@ -162,6 +166,7 @@ test("create polls pending sandboxes until they are running", async () => {
   const result = await resultPromise;
   assert.equal(result.status, "running");
   assert.equal(gets, 1);
+  assert.deepEqual((postOptions as any).params.query, { wait: false });
 });
 
 test("failed create carries the created sandbox", async () => {
@@ -357,8 +362,12 @@ test("sandbox exec objects refresh and cancel themselves", async () => {
 test("exec polls to a terminal result", async () => {
   vi.useFakeTimers();
   let gets = 0;
+  let postOptions: any;
   const client = {
-    POST: async () => ok(execWire()),
+    POST: async (_path: string, options: unknown) => {
+      postOptions = options;
+      return ok(execWire());
+    },
     GET: async () => {
       gets++;
       return ok(execWire("completed"));
@@ -372,6 +381,7 @@ test("exec polls to a terminal result", async () => {
   assert.equal(result.status, "completed");
   assert.equal(result.stdout, "hello\n");
   assert.equal(gets, 1);
+  assert.deepEqual(postOptions.params.query, { wait: false });
 });
 
 test("exec timeout carries the latest running exec", async () => {
