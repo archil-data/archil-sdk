@@ -76,63 +76,31 @@ await d.delete();
 
 ### Sandboxes
 
-Sandboxes are persistent VMs with their own lifecycle and command history. Account-level
-operations live on `Archil.sandboxes`; lifecycle and exec operations live on the returned
-`Sandbox` object:
+Use `Archil.sandboxes` to manage persistent VMs:
 
 ```ts
-const archil = new Archil({
+const client = new archil.Archil({
   apiKey: process.env.ARCHIL_API_KEY,
   region: "aws-us-east-1",
 });
-
-const sandbox = await archil.sandboxes.create({
-  vcpuCount: 2,
-  memSizeMiB: 4096,
-  env: { NODE_ENV: "development" },
-});
+const sandbox = await client.sandboxes.create({ vcpuCount: 2, memSizeMiB: 4096 });
 
 const result = await sandbox.exec("uname -a");
-console.log(result.status, result.stdout);
+console.log(result.stdout);
 
-await sandbox.stop(); // sandbox.status is now "stopped"
-await sandbox.start(); // sandbox.status is now "running" again
+await sandbox.stop();
+await sandbox.start();
+
+const all = await client.sandboxes.list();
+const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
 
-`refresh`, `start`, and `stop` update the `Sandbox` **in place** and return the same object,
-so there's no stale snapshot to track — after `await sandbox.stop()`, `sandbox.status`
-already reflects the new state. (`exec` is the exception: it creates a new command, so it
-returns a fresh `SandboxExec`.) `SandboxExec.refresh()` and `SandboxExec.cancel()` likewise
-mutate the exec in place.
+`create`, `start`, `stop`, and `exec` wait up to 30 seconds by default. Set `waitUpToMs` to
+change the limit, or disable waiting with `waitForStart`, `waitForStop`, or
+`waitForCompletion`. A `SandboxWaitTimeoutError` includes the latest resource state.
 
-Sandbox and exec timestamps are exposed as JavaScript `Date` objects.
-
-`create`, `start`, `stop`, and `exec` wait by default. Lifecycle transitions and command
-completion each have a 30-second SDK-side wait budget, including the control plane's initial
-wait. Customize or disable it explicitly:
-
-```ts
-await sandbox.start({ waitForStart: true, waitUpToMs: 60_000 });
-await sandbox.stop({ waitForStop: false }); // returns as soon as it's "stopping"
-const job = await sandbox.exec("long-job", { waitForCompletion: false });
-await job.refresh(); // updates job in place
-await job.cancel(); // updates job in place
-```
-
-If the budget expires, the SDK throws `SandboxWaitTimeoutError`. The lifecycle transition or
-execution continues remotely; the error's `latest` field is the same `Sandbox` or
-`SandboxExec` you called the operation on, updated to its newest observed state. Both objects
-have `refresh()` methods for continued polling; sandbox execs also have `cancel()`. The
-equivalent `Sandbox.getExec()` and `Sandbox.cancelExec()` methods remain available.
-Command failures, cancellation, and server-side execution timeouts are returned as terminal
-exec statuses and are not thrown as SDK errors.
-
-List all sandboxes, or filter to sandboxes mounting a particular disk:
-
-```ts
-const all = await archil.sandboxes.list();
-const usingDisk = await archil.sandboxes.list({ disk: "dsk-0123456789abcdef" });
-```
+`Sandbox` lifecycle methods and `SandboxExec.refresh()` and `.cancel()` update their objects
+in place. Timestamps are `Date` objects.
 
 API keys live at the account level, so those helpers are top-level:
 

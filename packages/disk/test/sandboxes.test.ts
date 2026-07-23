@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import type { ApiClient } from "../src/client.js";
-import { Sandbox, SandboxExec, SandboxWaitTimeoutError } from "../src/sandbox.js";
+import {
+  Sandbox,
+  SandboxExec,
+  SandboxStartError,
+  SandboxWaitTimeoutError,
+} from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
 
 const now = "2026-07-22T12:00:00Z";
@@ -157,6 +162,23 @@ test("create polls pending sandboxes until they are running", async () => {
   const result = await resultPromise;
   assert.equal(result.status, "running");
   assert.equal(gets, 1);
+});
+
+test("failed create carries the created sandbox", async () => {
+  const client = {
+    POST: async () => ok({ ...sandboxWire("failed"), exit_reason: "boot failed" }),
+  } as unknown as ApiClient;
+
+  await assert.rejects(
+    new Sandboxes(client).create(),
+    (error: unknown) => {
+      assert.ok(error instanceof SandboxStartError);
+      assert.equal(error.latest.id, "0198-sandbox");
+      assert.equal(error.latest.status, "failed");
+      assert.equal(error.latest.exitReason, "boot failed");
+      return true;
+    },
+  );
 });
 
 test("start throws a timeout carrying the latest sandbox snapshot", async () => {

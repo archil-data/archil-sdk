@@ -19,7 +19,7 @@ export type { ListTokensOptions } from "./tokens.js";
 export { Sandboxes } from "./sandboxes.js";
 export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
 
-export { Sandbox, SandboxExec, SandboxWaitTimeoutError } from "./sandbox.js";
+export { Sandbox, SandboxExec, SandboxStartError, SandboxWaitTimeoutError } from "./sandbox.js";
 export type {
   SandboxEndpoint,
   SandboxExecOptions,

@@ -3,12 +3,8 @@ import type { ApiClient } from "./client.js";
 import { unwrap } from "./client.js";
 import { ArchilError } from "./errors.js";
 
-type GeneratedSandbox = components["schemas"]["Sandbox"];
-
 /** @internal */
-export type SandboxWire = Omit<GeneratedSandbox, "port_mappings"> & {
-  endpoints?: Array<{ port: number; hostname: string }>;
-};
+export type SandboxWire = components["schemas"]["Sandbox"];
 
 /** @internal */
 export type SandboxExecWire = components["schemas"]["SandboxExec"];
@@ -97,6 +93,22 @@ export class SandboxWaitTimeoutError extends ArchilError {
     this.operation = operation;
     this.timeoutMs = timeoutMs;
     this.latest = latest;
+  }
+}
+
+/** The sandbox entered an inactive state before startup completed. */
+export class SandboxStartError extends ArchilError {
+  readonly latest: Sandbox;
+
+  constructor(sandbox: Sandbox) {
+    const detail = sandbox.exitReason ? `: ${sandbox.exitReason}` : "";
+    super(
+      `Sandbox entered ${sandbox.status} before it started${detail}`,
+      409,
+      "SANDBOX_START_FAILED",
+    );
+    this.name = "SandboxStartError";
+    this.latest = sandbox;
   }
 }
 
@@ -235,8 +247,8 @@ export class Sandbox {
     };
   }
 
-  /** Re-fetch this sandbox and update it in place, returning the same object. */
-  async refresh(): Promise<Sandbox> {
+  /** Re-fetch this sandbox. */
+  async refresh() {
     const data = await unwrap(
       this._client.GET("/api/sandboxes/{sid}", {
         params: { path: { sid: this.id } },
@@ -245,8 +257,8 @@ export class Sandbox {
     return this._apply(data as SandboxWire);
   }
 
-  /** Start this sandbox and update it in place, returning the same object. */
-  async start(options: WaitForStartOptions = {}): Promise<Sandbox> {
+  /** Start this sandbox. */
+  async start(options: WaitForStartOptions = {}) {
     const waitForStart = options.waitForStart ?? true;
     const waitUpToMs = options.waitUpToMs ?? DEFAULT_SANDBOX_WAIT_UP_TO_MS;
     if (waitForStart) validateWaitUpToMs(waitUpToMs);
@@ -261,8 +273,8 @@ export class Sandbox {
     return waitForStart ? waitForSandboxStart(this, deadline, waitUpToMs) : this;
   }
 
-  /** Stop this sandbox and update it in place, returning the same object. */
-  async stop(options: WaitForStopOptions = {}): Promise<Sandbox> {
+  /** Stop this sandbox. */
+  async stop(options: WaitForStopOptions = {}) {
     const waitForStop = options.waitForStop ?? true;
     const waitUpToMs = options.waitUpToMs ?? DEFAULT_SANDBOX_WAIT_UP_TO_MS;
     if (waitForStop) validateWaitUpToMs(waitUpToMs);
@@ -368,12 +380,7 @@ export async function waitForSandboxStart(
   for (;;) {
     if (sandbox.status === "running") return sandbox;
     if (sandbox.status !== "pending") {
-      const detail = sandbox.exitReason ? `: ${sandbox.exitReason}` : "";
-      throw new ArchilError(
-        `Sandbox entered ${sandbox.status} before it started${detail}`,
-        409,
-        "SANDBOX_START_FAILED",
-      );
+      throw new SandboxStartError(sandbox);
     }
 
     const remaining = deadline - Date.now();

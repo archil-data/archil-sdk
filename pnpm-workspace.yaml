@@ -6,6 +6,7 @@ allowBuilds:
   node-liblzma: true
 minimumReleaseAgeExclude:
   - '@archildata/api-types@0.0.5'
+  - '@archildata/api-types@0.0.7'
   - ai@7.0.5
   - eve@0.17.1
   - eve@0.20.0
