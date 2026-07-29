@@ -3,7 +3,7 @@ import type { CreateDiskRequest, ApiTokenResponse, CreateApiTokenRequest, ExecDi
 import type { CreateDiskResult, ListDisksOptions } from "./disks.js";
 import type { Disk } from "./disk.js";
 import type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
-import type { Sandbox, WaitForStartOptions } from "./sandbox.js";
+import type { Sandbox, SandboxWaitOptions } from "./sandbox.js";
 import type { ListTokensOptions } from "./tokens.js";
 import { Workspace } from "./workspace.js";
 
@@ -27,9 +27,7 @@ export type {
   SandboxExecStatus,
   SandboxResponse,
   SandboxStatus,
-  WaitForCompletionOptions,
-  WaitForStartOptions,
-  WaitForStopOptions,
+  SandboxWaitOptions,
 } from "./sandbox.js";
 
 export { Disk, DiskMultipart, effectiveUploadPartSize } from "./disk.js";
@@ -128,7 +126,7 @@ export function getDisk(id: string): Promise<Disk> {
 
 export function createSandbox(
   req: CreateSandboxRequest = {},
-  opts: WaitForStartOptions = {},
+  opts: SandboxWaitOptions = {},
 ): Promise<Sandbox> {
   return archil().sandboxes.create(req, opts);
 }

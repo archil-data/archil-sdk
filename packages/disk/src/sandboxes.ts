@@ -3,11 +3,11 @@ import type { ApiClient } from "./client.js";
 import { unwrap } from "./client.js";
 import type { Disk } from "./disk.js";
 import {
-  DEFAULT_SANDBOX_WAIT_UP_TO_MS,
+  DEFAULT_SANDBOX_TIMEOUT_MS,
   Sandbox,
   type SandboxWire,
-  type WaitForStartOptions,
-  validateWaitUpToMs,
+  type SandboxWaitOptions,
+  validateTimeoutMs,
   waitForSandboxStart,
 } from "./sandbox.js";
 
@@ -69,12 +69,11 @@ export class Sandboxes {
 
   async create(
     request: CreateSandboxRequest = {},
-    options: WaitForStartOptions = {},
+    options: SandboxWaitOptions = {},
   ): Promise<Sandbox> {
-    const waitForStart = options.waitForStart ?? true;
-    const waitUpToMs = options.waitUpToMs ?? DEFAULT_SANDBOX_WAIT_UP_TO_MS;
-    if (waitForStart) validateWaitUpToMs(waitUpToMs);
-    const deadline = Date.now() + waitUpToMs;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_SANDBOX_TIMEOUT_MS;
+    validateTimeoutMs(timeoutMs);
+    const deadline = Date.now() + timeoutMs;
 
     const body = {
       vcpu_count: request.vcpuCount,
@@ -92,8 +91,6 @@ export class Sandboxes {
       }),
     );
     const sandbox = new Sandbox(data as SandboxWire, this._client);
-    return waitForStart
-      ? waitForSandboxStart(sandbox, deadline, waitUpToMs)
-      : sandbox;
+    return waitForSandboxStart(sandbox, deadline, timeoutMs);
   }
 }

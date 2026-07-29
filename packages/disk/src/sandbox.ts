@@ -47,32 +47,24 @@ export interface SandboxExecResponse {
   finishedAt?: Date;
 }
 
-export type WaitForStartOptions =
-  | { waitForStart?: true; waitUpToMs?: number }
-  | { waitForStart: false; waitUpToMs?: never };
-
-export type WaitForStopOptions =
-  | { waitForStop?: true; waitUpToMs?: number }
-  | { waitForStop: false; waitUpToMs?: never };
-
-export type WaitForCompletionOptions =
-  | { waitForCompletion?: true; waitUpToMs?: number }
-  | { waitForCompletion: false; waitUpToMs?: never };
+export interface SandboxWaitOptions {
+  timeoutMs?: number;
+}
 
 export type SandboxExecOptions = {
   commandTty?: boolean;
   env?: Record<string, string>;
   timeoutSeconds?: number;
-} & WaitForCompletionOptions;
+} & SandboxWaitOptions;
 
 /** @internal */
-export const DEFAULT_SANDBOX_WAIT_UP_TO_MS = 30_000;
+export const DEFAULT_SANDBOX_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
 
 /** @internal */
-export function validateWaitUpToMs(waitUpToMs: number): void {
-  if (!Number.isFinite(waitUpToMs) || waitUpToMs < 0) {
-    throw new RangeError("waitUpToMs must be a finite, non-negative number");
+export function validateTimeoutMs(timeoutMs: number): void {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new RangeError("timeoutMs must be a finite, non-negative number");
   }
 }
 
@@ -82,11 +74,15 @@ export function validateWaitUpToMs(waitUpToMs: number): void {
  * updated in place to the last state observed before the deadline.
  */
 export class SandboxWaitTimeoutError extends ArchilError {
-  readonly operation: "start" | "stop" | "exec";
+  readonly operation: "start" | "stop" | "pause" | "resume" | "exec";
   readonly timeoutMs: number;
   readonly latest: Sandbox | SandboxExec;
 
-  constructor(operation: "start" | "stop" | "exec", timeoutMs: number, latest: Sandbox | SandboxExec) {
+  constructor(
+    operation: "start" | "stop" | "pause" | "resume" | "exec",
+    timeoutMs: number,
+    latest: Sandbox | SandboxExec,
+  ) {
     const subject = operation === "exec" ? "sandbox exec to complete" : `sandbox to ${operation}`;
     super(`Timed out after ${timeoutMs}ms waiting for ${subject}`, 408, "SANDBOX_WAIT_TIMEOUT");
     this.name = "SandboxWaitTimeoutError";
@@ -258,11 +254,10 @@ export class Sandbox {
   }
 
   /** Start this sandbox. */
-  async start(options: WaitForStartOptions = {}) {
-    const waitForStart = options.waitForStart ?? true;
-    const waitUpToMs = options.waitUpToMs ?? DEFAULT_SANDBOX_WAIT_UP_TO_MS;
-    if (waitForStart) validateWaitUpToMs(waitUpToMs);
-    const deadline = Date.now() + waitUpToMs;
+  async start(options: SandboxWaitOptions = {}) {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_SANDBOX_TIMEOUT_MS;
+    validateTimeoutMs(timeoutMs);
+    const deadline = Date.now() + timeoutMs;
 
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/start", {
@@ -270,15 +265,14 @@ export class Sandbox {
       }),
     );
     this._apply(data as SandboxWire);
-    return waitForStart ? waitForSandboxStart(this, deadline, waitUpToMs) : this;
+    return waitForSandboxStart(this, deadline, timeoutMs);
   }
 
   /** Stop this sandbox. */
-  async stop(options: WaitForStopOptions = {}) {
-    const waitForStop = options.waitForStop ?? true;
-    const waitUpToMs = options.waitUpToMs ?? DEFAULT_SANDBOX_WAIT_UP_TO_MS;
-    if (waitForStop) validateWaitUpToMs(waitUpToMs);
-    const deadline = Date.now() + waitUpToMs;
+  async stop(options: SandboxWaitOptions = {}) {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_SANDBOX_TIMEOUT_MS;
+    validateTimeoutMs(timeoutMs);
+    const deadline = Date.now() + timeoutMs;
 
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/stop", {
@@ -286,7 +280,6 @@ export class Sandbox {
       }),
     );
     this._apply(data as SandboxWire);
-    if (!waitForStop) return this;
 
     for (;;) {
       if (["stopped", "exited", "failed"].includes(this.status)) return this;
@@ -300,7 +293,71 @@ export class Sandbox {
 
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        throw new SandboxWaitTimeoutError("stop", waitUpToMs, this);
+        throw new SandboxWaitTimeoutError("stop", timeoutMs, this);
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
+      await this.refresh();
+    }
+  }
+
+  /** Pause this sandbox, preserving its CPU and memory state. */
+  async pause(options: SandboxWaitOptions = {}) {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_SANDBOX_TIMEOUT_MS;
+    validateTimeoutMs(timeoutMs);
+    const deadline = Date.now() + timeoutMs;
+
+    const data = await unwrap(
+      this._client.POST("/api/sandboxes/{sid}/pause", {
+        params: { path: { sid: this.id } },
+      }),
+    );
+    this._apply(data as SandboxWire);
+
+    for (;;) {
+      if (["paused", "stopped", "exited", "failed"].includes(this.status)) return this;
+      if (this.status !== "pausing") {
+        throw new ArchilError(
+          `Sandbox entered ${this.status} before it paused`,
+          409,
+          "SANDBOX_PAUSE_FAILED",
+        );
+      }
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new SandboxWaitTimeoutError("pause", timeoutMs, this);
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
+      await this.refresh();
+    }
+  }
+
+  /** Resume this sandbox from its preserved CPU and memory state. */
+  async resume(options: SandboxWaitOptions = {}) {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_SANDBOX_TIMEOUT_MS;
+    validateTimeoutMs(timeoutMs);
+    const deadline = Date.now() + timeoutMs;
+
+    const data = await unwrap(
+      this._client.POST("/api/sandboxes/{sid}/resume", {
+        params: { path: { sid: this.id }, query: { wait: false } },
+      }),
+    );
+    this._apply(data as SandboxWire);
+
+    for (;;) {
+      if (this.status === "running") return this;
+      if (this.status !== "pending") {
+        throw new ArchilError(
+          `Sandbox entered ${this.status} before it resumed`,
+          409,
+          "SANDBOX_RESUME_FAILED",
+        );
+      }
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new SandboxWaitTimeoutError("resume", timeoutMs, this);
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
       await this.refresh();
@@ -308,10 +365,9 @@ export class Sandbox {
   }
 
   async exec(command: string, options: SandboxExecOptions = {}): Promise<SandboxExec> {
-    const waitForCompletion = options.waitForCompletion ?? true;
-    const waitUpToMs = options.waitUpToMs ?? DEFAULT_SANDBOX_WAIT_UP_TO_MS;
-    if (waitForCompletion) validateWaitUpToMs(waitUpToMs);
-    const deadline = Date.now() + waitUpToMs;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_SANDBOX_TIMEOUT_MS;
+    validateTimeoutMs(timeoutMs);
+    const deadline = Date.now() + timeoutMs;
 
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/execs", {
@@ -328,12 +384,12 @@ export class Sandbox {
       }),
     );
     const exec = new SandboxExec(data as SandboxExecWire, this._client);
-    if (!waitForCompletion || exec.status !== "running") return exec;
+    if (exec.status !== "running") return exec;
 
     for (;;) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        throw new SandboxWaitTimeoutError("exec", waitUpToMs, exec);
+        throw new SandboxWaitTimeoutError("exec", timeoutMs, exec);
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)));
       await exec.refresh();

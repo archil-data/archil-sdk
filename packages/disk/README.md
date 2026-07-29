@@ -90,14 +90,16 @@ console.log(result.stdout);
 
 await sandbox.stop();
 await sandbox.start();
+await sandbox.pause();
+await sandbox.resume();
 
 const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
 
-`create`, `start`, `stop`, and `exec` wait up to 30 seconds by default. Set `waitUpToMs` to
-change the limit, or disable waiting with `waitForStart`, `waitForStop`, or
-`waitForCompletion`. A `SandboxWaitTimeoutError` includes the latest resource state.
+`create`, `start`, `stop`, `pause`, `resume`, and `exec` wait up to 30 seconds by default.
+Set `timeoutMs` to change the limit. A `SandboxWaitTimeoutError` includes the latest
+resource state.
 
 API keys live at the account level, so those helpers are top-level:
 

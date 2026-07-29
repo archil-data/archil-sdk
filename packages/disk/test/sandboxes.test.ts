@@ -59,7 +59,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     },
     POST: async (path: string, options: unknown) => {
       calls.push({ method: "POST", path, options });
-      return ok(sandboxWire());
+      return ok(sandboxWire("running"));
     },
   } as unknown as ApiClient;
   const sandboxes = new Sandboxes(client);
@@ -83,18 +83,15 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     exitReason: undefined,
   });
 
-  const created = await sandboxes.create(
-    {
-      vcpuCount: 4,
-      memSizeMiB: 8192,
-      baseImage: "ubuntu:26.04",
-      env: { NODE_ENV: "test" },
-      maxTtlSeconds: 600,
-      maxConcurrentExecs: 16,
-    },
-    { waitForStart: false },
-  );
-  assert.equal(created.status, "pending");
+  const created = await sandboxes.create({
+    vcpuCount: 4,
+    memSizeMiB: 8192,
+    baseImage: "ubuntu:26.04",
+    env: { NODE_ENV: "test" },
+    maxTtlSeconds: 600,
+    maxConcurrentExecs: 16,
+  });
+  assert.equal(created.status, "running");
   assert.deepEqual(calls, [
     {
       method: "GET",
@@ -193,7 +190,7 @@ test("start throws a timeout carrying the latest sandbox snapshot", async () => 
   const sandbox = new Sandbox(sandboxWire() as any, client);
 
   await assert.rejects(
-    sandbox.start({ waitUpToMs: 0 }),
+    sandbox.start({ timeoutMs: 0 }),
     (error: unknown) => {
       assert.ok(error instanceof SandboxWaitTimeoutError);
       assert.equal(error.operation, "start");
@@ -241,22 +238,6 @@ test("stop polls stopping sandboxes until they are stopped", async () => {
   assert.equal(gets, 1);
 });
 
-test("stop can return immediately without polling", async () => {
-  let gets = 0;
-  const client = {
-    POST: async () => ok(sandboxWire("stopping")),
-    GET: async () => {
-      gets++;
-      return ok(sandboxWire("stopped"));
-    },
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("running") as any, client);
-
-  const result = await sandbox.stop({ waitForStop: false });
-  assert.equal(result.status, "stopping");
-  assert.equal(gets, 0);
-});
-
 test("stop timeout carries the latest stopping sandbox", async () => {
   const client = {
     POST: async () => ok(sandboxWire("stopping")),
@@ -264,7 +245,7 @@ test("stop timeout carries the latest stopping sandbox", async () => {
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   await assert.rejects(
-    sandbox.stop({ waitUpToMs: 0 }),
+    sandbox.stop({ timeoutMs: 0 }),
     (error: unknown) => {
       assert.ok(error instanceof SandboxWaitTimeoutError);
       assert.equal(error.operation, "stop");
@@ -276,12 +257,126 @@ test("stop timeout carries the latest stopping sandbox", async () => {
   );
 });
 
-test("exec translates options and can return immediately", async () => {
+test("pause polls pausing sandboxes until they are paused", async () => {
+  vi.useFakeTimers();
+  let gets = 0;
+  let captured: { path: string; options: unknown } | undefined;
+  const client = {
+    POST: async (path: string, options: unknown) => {
+      captured = { path, options };
+      return ok(sandboxWire("pausing"));
+    },
+    GET: async () => {
+      gets++;
+      return ok(sandboxWire("paused"));
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const resultPromise = sandbox.pause();
+  await vi.advanceTimersByTimeAsync(500);
+  const result = await resultPromise;
+  assert.equal(result, sandbox);
+  assert.equal(result.status, "paused");
+  assert.equal(gets, 1);
+  assert.deepEqual(captured, {
+    path: "/api/sandboxes/{sid}/pause",
+    options: { params: { path: { sid: "0198-sandbox" } } },
+  });
+});
+
+test("resume polls pending sandboxes until they are running", async () => {
+  vi.useFakeTimers();
+  let gets = 0;
+  let captured: { path: string; options: unknown } | undefined;
+  const client = {
+    POST: async (path: string, options: unknown) => {
+      captured = { path, options };
+      return ok(sandboxWire("pending"));
+    },
+    GET: async () => {
+      gets++;
+      return ok(sandboxWire("running"));
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("paused") as any, client);
+
+  const resultPromise = sandbox.resume();
+  await vi.advanceTimersByTimeAsync(500);
+  const result = await resultPromise;
+  assert.equal(result, sandbox);
+  assert.equal(result.status, "running");
+  assert.equal(gets, 1);
+  assert.deepEqual(captured, {
+    path: "/api/sandboxes/{sid}/resume",
+    options: {
+      params: {
+        path: { sid: "0198-sandbox" },
+        query: { wait: false },
+      },
+    },
+  });
+});
+
+test("pause and resume timeouts carry the latest sandbox", async () => {
+  const client = {
+    POST: async (path: string) =>
+      ok(sandboxWire(path.endsWith("/pause") ? "pausing" : "pending")),
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  await assert.rejects(
+    sandbox.pause({ timeoutMs: 0 }),
+    (error: unknown) => {
+      assert.ok(error instanceof SandboxWaitTimeoutError);
+      assert.equal(error.operation, "pause");
+      assert.equal(error.timeoutMs, 0);
+      assert.equal(error.latest, sandbox);
+      assert.equal(error.latest.status, "pausing");
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    sandbox.resume({ timeoutMs: 0 }),
+    (error: unknown) => {
+      assert.ok(error instanceof SandboxWaitTimeoutError);
+      assert.equal(error.operation, "resume");
+      assert.equal(error.timeoutMs, 0);
+      assert.equal(error.latest, sandbox);
+      assert.equal(error.latest.status, "pending");
+      return true;
+    },
+  );
+});
+
+test("sandbox lifecycle waits default to a 30 second timeout", async () => {
+  vi.useFakeTimers();
+  const client = {
+    POST: async () => ok(sandboxWire("pausing")),
+    GET: async () => ok(sandboxWire("pausing")),
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const rejection = assert.rejects(
+    sandbox.pause(),
+    (error: unknown) => {
+      assert.ok(error instanceof SandboxWaitTimeoutError);
+      assert.equal(error.operation, "pause");
+      assert.equal(error.timeoutMs, 30_000);
+      return true;
+    },
+  );
+  await vi.advanceTimersByTimeAsync(30_000);
+  await rejection;
+});
+
+test("exec translates options", async () => {
   let captured: any;
   const client = {
     POST: async (path: string, options: unknown) => {
       captured = { path, options };
-      return ok(execWire());
+      return ok(execWire("completed"));
     },
   } as unknown as ApiClient;
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
@@ -290,10 +385,9 @@ test("exec translates options and can return immediately", async () => {
     commandTty: true,
     env: { HELLO: "world" },
     timeoutSeconds: 10,
-    waitForCompletion: false,
   });
   assert.ok(result instanceof SandboxExec);
-  assert.equal(result.status, "running");
+  assert.equal(result.status, "completed");
   assert.deepEqual(captured, {
     path: "/api/sandboxes/{sid}/execs",
     options: {
@@ -391,7 +485,7 @@ test("exec timeout carries the latest running exec", async () => {
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   await assert.rejects(
-    sandbox.exec("echo hello", { waitUpToMs: 0 }),
+    sandbox.exec("echo hello", { timeoutMs: 0 }),
     (error: unknown) => {
       assert.ok(error instanceof SandboxWaitTimeoutError);
       assert.equal(error.operation, "exec");
@@ -412,14 +506,14 @@ test("sandbox instance methods use the owning sandbox id", async () => {
     },
     POST: async (path: string, options: unknown) => {
       calls.push({ method: "POST", path, options });
-      if (path.endsWith("/stop")) return ok(sandboxWire("stopping"));
+      if (path.endsWith("/stop")) return ok(sandboxWire("stopped"));
       return ok(execWire("cancelled"));
     },
   } as unknown as ApiClient;
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   assert.equal((await sandbox.refresh()).status, "running");
-  assert.equal((await sandbox.stop({ waitForStop: false })).status, "stopping");
+  assert.equal((await sandbox.stop()).status, "stopped");
   assert.deepEqual(await sandbox.listExecs(), []);
   assert.equal((await sandbox.getExec("0198-exec")).status, "completed");
   assert.equal((await sandbox.cancelExec("0198-exec")).status, "cancelled");
