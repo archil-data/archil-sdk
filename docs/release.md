@@ -1,6 +1,6 @@
-# Release workflow
+# Release workflows
 
-The SDK is released with [Changesets](https://github.com/changesets/changesets). Versioning and publishing are fully automated by CI — nobody runs `npm publish` from their machine for a normal release.
+The JavaScript SDKs are released with [Changesets](https://github.com/changesets/changesets). Versioning and publishing are fully automated by CI — nobody runs `npm publish` from their machine for a normal release.
 
 ## Overview
 
@@ -45,6 +45,24 @@ Publishing authenticates via [npm trusted publishing](https://docs.npmjs.com/tru
 3. The workflow builds the repository and publishes the initial version of each package specified.
 
 After the initial version exists on npm, configure trusted publishing for the package on npmjs.com and let the normal changesets flow handle all subsequent releases.
+
+## Publishing the Python SDK
+
+The `archil` Python package has an independent release workflow:
+
+1. Update `packages/python/pyproject.toml` and `packages/python/CHANGELOG.md` in a release PR.
+2. Merge the release PR to `main`.
+3. Tag that commit as `python/vX.Y.Z`, matching the version in `pyproject.toml`.
+4. The [Python release workflow](../.github/workflows/python-release.yaml) verifies the tag, runs the complete Python test suite, builds the wheel and source distribution, publishes them to PyPI with trusted publishing, and creates a GitHub release.
+
+The first release from this repository is `python/v0.8.27`. PyPI trusted
+publishing for the `archil` project must point to `archil-data/archil-sdk`,
+workflow `python-release.yaml`, environment `pypi`. The old publisher in
+`archil-data/archil` is disabled.
+
+The optional generated client is released separately as `archil-openapi` from
+the canonical OpenAPI schema in `archil-data/archil`. Dependabot updates the
+exact `archil-openapi` pin in this repository.
 
 ## Troubleshooting
 

@@ -60,13 +60,10 @@ from ._models import (
 from ._wrapped import Archil, Disk, Disks, Multipart, Tokens, Workspace
 from .agent_tools import AgentToolset
 from .errors import ArchilApiError, ArchilError, ArchilS3Error
-from .openapi import AuthenticatedClient, Client
 
 __all__ = [
     "__version__",
     "Archil",
-    "Client",
-    "AuthenticatedClient",
     "Disks",
     "Disk",
     "Multipart",
