@@ -21,7 +21,7 @@ pip install "archil[openapi]"
 
 ```python
 from archil.openapi import AuthenticatedClient
-from archil_api_types.api.disks import get_disk
+from archil_openapi.api.disks import get_disk
 
 client = AuthenticatedClient(
     base_url="https://api.archil.com",
