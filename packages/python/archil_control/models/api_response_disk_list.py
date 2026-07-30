@@ -1,8 +1,10 @@
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, Union
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
+
+from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
     from ..models.disk_response import DiskResponse
@@ -19,10 +21,13 @@ class ApiResponseDiskList:
         Attributes:
             success (bool):  Example: True.
             data (list['DiskResponse']):
+            next_cursor (Union[Unset, str]): Set when more disks remain beyond this page. Pass it back as the `cursor` query
+                parameter to fetch the next page. Absent on the last page.
     """
 
     success: bool
     data: list["DiskResponse"]
+    next_cursor: Union[Unset, str] = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -33,6 +38,8 @@ class ApiResponseDiskList:
             data_item = data_item_data.to_dict()
             data.append(data_item)
 
+        next_cursor = self.next_cursor
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -41,6 +48,8 @@ class ApiResponseDiskList:
                 "data": data,
             }
         )
+        if next_cursor is not UNSET:
+            field_dict["nextCursor"] = next_cursor
 
         return field_dict
 
@@ -58,9 +67,12 @@ class ApiResponseDiskList:
 
             data.append(data_item)
 
+        next_cursor = d.pop("nextCursor", UNSET)
+
         api_response_disk_list = cls(
             success=success,
             data=data,
+            next_cursor=next_cursor,
         )
 
         api_response_disk_list.additional_properties = d

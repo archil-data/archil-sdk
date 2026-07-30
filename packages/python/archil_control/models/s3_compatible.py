@@ -21,6 +21,7 @@ class S3Compatible:
         access_key_id (str): Access key ID
         secret_access_key (str): Secret access key
         bucket_prefix (Union[Unset, str]): Prefix within the bucket (optional) Example: data/.
+        bucket_region (Union[Unset, str]): Bucket region Example: auto.
     """
 
     type_: S3CompatibleType
@@ -29,6 +30,7 @@ class S3Compatible:
     access_key_id: str
     secret_access_key: str
     bucket_prefix: Union[Unset, str] = UNSET
+    bucket_region: Union[Unset, str] = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -44,6 +46,8 @@ class S3Compatible:
 
         bucket_prefix = self.bucket_prefix
 
+        bucket_region = self.bucket_region
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -57,6 +61,8 @@ class S3Compatible:
         )
         if bucket_prefix is not UNSET:
             field_dict["bucketPrefix"] = bucket_prefix
+        if bucket_region is not UNSET:
+            field_dict["bucketRegion"] = bucket_region
 
         return field_dict
 
@@ -75,6 +81,8 @@ class S3Compatible:
 
         bucket_prefix = d.pop("bucketPrefix", UNSET)
 
+        bucket_region = d.pop("bucketRegion", UNSET)
+
         s3_compatible = cls(
             type_=type_,
             bucket_name=bucket_name,
@@ -82,6 +90,7 @@ class S3Compatible:
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
             bucket_prefix=bucket_prefix,
+            bucket_region=bucket_region,
         )
 
         s3_compatible.additional_properties = d

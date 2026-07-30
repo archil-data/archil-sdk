@@ -19,7 +19,14 @@ class ExecRequestDisks:
 
     Each value is either a plain disk ID string (mounts the disk's
     root, read-write) or an object that additionally selects a
-    subdirectory of the disk and/or marks the mount as read-only.
+    subdirectory of the disk and/or marks the mount as read-only,
+    conditional, or requests delegation checkouts before the command
+    starts. `checkoutPaths` are relative to that disk's exposed mount
+    root. `queueMs` is an optional timeout for delegation acquisition;
+    with `checkoutPaths`, it applies to each requested checkout, and
+    without `checkoutPaths`, the mount root is acquired during mount
+    setup. Delegation checkout options are rejected with `readOnly:
+    true`.
 
         Example:
             {'data': 'dsk-abc123', 'logs': {'disk': 'dsk-def456', 'subdirectory': 'app/logs', 'readOnly': True}}

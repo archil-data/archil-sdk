@@ -82,7 +82,7 @@ def sync_detailed(
     client: Union[AuthenticatedClient, Client],
     body: GrepDiskRequest,
 ) -> Response[Union[ApiResponseGrepDisk, ErrorResponse]]:
-    """Parallel grep over a directory on a disk
+    """Constant-time parallel grep over a directory on a disk
 
      Searches files under a directory on the disk for lines matching a
     regular expression. Listing and matching are fanned out across
@@ -91,10 +91,10 @@ def sync_detailed(
 
     The user controls cost and latency with three knobs:
 
-    - `maxDurationSeconds` is the wall-clock deadline (capped at 30s).
+    - `maxDurationSeconds` is the wall-clock deadline.
     - `concurrency` is the maximum number of parallel grep workers.
-      Higher concurrency finishes larger datasets within the deadline,
-      at proportionally more compute.
+      Higher concurrency finishes larger datasets within the deadline;
+      the controlplane clamps to the runtime fleet's current capacity.
     - `maxResults` causes the search to short-circuit after the
       aggregator has collected this many matches.
 
@@ -138,7 +138,7 @@ def sync(
     client: Union[AuthenticatedClient, Client],
     body: GrepDiskRequest,
 ) -> Optional[Union[ApiResponseGrepDisk, ErrorResponse]]:
-    """Parallel grep over a directory on a disk
+    """Constant-time parallel grep over a directory on a disk
 
      Searches files under a directory on the disk for lines matching a
     regular expression. Listing and matching are fanned out across
@@ -147,10 +147,10 @@ def sync(
 
     The user controls cost and latency with three knobs:
 
-    - `maxDurationSeconds` is the wall-clock deadline (capped at 30s).
+    - `maxDurationSeconds` is the wall-clock deadline.
     - `concurrency` is the maximum number of parallel grep workers.
-      Higher concurrency finishes larger datasets within the deadline,
-      at proportionally more compute.
+      Higher concurrency finishes larger datasets within the deadline;
+      the controlplane clamps to the runtime fleet's current capacity.
     - `maxResults` causes the search to short-circuit after the
       aggregator has collected this many matches.
 
@@ -189,7 +189,7 @@ async def asyncio_detailed(
     client: Union[AuthenticatedClient, Client],
     body: GrepDiskRequest,
 ) -> Response[Union[ApiResponseGrepDisk, ErrorResponse]]:
-    """Parallel grep over a directory on a disk
+    """Constant-time parallel grep over a directory on a disk
 
      Searches files under a directory on the disk for lines matching a
     regular expression. Listing and matching are fanned out across
@@ -198,10 +198,10 @@ async def asyncio_detailed(
 
     The user controls cost and latency with three knobs:
 
-    - `maxDurationSeconds` is the wall-clock deadline (capped at 30s).
+    - `maxDurationSeconds` is the wall-clock deadline.
     - `concurrency` is the maximum number of parallel grep workers.
-      Higher concurrency finishes larger datasets within the deadline,
-      at proportionally more compute.
+      Higher concurrency finishes larger datasets within the deadline;
+      the controlplane clamps to the runtime fleet's current capacity.
     - `maxResults` causes the search to short-circuit after the
       aggregator has collected this many matches.
 
@@ -243,7 +243,7 @@ async def asyncio(
     client: Union[AuthenticatedClient, Client],
     body: GrepDiskRequest,
 ) -> Optional[Union[ApiResponseGrepDisk, ErrorResponse]]:
-    """Parallel grep over a directory on a disk
+    """Constant-time parallel grep over a directory on a disk
 
      Searches files under a directory on the disk for lines matching a
     regular expression. Listing and matching are fanned out across
@@ -252,10 +252,10 @@ async def asyncio(
 
     The user controls cost and latency with three knobs:
 
-    - `maxDurationSeconds` is the wall-clock deadline (capped at 30s).
+    - `maxDurationSeconds` is the wall-clock deadline.
     - `concurrency` is the maximum number of parallel grep workers.
-      Higher concurrency finishes larger datasets within the deadline,
-      at proportionally more compute.
+      Higher concurrency finishes larger datasets within the deadline;
+      the controlplane clamps to the runtime fleet's current capacity.
     - `maxResults` causes the search to short-circuit after the
       aggregator has collected this many matches.
 

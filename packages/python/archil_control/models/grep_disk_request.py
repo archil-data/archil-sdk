@@ -24,8 +24,9 @@ class GrepDiskRequest:
             mid-scan.
              Default: 30.
         concurrency (Union[Unset, int]): Maximum number of parallel grep workers. Higher values finish
-            larger datasets within the deadline but consume proportionally
-            more runtime capacity.
+            larger datasets within the deadline but consume more runtime
+            capacity. The controlplane clamps this to the fleet's
+            currently-available capacity.
              Default: 50.
         max_results (Union[Unset, int]): Stop scanning once the aggregator has this many matches.
             Returned matches are a sample of whichever workers reported

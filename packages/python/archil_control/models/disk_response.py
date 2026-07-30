@@ -1,11 +1,12 @@
 import datetime
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, TypeVar, Union
+from typing import TYPE_CHECKING, Any, TypeVar, Union, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 from dateutil.parser import isoparse
 
+from ..models.disk_response_capabilities_item import DiskResponseCapabilitiesItem
 from ..models.disk_response_status import DiskResponseStatus
 from ..types import UNSET, Unset
 
@@ -38,6 +39,15 @@ class DiskResponse:
         metrics (Union[Unset, DiskMetrics]):
         connected_clients (Union[Unset, list['ConnectedClient']]):
         authorized_users (Union[Unset, list['AuthorizedUser']]):
+        allowed_ips (Union[Unset, list[str]]): IP allowlist for mount access. Empty means all IPs are allowed.
+             Example: ['203.0.113.0/24'].
+        capabilities (Union[Unset, list[DiskResponseCapabilitiesItem]]): Capabilities supported by this disk. Determined
+            at creation
+            time and immutable thereafter. Defined values:
+
+            * `checkpoints` — checkpoints can be created on this disk. Not
+              available for disks with bring-your-own buckets.
+             Example: ['checkpoints'].
     """
 
     id: str
@@ -55,6 +65,8 @@ class DiskResponse:
     metrics: Union[Unset, "DiskMetrics"] = UNSET
     connected_clients: Union[Unset, list["ConnectedClient"]] = UNSET
     authorized_users: Union[Unset, list["AuthorizedUser"]] = UNSET
+    allowed_ips: Union[Unset, list[str]] = UNSET
+    capabilities: Union[Unset, list[DiskResponseCapabilitiesItem]] = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -107,6 +119,17 @@ class DiskResponse:
                 authorized_users_item = authorized_users_item_data.to_dict()
                 authorized_users.append(authorized_users_item)
 
+        allowed_ips: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.allowed_ips, Unset):
+            allowed_ips = self.allowed_ips
+
+        capabilities: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.capabilities, Unset):
+            capabilities = []
+            for capabilities_item_data in self.capabilities:
+                capabilities_item = capabilities_item_data.value
+                capabilities.append(capabilities_item)
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -136,6 +159,10 @@ class DiskResponse:
             field_dict["connectedClients"] = connected_clients
         if authorized_users is not UNSET:
             field_dict["authorizedUsers"] = authorized_users
+        if allowed_ips is not UNSET:
+            field_dict["allowedIps"] = allowed_ips
+        if capabilities is not UNSET:
+            field_dict["capabilities"] = capabilities
 
         return field_dict
 
@@ -202,6 +229,15 @@ class DiskResponse:
 
             authorized_users.append(authorized_users_item)
 
+        allowed_ips = cast(list[str], d.pop("allowedIps", UNSET))
+
+        capabilities = []
+        _capabilities = d.pop("capabilities", UNSET)
+        for capabilities_item_data in _capabilities or []:
+            capabilities_item = DiskResponseCapabilitiesItem(capabilities_item_data)
+
+            capabilities.append(capabilities_item)
+
         disk_response = cls(
             id=id,
             name=name,
@@ -218,6 +254,8 @@ class DiskResponse:
             metrics=metrics,
             connected_clients=connected_clients,
             authorized_users=authorized_users,
+            allowed_ips=allowed_ips,
+            capabilities=capabilities,
         )
 
         disk_response.additional_properties = d

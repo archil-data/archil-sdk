@@ -12,7 +12,7 @@ from ...types import UNSET, Response, Unset
 
 def _get_kwargs(
     *,
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {}
@@ -70,7 +70,7 @@ def _build_response(
 def sync_detailed(
     *,
     client: Union[AuthenticatedClient, Client],
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
 ) -> Response[Union[ApiResponseTokenList, ErrorResponse]]:
     """List API tokens
@@ -78,7 +78,7 @@ def sync_detailed(
      Returns all API tokens for the authenticated account.
 
     Args:
-        limit (Union[Unset, int]):  Default: 50.
+        limit (Union[Unset, int]):
         cursor (Union[Unset, str]):
 
     Raises:
@@ -104,7 +104,7 @@ def sync_detailed(
 def sync(
     *,
     client: Union[AuthenticatedClient, Client],
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
 ) -> Optional[Union[ApiResponseTokenList, ErrorResponse]]:
     """List API tokens
@@ -112,7 +112,7 @@ def sync(
      Returns all API tokens for the authenticated account.
 
     Args:
-        limit (Union[Unset, int]):  Default: 50.
+        limit (Union[Unset, int]):
         cursor (Union[Unset, str]):
 
     Raises:
@@ -133,7 +133,7 @@ def sync(
 async def asyncio_detailed(
     *,
     client: Union[AuthenticatedClient, Client],
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
 ) -> Response[Union[ApiResponseTokenList, ErrorResponse]]:
     """List API tokens
@@ -141,7 +141,7 @@ async def asyncio_detailed(
      Returns all API tokens for the authenticated account.
 
     Args:
-        limit (Union[Unset, int]):  Default: 50.
+        limit (Union[Unset, int]):
         cursor (Union[Unset, str]):
 
     Raises:
@@ -165,7 +165,7 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: Union[AuthenticatedClient, Client],
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
 ) -> Optional[Union[ApiResponseTokenList, ErrorResponse]]:
     """List API tokens
@@ -173,7 +173,7 @@ async def asyncio(
      Returns all API tokens for the authenticated account.
 
     Args:
-        limit (Union[Unset, int]):  Default: 50.
+        limit (Union[Unset, int]):
         cursor (Union[Unset, str]):
 
     Raises:

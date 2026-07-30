@@ -17,12 +17,14 @@ class MountConfigResponse:
         bucket_name (Union[Unset, str]): Bucket name
         bucket_endpoint (Union[Unset, str]): Storage endpoint URL
         bucket_prefix (Union[Unset, str]): Prefix within the bucket
+        bucket_region (Union[Unset, str]): Bucket region
         session_id (Union[Unset, str]): Session identifier for IAM-authorized mounts
     """
 
     bucket_name: Union[Unset, str] = UNSET
     bucket_endpoint: Union[Unset, str] = UNSET
     bucket_prefix: Union[Unset, str] = UNSET
+    bucket_region: Union[Unset, str] = UNSET
     session_id: Union[Unset, str] = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -32,6 +34,8 @@ class MountConfigResponse:
         bucket_endpoint = self.bucket_endpoint
 
         bucket_prefix = self.bucket_prefix
+
+        bucket_region = self.bucket_region
 
         session_id = self.session_id
 
@@ -44,6 +48,8 @@ class MountConfigResponse:
             field_dict["bucketEndpoint"] = bucket_endpoint
         if bucket_prefix is not UNSET:
             field_dict["bucketPrefix"] = bucket_prefix
+        if bucket_region is not UNSET:
+            field_dict["bucketRegion"] = bucket_region
         if session_id is not UNSET:
             field_dict["sessionId"] = session_id
 
@@ -58,12 +64,15 @@ class MountConfigResponse:
 
         bucket_prefix = d.pop("bucketPrefix", UNSET)
 
+        bucket_region = d.pop("bucketRegion", UNSET)
+
         session_id = d.pop("sessionId", UNSET)
 
         mount_config_response = cls(
             bucket_name=bucket_name,
             bucket_endpoint=bucket_endpoint,
             bucket_prefix=bucket_prefix,
+            bucket_region=bucket_region,
             session_id=session_id,
         )
 

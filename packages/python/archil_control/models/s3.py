@@ -21,6 +21,7 @@ class S3:
         secret_access_key (Union[Unset, str]): AWS secret access key
         session_token (Union[Unset, str]): Session token for temporary credentials
         bucket_prefix (Union[Unset, str]): Prefix within the bucket Example: data/.
+        bucket_region (Union[Unset, str]): Bucket region Example: us-east-1.
     """
 
     type_: S3Type
@@ -29,6 +30,7 @@ class S3:
     secret_access_key: Union[Unset, str] = UNSET
     session_token: Union[Unset, str] = UNSET
     bucket_prefix: Union[Unset, str] = UNSET
+    bucket_region: Union[Unset, str] = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -43,6 +45,8 @@ class S3:
         session_token = self.session_token
 
         bucket_prefix = self.bucket_prefix
+
+        bucket_region = self.bucket_region
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -60,6 +64,8 @@ class S3:
             field_dict["sessionToken"] = session_token
         if bucket_prefix is not UNSET:
             field_dict["bucketPrefix"] = bucket_prefix
+        if bucket_region is not UNSET:
+            field_dict["bucketRegion"] = bucket_region
 
         return field_dict
 
@@ -78,6 +84,8 @@ class S3:
 
         bucket_prefix = d.pop("bucketPrefix", UNSET)
 
+        bucket_region = d.pop("bucketRegion", UNSET)
+
         s3 = cls(
             type_=type_,
             bucket_name=bucket_name,
@@ -85,6 +93,7 @@ class S3:
             secret_access_key=secret_access_key,
             session_token=session_token,
             bucket_prefix=bucket_prefix,
+            bucket_region=bucket_region,
         )
 
         s3.additional_properties = d

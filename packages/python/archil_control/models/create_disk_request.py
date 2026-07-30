@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, TypeVar, Union
+from typing import TYPE_CHECKING, Any, TypeVar, Union, cast
 
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
@@ -26,6 +26,9 @@ class CreateDiskRequest:
         name (str): Disk name (alphanumeric, dashes, underscores) Example: my-data-disk.
         mounts (Union[Unset, list[Union['AzureBlobStorage', 'CloudflareR2', 'GoogleCloudStorage', 'S3',
             'S3Compatible']]]): Storage mount to attach. Omit for archil-managed storage.
+        allowed_ips (Union[Unset, list[str]]): IP allowlist for mount access. When non-empty, only clients connecting
+            from these IPs or CIDR ranges can mount the disk. An empty list (default) allows all IPs.
+             Example: ['203.0.113.0/24', '198.51.100.42'].
         auth_methods (Union[Unset, list[Union['AwsStsUser', 'TokenUser']]]): Deprecated. Use AddDiskUser after creation
             instead. When provided, suppresses the default auto-generated token user.
     """
@@ -34,6 +37,7 @@ class CreateDiskRequest:
     mounts: Union[
         Unset, list[Union["AzureBlobStorage", "CloudflareR2", "GoogleCloudStorage", "S3", "S3Compatible"]]
     ] = UNSET
+    allowed_ips: Union[Unset, list[str]] = UNSET
     auth_methods: Union[Unset, list[Union["AwsStsUser", "TokenUser"]]] = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -64,6 +68,10 @@ class CreateDiskRequest:
 
                 mounts.append(mounts_item)
 
+        allowed_ips: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.allowed_ips, Unset):
+            allowed_ips = self.allowed_ips
+
         auth_methods: Union[Unset, list[dict[str, Any]]] = UNSET
         if not isinstance(self.auth_methods, Unset):
             auth_methods = []
@@ -85,6 +93,8 @@ class CreateDiskRequest:
         )
         if mounts is not UNSET:
             field_dict["mounts"] = mounts
+        if allowed_ips is not UNSET:
+            field_dict["allowedIps"] = allowed_ips
         if auth_methods is not UNSET:
             field_dict["authMethods"] = auth_methods
 
@@ -152,6 +162,8 @@ class CreateDiskRequest:
 
             mounts.append(mounts_item)
 
+        allowed_ips = cast(list[str], d.pop("allowedIps", UNSET))
+
         auth_methods = []
         _auth_methods = d.pop("authMethods", UNSET)
         for auth_methods_item_data in _auth_methods or []:
@@ -178,6 +190,7 @@ class CreateDiskRequest:
         create_disk_request = cls(
             name=name,
             mounts=mounts,
+            allowed_ips=allowed_ips,
             auth_methods=auth_methods,
         )
 

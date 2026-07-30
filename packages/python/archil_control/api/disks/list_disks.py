@@ -12,7 +12,7 @@ from ...types import UNSET, Response, Unset
 
 def _get_kwargs(
     *,
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
     name: Union[Unset, str] = UNSET,
 ) -> dict[str, Any]:
@@ -73,7 +73,7 @@ def _build_response(
 def sync_detailed(
     *,
     client: Union[AuthenticatedClient, Client],
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
     name: Union[Unset, str] = UNSET,
 ) -> Response[Union[ApiResponseDiskList, ErrorResponse]]:
@@ -82,7 +82,7 @@ def sync_detailed(
      Returns all disks owned by the authenticated account.
 
     Args:
-        limit (Union[Unset, int]):  Default: 50.
+        limit (Union[Unset, int]):
         cursor (Union[Unset, str]):
         name (Union[Unset, str]):
 
@@ -110,7 +110,7 @@ def sync_detailed(
 def sync(
     *,
     client: Union[AuthenticatedClient, Client],
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
     name: Union[Unset, str] = UNSET,
 ) -> Optional[Union[ApiResponseDiskList, ErrorResponse]]:
@@ -119,7 +119,7 @@ def sync(
      Returns all disks owned by the authenticated account.
 
     Args:
-        limit (Union[Unset, int]):  Default: 50.
+        limit (Union[Unset, int]):
         cursor (Union[Unset, str]):
         name (Union[Unset, str]):
 
@@ -142,7 +142,7 @@ def sync(
 async def asyncio_detailed(
     *,
     client: Union[AuthenticatedClient, Client],
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
     name: Union[Unset, str] = UNSET,
 ) -> Response[Union[ApiResponseDiskList, ErrorResponse]]:
@@ -151,7 +151,7 @@ async def asyncio_detailed(
      Returns all disks owned by the authenticated account.
 
     Args:
-        limit (Union[Unset, int]):  Default: 50.
+        limit (Union[Unset, int]):
         cursor (Union[Unset, str]):
         name (Union[Unset, str]):
 
@@ -177,7 +177,7 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: Union[AuthenticatedClient, Client],
-    limit: Union[Unset, int] = 50,
+    limit: Union[Unset, int] = UNSET,
     cursor: Union[Unset, str] = UNSET,
     name: Union[Unset, str] = UNSET,
 ) -> Optional[Union[ApiResponseDiskList, ErrorResponse]]:
@@ -186,7 +186,7 @@ async def asyncio(
      Returns all disks owned by the authenticated account.
 
     Args:
-        limit (Union[Unset, int]):  Default: 50.
+        limit (Union[Unset, int]):
         cursor (Union[Unset, str]):
         name (Union[Unset, str]):
 

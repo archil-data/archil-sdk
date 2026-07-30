@@ -68,6 +68,11 @@ def _parse_response(
 
         return response_500
 
+    if response.status_code == 503:
+        response_503 = ErrorResponse.from_dict(response.json())
+
+        return response_503
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
@@ -92,12 +97,10 @@ def sync_detailed(
 ) -> Response[Union[ApiResponseCreateDisk, ErrorResponse]]:
     """Create a new disk
 
-     Creates a new disk with the specified configuration. A default disk
-    token user is automatically generated and returned in the response,
-    so the disk is immediately mountable. The one-time disk token appears
-    in `authorizedUsers[].token` and cannot be retrieved again. (This
-    disk token is scoped to the new disk and is separate from the API
-    key you used to make this request.)
+     Creates a new disk with the specified configuration. A default token
+    user is automatically generated and returned in the response, so the
+    disk is immediately mountable. The one-time token appears in
+    `authorizedUsers[].token` and cannot be retrieved again.
 
     To provide your own users instead, pass the deprecated `authMethods`
     field or call AddDiskUser after creation.
@@ -131,12 +134,10 @@ def sync(
 ) -> Optional[Union[ApiResponseCreateDisk, ErrorResponse]]:
     """Create a new disk
 
-     Creates a new disk with the specified configuration. A default disk
-    token user is automatically generated and returned in the response,
-    so the disk is immediately mountable. The one-time disk token appears
-    in `authorizedUsers[].token` and cannot be retrieved again. (This
-    disk token is scoped to the new disk and is separate from the API
-    key you used to make this request.)
+     Creates a new disk with the specified configuration. A default token
+    user is automatically generated and returned in the response, so the
+    disk is immediately mountable. The one-time token appears in
+    `authorizedUsers[].token` and cannot be retrieved again.
 
     To provide your own users instead, pass the deprecated `authMethods`
     field or call AddDiskUser after creation.
@@ -165,12 +166,10 @@ async def asyncio_detailed(
 ) -> Response[Union[ApiResponseCreateDisk, ErrorResponse]]:
     """Create a new disk
 
-     Creates a new disk with the specified configuration. A default disk
-    token user is automatically generated and returned in the response,
-    so the disk is immediately mountable. The one-time disk token appears
-    in `authorizedUsers[].token` and cannot be retrieved again. (This
-    disk token is scoped to the new disk and is separate from the API
-    key you used to make this request.)
+     Creates a new disk with the specified configuration. A default token
+    user is automatically generated and returned in the response, so the
+    disk is immediately mountable. The one-time token appears in
+    `authorizedUsers[].token` and cannot be retrieved again.
 
     To provide your own users instead, pass the deprecated `authMethods`
     field or call AddDiskUser after creation.
@@ -202,12 +201,10 @@ async def asyncio(
 ) -> Optional[Union[ApiResponseCreateDisk, ErrorResponse]]:
     """Create a new disk
 
-     Creates a new disk with the specified configuration. A default disk
-    token user is automatically generated and returned in the response,
-    so the disk is immediately mountable. The one-time disk token appears
-    in `authorizedUsers[].token` and cannot be retrieved again. (This
-    disk token is scoped to the new disk and is separate from the API
-    key you used to make this request.)
+     Creates a new disk with the specified configuration. A default token
+    user is automatically generated and returned in the response, so the
+    disk is immediately mountable. The one-time token appears in
+    `authorizedUsers[].token` and cannot be retrieved again.
 
     To provide your own users instead, pass the deprecated `authMethods`
     field or call AddDiskUser after creation.
