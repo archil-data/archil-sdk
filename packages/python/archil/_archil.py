@@ -114,10 +114,7 @@ class _Archil:
             else:
                 payload[rel_path] = _disk_id(mount)
         data = await self._transport.request_json(
-            "POST",
-            "/api/exec",
-            json={"disks": payload, "command": command},
-            timeout=None,
+            "POST", "/api/exec", json={"disks": payload, "command": command}
         )
         return ExecResult.from_json(data)
 

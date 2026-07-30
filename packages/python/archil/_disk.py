@@ -322,10 +322,7 @@ class _Disk:
         """Execute a command in a container with this disk mounted. Blocks until
         the command completes and returns stdout, stderr, and exit code."""
         data = await self._transport.request_json(
-            "POST",
-            f"/api/disks/{self.id}/exec",
-            json={"command": command},
-            timeout=None,
+            "POST", f"/api/disks/{self.id}/exec", json={"command": command}
         )
         return ExecResult.from_json(data)
 
@@ -353,7 +350,6 @@ class _Disk:
                 "concurrency": concurrency,
                 "maxResults": max_results,
             },
-            timeout=None,
         )
         return GrepResult.from_json(data)
 

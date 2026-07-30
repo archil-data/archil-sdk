@@ -21,7 +21,6 @@ class RecordedRequest:
     query: dict
     headers: dict
     content: bytes
-    extensions: dict
 
     @property
     def json(self):
@@ -45,7 +44,6 @@ class Router:
                 query=dict(request.url.params),
                 headers=dict(request.headers),
                 content=request.content,
-                extensions=dict(request.extensions),
             )
         )
         assert self._handler is not None, "no handler set on Router"

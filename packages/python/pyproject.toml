@@ -14,9 +14,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "attrs>=22.2.0",
     "httpx>=0.27",
-    "python-dateutil>=2.8.0,<3",
     "synchronicity>=0.12.3",
 ]
 
@@ -25,7 +23,6 @@ Homepage = "https://archil.com"
 Documentation = "https://docs.archil.com"
 
 [project.optional-dependencies]
-openapi = ["archil-openapi==0.0.1"]
 openai-agents = ["openai-agents>=0.0.1"]
 langchain = ["langchain-core>=0.3"]
 dev = [
@@ -35,7 +32,6 @@ dev = [
     "synchronicity[compile]>=0.12.3",
     "mypy>=1.11",
     "pyright>=1.1.390",
-    "types-python-dateutil",
     "openai-agents>=0.0.1",
     "openai<2.45",
     "langchain-core>=0.3",

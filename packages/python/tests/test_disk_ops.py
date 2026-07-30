@@ -155,7 +155,6 @@ def test_exec_and_grep(archil, router):
     assert res.exit_code == 0 and res.stdout == "hi"
     assert res.timing.total_ms == 5
     assert router.requests[-1].json == {"command": "echo hi"}
-    assert router.requests[-1].extensions["timeout"]["read"] is None
 
     router.set(
         lambda req: ok_envelope(
@@ -174,7 +173,6 @@ def test_exec_and_grep(archil, router):
     grep = d.grep(directory="logs", pattern="ERROR")
     assert grep.matches[0].line == 3
     assert grep.stopped_reason == "completed"
-    assert router.requests[-1].extensions["timeout"]["read"] is None
 
     # Go nil slice: "matches": null must yield [] rather than TypeError.
     router.set(
@@ -254,4 +252,3 @@ def test_archil_exec_payload_shapes(archil, router):
         "work": {"disk": "dsk-4", "readOnly": False, "conditional": True},
     }
     assert captured["body"]["command"] == "ls"
-    assert router.requests[-1].extensions["timeout"]["read"] is None

@@ -12,28 +12,6 @@ Every method works **both synchronously and asynchronously** from a single imple
 pip install archil
 ```
 
-For direct access to the generated control-plane API, install the optional
-OpenAPI client:
-
-```bash
-pip install "archil[openapi]"
-```
-
-```python
-from archil.openapi import AuthenticatedClient
-from archil_openapi.api.disks import get_disk
-
-client = AuthenticatedClient(
-    base_url="https://api.archil.com",
-    token="key-...",
-)
-
-disk = get_disk.sync(id="dsk-...", client=client)
-
-async def fetch_disk():
-    return await get_disk.asyncio(id="dsk-...", client=client)
-```
-
 ## Library
 
 ```python

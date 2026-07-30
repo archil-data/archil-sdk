@@ -60,10 +60,6 @@ publishing for the `archil` project must point to `archil-data/archil-sdk`,
 workflow `python-release.yaml`, environment `pypi`. The old publisher in
 `archil-data/archil` is disabled.
 
-The optional generated client is released separately as `archil-openapi` from
-the canonical OpenAPI schema in `archil-data/archil`. Dependabot updates the
-exact `archil-openapi` pin in this repository.
-
 ## Troubleshooting
 
 - **My change merged but no Version Packages PR appeared** — the PR probably didn't include a changeset. Open a follow-up PR that adds one (`pnpm changeset`).
