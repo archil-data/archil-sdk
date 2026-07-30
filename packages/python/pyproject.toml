@@ -25,7 +25,7 @@ Homepage = "https://archil.com"
 Documentation = "https://docs.archil.com"
 
 [project.optional-dependencies]
-openapi = ["archil-openapi==0.0.1"]
+openapi = ["archil-api-types==0.0.1"]
 openai-agents = ["openai-agents>=0.0.1"]
 langchain = ["langchain-core>=0.3"]
 dev = [
