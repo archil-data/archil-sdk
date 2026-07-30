@@ -6,7 +6,7 @@
     "test": "pnpm -r --parallel run test",
     "build": "pnpm -r run build",
     "release": "pnpm build && changeset publish",
-    "generate:python": "uvx openapi-python-client generate --path ../archil/api/controlplane/openapi.yaml --config openapi-python-client.yaml --output-path packages/python --overwrite --meta uv"
+    "generate:python": "uvx openapi-python-client generate --path ../archil/api/controlplane/openapi.yaml --config openapi-python-client.yaml --output-path packages/python/archil/openapi --overwrite --meta none"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.0-next.5"

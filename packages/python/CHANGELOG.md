@@ -1,5 +1,6 @@
 # Changelog
 
-## 1.0.0
+## 0.8.27
 
-- Initial release.
+- Move the SDK to `archil-data/archil-sdk`.
+- Add the generated OpenAPI client under `archil.openapi`.
