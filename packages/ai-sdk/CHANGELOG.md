@@ -1,5 +1,12 @@
 # @archildata/ai-sdk
 
+## 0.0.5
+
+### Patch Changes
+
+- Updated dependencies [45df6fe]
+  - disk@0.8.23
+
 ## 0.0.4
 
 ### Patch Changes
