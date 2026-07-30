@@ -102,11 +102,14 @@ class _Transport:
         *,
         params: Optional[dict] = None,
         json: Optional[Any] = None,
+        timeout: Any = httpx.USE_CLIENT_DEFAULT,
     ) -> Any:
         """Send a control-plane request and unwrap the ``{success, data}``
         envelope, returning ``data``. Raises ArchilApiError on transport failure
         or a ``success: false`` body."""
-        body = await self._request_envelope(method, path, params=params, json=json)
+        body = await self._request_envelope(
+            method, path, params=params, json=json, timeout=timeout
+        )
         return body.get("data")
 
     async def request_json_page(
@@ -132,10 +135,24 @@ class _Transport:
     ) -> None:
         await self._request_envelope(method, path, params=params, json=json)
 
-    async def _request_envelope(self, method, path, *, params, json) -> dict:
+    async def _request_envelope(
+        self,
+        method,
+        path,
+        *,
+        params,
+        json,
+        timeout=httpx.USE_CLIENT_DEFAULT,
+    ) -> dict:
         # Drop None-valued query params so optional args don't serialize as "None".
         clean_params = {k: v for k, v in (params or {}).items() if v is not None} or None
-        resp = await self._cp_client().request(method, path, params=clean_params, json=json)
+        resp = await self._cp_client().request(
+            method,
+            path,
+            params=clean_params,
+            json=json,
+            timeout=timeout,
+        )
         body: Optional[dict]
         try:
             body = resp.json()
