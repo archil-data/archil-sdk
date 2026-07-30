@@ -1,5 +1,5 @@
 [project]
-name = "archil-control"
+name = "archil"
 version = "1.0.0"
 description = "A client library for accessing Archil Control Plane API"
 authors = []
@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [tool.uv.build-backend]
-module-name = "archil_control"
+module-name = "archil"
 module-root = ""
 data = [
     "CHANGELOG.md",
