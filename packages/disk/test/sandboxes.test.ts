@@ -106,7 +106,6 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
         body: {
           vcpu_count: 4,
           mem_size_mib: 8192,
-          kernel: undefined,
           base_image: "ubuntu:26.04",
           env: { NODE_ENV: "test" },
           max_ttl_seconds: 600,

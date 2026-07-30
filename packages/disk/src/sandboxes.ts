@@ -14,7 +14,6 @@ import {
 export interface CreateSandboxRequest {
   vcpuCount?: number;
   memSizeMiB?: number;
-  kernel?: string;
   /**
    * Public Linux OCI image reference for the sandbox's root filesystem.
    * Docker Hub shorthand and any public registry are accepted; the tag
@@ -78,7 +77,6 @@ export class Sandboxes {
     const body = {
       vcpu_count: request.vcpuCount,
       mem_size_mib: request.memSizeMiB,
-      kernel: request.kernel,
       base_image: request.baseImage,
       env: request.env,
       max_ttl_seconds: request.maxTtlSeconds,
