@@ -314,7 +314,7 @@ export class Sandbox {
     this._apply(data);
 
     for (; ;) {
-      if (["paused", "stopped", "exited", "failed"].includes(this.status)) return this;
+      if (this.status === "paused") return this;
       if (this.status !== "pausing") {
         throw new ArchilError(
           `Sandbox entered ${this.status} before it paused`,
