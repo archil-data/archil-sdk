@@ -169,7 +169,7 @@ export class SandboxExec {
         params: { path: { sid: this.sandboxId, eid: this.id } },
       }),
     );
-    return this._apply(data as SandboxExecWire);
+    return this._apply(data);
   }
 
   /** Cancel this exec and update it in place, returning the same object. */
@@ -179,7 +179,7 @@ export class SandboxExec {
         params: { path: { sid: this.sandboxId, eid: this.id } },
       }),
     );
-    return this._apply(data as SandboxExecWire);
+    return this._apply(data);
   }
 }
 
@@ -250,7 +250,7 @@ export class Sandbox {
         params: { path: { sid: this.id } },
       }),
     );
-    return this._apply(data as SandboxWire);
+    return this._apply(data);
   }
 
   /** Start this sandbox. */
@@ -264,7 +264,7 @@ export class Sandbox {
         params: { path: { sid: this.id }, query: { wait: false } },
       }),
     );
-    this._apply(data as SandboxWire);
+    this._apply(data);
     return waitForSandboxStart(this, deadline, timeoutMs);
   }
 
@@ -279,9 +279,9 @@ export class Sandbox {
         params: { path: { sid: this.id } },
       }),
     );
-    this._apply(data as SandboxWire);
+    this._apply(data);
 
-    for (;;) {
+    for (; ;) {
       if (["stopped", "exited", "failed"].includes(this.status)) return this;
       if (this.status !== "stopping") {
         throw new ArchilError(
@@ -311,9 +311,9 @@ export class Sandbox {
         params: { path: { sid: this.id } },
       }),
     );
-    this._apply(data as SandboxWire);
+    this._apply(data);
 
-    for (;;) {
+    for (; ;) {
       if (["paused", "stopped", "exited", "failed"].includes(this.status)) return this;
       if (this.status !== "pausing") {
         throw new ArchilError(
@@ -343,9 +343,9 @@ export class Sandbox {
         params: { path: { sid: this.id }, query: { wait: false } },
       }),
     );
-    this._apply(data as SandboxWire);
+    this._apply(data);
 
-    for (;;) {
+    for (; ;) {
       if (this.status === "running") return this;
       if (this.status !== "pending") {
         throw new ArchilError(
@@ -383,10 +383,10 @@ export class Sandbox {
         },
       }),
     );
-    const exec = new SandboxExec(data as SandboxExecWire, this._client);
+    const exec = new SandboxExec(data, this._client);
     if (exec.status !== "running") return exec;
 
-    for (;;) {
+    for (; ;) {
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
         throw new SandboxWaitTimeoutError("exec", timeoutMs, exec);
@@ -414,7 +414,7 @@ export class Sandbox {
         params: { path: { sid: this.id, eid: execId } },
       }),
     );
-    return new SandboxExec(data as SandboxExecWire, this._client);
+    return new SandboxExec(data, this._client);
   }
 
   async cancelExec(execId: string): Promise<SandboxExec> {
@@ -423,7 +423,7 @@ export class Sandbox {
         params: { path: { sid: this.id, eid: execId } },
       }),
     );
-    return new SandboxExec(data as SandboxExecWire, this._client);
+    return new SandboxExec(data, this._client);
   }
 }
 
@@ -433,7 +433,7 @@ export async function waitForSandboxStart(
   deadline: number,
   timeoutMs: number,
 ): Promise<Sandbox> {
-  for (;;) {
+  for (; ;) {
     if (sandbox.status === "running") return sandbox;
     if (sandbox.status !== "pending") {
       throw new SandboxStartError(sandbox);
