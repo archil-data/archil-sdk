@@ -1,5 +1,11 @@
 # disk
 
+## 0.8.23
+
+### Patch Changes
+
+- 45df6fe: Add sandbox creation, listing, lifecycle (including pause and resume), and command execution APIs.
+
 ## 0.8.22
 
 ### Patch Changes
