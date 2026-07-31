@@ -83,7 +83,7 @@ const client = new archil.Archil({
   apiKey: process.env.ARCHIL_API_KEY,
   region: "aws-us-east-1",
 });
-const sandbox = await client.sandboxes.create({ vcpuCount: 2, memSizeMiB: 4096 });
+const sandbox = await client.sandboxes.create();
 
 const result = await sandbox.exec("uname -a");
 console.log(result.stdout);
