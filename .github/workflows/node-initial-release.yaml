@@ -1,4 +1,4 @@
-name: Initial Release
+name: Initial Node Release
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   publish:
-    name: Publish initial package versions
+    name: Publish initial Node package versions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

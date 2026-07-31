@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/eve-e2e.yaml'
   workflow_dispatch:
 
 jobs:
