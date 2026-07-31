@@ -38,5 +38,11 @@ Configure these repository secrets:
 
 - `AI_GATEWAY_API_KEY`
 - `ARCHIL_API_KEY`
+
+And these repository variables for the target fleet:
+
 - `ARCHIL_REGION`
-- `ARCHIL_E2E_DISK_ID`
+- `ARCHIL_BASE_URL`
+- `ARCHIL_S3_BASE_URL`
+
+The workflow creates a temporary disk for each run and deletes it afterward.
