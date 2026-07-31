@@ -13,6 +13,7 @@ on:
       - 'python/**'
       - '.github/workflows/python-test.yaml'
       - '.github/workflows/python-release.yaml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - uses: astral-sh/setup-uv@v8
         with:
           python-version: ${{ matrix.python-version }}
           working-directory: python
@@ -55,3 +56,29 @@ jobs:
       - name: Build
         working-directory: python
         run: uv build
+
+  integration:
+    name: Test/staging fleet
+    runs-on: ubuntu-latest
+    env:
+      ARCHIL_API_KEY: ${{ secrets.ARCHIL_API_KEY }}
+      ARCHIL_REGION: ${{ vars.ARCHIL_INTEGRATION_REGION }}
+      ARCHIL_BASE_URL: ${{ vars.ARCHIL_INTEGRATION_BASE_URL }}
+      ARCHIL_S3_BASE_URL: ${{ vars.ARCHIL_INTEGRATION_S3_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v8
+        with:
+          python-version: '3.12'
+          working-directory: python
+
+      - name: Install package
+        working-directory: python
+        run: |
+          uv venv
+          uv pip install -e .
+
+      - name: Run integration test
+        working-directory: python
+        run: uv run --no-sync python integration/sdk_integration_test.py

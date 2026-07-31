@@ -9,10 +9,10 @@ control-plane REST surface and the S3-compatible object API end-to-end — which
 the entire Python SDK surface.
 
 Environment variables:
-  ARCHIL_API_KEY        API key for the staging account
-  ARCHIL_REGION         Region string (e.g. "aws-us-east-1")
-  ARCHIL_BASE_URL       Optional control-plane URL override
-  ARCHIL_S3_BASE_URL    Optional S3-compatible gateway URL override
+  ARCHIL_API_KEY        API key for the test/staging account
+  ARCHIL_REGION         Fleet region (e.g. "test.us-east-1.red")
+  ARCHIL_BASE_URL       Test/staging control-plane URL
+  ARCHIL_S3_BASE_URL    Test/staging S3-compatible gateway URL
 """
 
 from __future__ import annotations
