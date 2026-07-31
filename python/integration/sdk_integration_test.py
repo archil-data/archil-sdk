@@ -9,14 +9,10 @@ control-plane REST surface and the S3-compatible object API end-to-end — which
 the entire Python SDK surface.
 
 Environment variables:
-  ARCHIL_API_KEY        API key for the controlplane
-  ARCHIL_REGION         Region string (e.g. "test.integration.us-east-1.green")
-  ARCHIL_BASE_URL       Controlplane public API (e.g. "http://controlplane:8080")
-  ARCHIL_S3_BASE_URL    S3-compatible gateway (e.g. "http://controlplane:9000")
-  ARCHIL_TEST_BUCKET    S3 bucket for the disk mount config
-  AWS_ACCESS_KEY_ID     AWS credentials for the S3 bucket
-  AWS_SECRET_ACCESS_KEY
-  ARCHIL_BUCKET_ENDPOINT  Bucket endpoint (default: http://localstack:4566)
+  ARCHIL_API_KEY        API key for the staging account
+  ARCHIL_REGION         Region string (e.g. "aws-us-east-1")
+  ARCHIL_BASE_URL       Optional control-plane URL override
+  ARCHIL_S3_BASE_URL    Optional S3-compatible gateway URL override
 """
 
 from __future__ import annotations
@@ -24,10 +20,9 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-import time
 import uuid
 
-from archil import Archil, ArchilError, ArchilS3Error, S3CompatibleMount, TokenUser
+from archil import Archil, ArchilError, ArchilS3Error, TokenUser
 
 
 def require_env(name: str) -> str:
@@ -284,31 +279,17 @@ def run_s3_advanced_suite(disk) -> None:
 def main() -> None:
     api_key = require_env("ARCHIL_API_KEY")
     region = require_env("ARCHIL_REGION")
-    base_url = require_env("ARCHIL_BASE_URL")
-    s3_base_url = require_env("ARCHIL_S3_BASE_URL")
-    bucket = require_env("ARCHIL_TEST_BUCKET")
-    aws_access_key_id = require_env("AWS_ACCESS_KEY_ID")
-    aws_secret_access_key = require_env("AWS_SECRET_ACCESS_KEY")
-    bucket_endpoint = os.environ.get("ARCHIL_BUCKET_ENDPOINT", "http://localstack:4566")
+    base_url = os.environ.get("ARCHIL_BASE_URL")
+    s3_base_url = os.environ.get("ARCHIL_S3_BASE_URL")
 
-    disk_name = f"sdk-py-test-{int(time.time())}"
+    disk_name = f"sdk-py-test-{uuid.uuid4().hex[:12]}"
     disk_id = None
     disk_b_id = None
     archil = Archil(api_key=api_key, region=region, base_url=base_url, s3_base_url=s3_base_url)
 
     try:
         with step("Create disk"):
-            result = archil.disks.create(
-                name=disk_name,
-                mounts=[
-                    S3CompatibleMount(
-                        bucket_name=bucket,
-                        bucket_endpoint=bucket_endpoint,
-                        access_key_id=aws_access_key_id,
-                        secret_access_key=aws_secret_access_key,
-                    )
-                ],
-            )
+            result = archil.disks.create(name=disk_name)
             disk = result.disk
             disk_id = disk.id
 
@@ -333,20 +314,7 @@ def main() -> None:
         run_agent_tools_suite(disk)
 
         with step("Create second disk for workspace routing"):
-            result_b = archil.disks.create(
-                name=f"{disk_name}-b",
-                mounts=[
-                    S3CompatibleMount(
-                        bucket_name=bucket,
-                        bucket_endpoint=bucket_endpoint,
-                        access_key_id=aws_access_key_id,
-                        secret_access_key=aws_secret_access_key,
-                        # Distinct prefix so the two disks don't share objects in
-                        # the same bucket.
-                        bucket_prefix=f"ws-b-{int(time.time())}",
-                    )
-                ],
-            )
+            result_b = archil.disks.create(name=f"{disk_name}-b")
             disk_b = result_b.disk
             disk_b_id = disk_b.id
 
