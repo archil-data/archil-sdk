@@ -62,9 +62,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ARCHIL_API_KEY: ${{ secrets.ARCHIL_API_KEY }}
-      ARCHIL_REGION: ${{ vars.ARCHIL_INTEGRATION_REGION }}
-      ARCHIL_BASE_URL: ${{ vars.ARCHIL_INTEGRATION_BASE_URL }}
-      ARCHIL_S3_BASE_URL: ${{ vars.ARCHIL_INTEGRATION_S3_BASE_URL }}
+      ARCHIL_REGION: ${{ vars.ARCHIL_REGION }}
+      ARCHIL_BASE_URL: ${{ vars.ARCHIL_BASE_URL }}
+      ARCHIL_S3_BASE_URL: ${{ vars.ARCHIL_S3_BASE_URL }}
     steps:
       - uses: actions/checkout@v7
 
