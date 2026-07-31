@@ -1,4 +1,4 @@
 dist/
 node_modules/
 .ruff_cache/
-packages/python/uv.lock
+python/uv.lock

@@ -50,7 +50,7 @@ After the initial version exists on npm, configure trusted publishing for the pa
 
 The `archil` Python package has an independent release workflow:
 
-1. Update `packages/python/pyproject.toml` and `packages/python/CHANGELOG.md` in a release PR.
+1. Update `python/pyproject.toml` and `python/CHANGELOG.md` in a release PR.
 2. Merge the release PR to `main`.
 3. Tag that commit as `python/vX.Y.Z`, matching the version in `pyproject.toml`.
 4. The [Python release workflow](../.github/workflows/python-release.yaml) verifies the tag, runs the complete Python test suite, builds the wheel and source distribution, publishes them to PyPI with trusted publishing, and creates a GitHub release.
