@@ -14,7 +14,6 @@ let exitCode = 1;
 
 try {
   ({ disk } = await archil.disks.create({ name: diskName }));
-  disk = await waitUntilAvailable(disk.id);
 
   const child = spawn("eve", ["eval", ...process.argv.slice(2)], {
     stdio: "inherit",
@@ -28,14 +27,3 @@ try {
 }
 
 process.exitCode = exitCode;
-
-async function waitUntilAvailable(id) {
-  for (let attempt = 0; attempt < 60; attempt++) {
-    const current = await archil.disks.get(id);
-    if (current.status === "available") {
-      return current;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-  }
-  throw new Error(`Timed out waiting for disk ${id} to become available`);
-}
