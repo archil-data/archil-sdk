@@ -41,8 +41,8 @@ Configure these repository secrets:
 
 And these repository variables for the target fleet:
 
-- `ARCHIL_REGION`
-- `ARCHIL_BASE_URL`
-- `ARCHIL_S3_BASE_URL`
+- `ARCHIL_INTEGRATION_REGION`
+- `ARCHIL_INTEGRATION_BASE_URL`
+- `ARCHIL_INTEGRATION_S3_BASE_URL`
 
 The workflow creates a temporary disk for each run and deletes it afterward.
