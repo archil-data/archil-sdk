@@ -13,14 +13,16 @@ from archil_openapi.api.disk_configuration import (
     set_allowed_i_ps,
 )
 from archil_openapi.api.disk_users import add_disk_user, remove_disk_user
-from archil_openapi.api.disks import delete_disk, exec_disk, get_disk, grep_disk
+from archil_openapi.api.disks import create_share_url, delete_disk, exec_disk, get_disk, grep_disk
 from archil_openapi.models.aws_sts_user import AwsStsUser as OpenApiAwsStsUser
+from archil_openapi.models.create_share_url_request import CreateShareUrlRequest
 from archil_openapi.models.exec_disk_request import ExecDiskRequest
 from archil_openapi.models.grep_disk_request import GrepDiskRequest
 from archil_openapi.models.remove_disk_user_user_type import RemoveDiskUserUserType
 from archil_openapi.models.revoke_delegation_request import RevokeDelegationRequest
 from archil_openapi.models.set_allowed_i_ps_body import SetAllowedIPsBody
 from archil_openapi.models.token_user import TokenUser as OpenApiTokenUser
+from archil_openapi.types import UNSET
 
 from ._http import BodyType, _Transport
 from ._models import (
@@ -419,8 +421,17 @@ class _Disk:
         at most 604800 = 7 days). Defaults to 24 hours.
 
         Async: ``await disk.share.aio(key)``."""
-        data = await self._transport.create_share_url(self.id, key, expires_in)
-        return ShareUrl.from_json(data)
+        response = self._transport.unwrap(
+            await create_share_url.asyncio_detailed(
+                self.id,
+                client=self._transport.openapi,
+                body=CreateShareUrlRequest(
+                    key=key,
+                    expires_in=UNSET if expires_in is None else expires_in,
+                ),
+            )
+        )
+        return ShareUrl.from_json(response.data.to_dict())
 
     # --- Agent tools -------------------------------------------------------
 

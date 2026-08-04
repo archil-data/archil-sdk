@@ -106,26 +106,6 @@ class _Transport:
             )
         return parsed
 
-    async def create_share_url(
-        self, disk_id: str, key: str, expires_in: Optional[int]
-    ) -> dict[str, Any]:
-        request_body: dict[str, Any] = {"key": key}
-        if expires_in is not None:
-            request_body["expiresIn"] = expires_in
-
-        response = await self.openapi.get_async_httpx_client().post(
-            f"/api/disks/{disk_id}/share", json=request_body
-        )
-        try:
-            body = response.json()
-        except ValueError:
-            body = None
-        if not body or not body.get("success"):
-            message = (body or {}).get("error") or f"API request failed with status {response.status_code}"
-            code = body.get("code") if body else None
-            raise ArchilApiError(message, response.status_code, code)
-        return body["data"]
-
     async def s3_request(
         self,
         method: str,
