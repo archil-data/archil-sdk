@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import AsyncIterator, Optional, Sequence
 
+from archil_openapi.api.disks import create_disk, get_disk, list_disks
+from archil_openapi.models.create_disk_request import CreateDiskRequest
+from archil_openapi.types import UNSET, Unset
+
 from ._disk import _Disk
 from ._http import _Transport
 from ._models import AuthorizedUser, CreateDiskResult, DiskData, DiskPage, MountConfig
@@ -25,12 +29,19 @@ class _Disks:
     async def _page(
         self, *, limit: Optional[int], cursor: Optional[str], name: Optional[str] = None
     ) -> tuple[list["_Disk"], Optional[str]]:
-        data, next_cursor = await self._transport.request_json_page(
-            "GET", "/api/disks", params={"limit": limit, "cursor": cursor, "name": name}
+        response = self._transport.unwrap(
+            await list_disks.asyncio_detailed(
+                client=self._transport.openapi,
+                limit=UNSET if limit is None else limit,
+                cursor=UNSET if cursor is None else cursor,
+                name=UNSET if name is None else name,
+            )
         )
-        # `data or []`: the list endpoint can come back as JSON `null` (Go nil
-        # slice) for an empty account, which would otherwise raise TypeError.
-        disks = [_Disk(self._transport, self._region, DiskData.from_json(d)) for d in (data or [])]
+        disks = [
+            _Disk(self._transport, self._region, DiskData.from_json(disk.to_dict()))
+            for disk in response.data
+        ]
+        next_cursor = None if isinstance(response.next_cursor, Unset) else response.next_cursor
         return disks, next_cursor
 
     async def list(
@@ -85,8 +96,10 @@ class _Disks:
             cursor = next_cursor
 
     async def get(self, id: str) -> "_Disk":
-        data = await self._transport.request_json("GET", f"/api/disks/{id}")
-        return _Disk(self._transport, self._region, DiskData.from_json(data))
+        response = self._transport.unwrap(
+            await get_disk.asyncio_detailed(id, client=self._transport.openapi)
+        )
+        return _Disk(self._transport, self._region, DiskData.from_json(response.data.to_dict()))
 
     async def create(
         self,
@@ -105,13 +118,19 @@ class _Disks:
         if allowed_ips is not None:
             body["allowedIps"] = allowed_ips
 
-        created = await self._transport.request_json("POST", "/api/disks", json=body)
-        disk_id = created.get("diskId")
-        if not disk_id:
+        response = self._transport.unwrap(
+            await create_disk.asyncio_detailed(
+                client=self._transport.openapi,
+                body=CreateDiskRequest.from_dict(body),
+            )
+        )
+        created = response.data
+        if isinstance(created.disk_id, Unset):
             raise RuntimeError("API returned success but no diskId")
+        disk_id = created.disk_id
 
         authorized_users = [
-            AuthorizedUser.from_json(u) for u in (created.get("authorizedUsers") or [])
+            AuthorizedUser.from_json(user.to_dict()) for user in (created.authorized_users or [])
         ]
         token_user = next((u for u in authorized_users if u.token), None)
 

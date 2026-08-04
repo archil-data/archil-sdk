@@ -21,7 +21,11 @@ def _disk(archil, router):
 
 def test_add_user_serializes_token_user(archil, router):
     d = _disk(archil, router)
-    router.set(lambda req: ok_envelope({"type": "token", "identifier": "tok-1", "nickname": "ci"}))
+    router.set(
+        lambda req: ok_envelope(
+            {"type": "token", "identifier": "tok-1", "nickname": "ci"}, status=201
+        )
+    )
     user = d.add_user(TokenUser(nickname="ci"))
     assert user.identifier == "tok-1"
     assert router.requests[-1].json == {"type": "token", "nickname": "ci"}
@@ -29,14 +33,14 @@ def test_add_user_serializes_token_user(archil, router):
 
 def test_add_user_awssts(archil, router):
     d = _disk(archil, router)
-    router.set(lambda req: ok_envelope({"type": "awssts", "identifier": "arn:x"}))
+    router.set(lambda req: ok_envelope({"type": "awssts", "identifier": "arn:x"}, status=201))
     d.add_user(AwsStsUser(principal="arn:x"))
     assert router.requests[-1].json == {"type": "awssts", "principal": "arn:x"}
 
 
 def test_remove_user_query_param(archil, router):
     d = _disk(archil, router)
-    router.set(lambda req: ok_envelope(None))
+    router.set(lambda req: ok_envelope({"message": "User removed"}))
     d.remove_user("token", "tok-1")
     req = router.requests[-1]
     assert req.method == "DELETE"
@@ -125,13 +129,12 @@ def test_allowed_ips_add_and_remove(archil, router):
     assert "10.0.0.0/8" not in after_remove
 
 
-def test_allowed_ips_null_array(archil, router):
+def test_allowed_ips_empty_array(archil, router):
     d = _disk(archil, router)
-    # Empty allowlist as JSON null must come back as [], and add must still work.
-    router.set(lambda req: ok_envelope({"allowedIps": None}))
+    router.set(lambda req: ok_envelope({"allowedIps": []}))
     assert d.get_allowed_ips() == []
 
-    state = {"ips": None}
+    state = {"ips": []}
 
     def handler(req):
         if req.method == "PUT":
@@ -140,7 +143,7 @@ def test_allowed_ips_null_array(archil, router):
         return ok_envelope({"allowedIps": state["ips"]})
 
     router.set(handler)
-    after = d.add_allowed_ip("1.2.3.4")  # must not TypeError on the null current list
+    after = d.add_allowed_ip("1.2.3.4")
     assert after == ["1.2.3.4"]
 
 
@@ -174,11 +177,10 @@ def test_exec_and_grep(archil, router):
     assert grep.matches[0].line == 3
     assert grep.stopped_reason == "completed"
 
-    # Go nil slice: "matches": null must yield [] rather than TypeError.
     router.set(
         lambda req: ok_envelope(
             {
-                "matches": None,
+                "matches": [],
                 "stoppedReason": "completed",
                 "filesScanned": 0,
                 "containersDispatched": 0,

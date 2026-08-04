@@ -14,6 +14,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "archil-openapi>=0.0.3,<0.0.4",
     "httpx>=0.27",
     "synchronicity>=0.12.3",
 ]

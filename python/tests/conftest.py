@@ -53,11 +53,11 @@ class Router:
         self._handler = handler
 
 
-def ok_envelope(data, next_cursor: Optional[str] = None) -> httpx.Response:
+def ok_envelope(data, next_cursor: Optional[str] = None, status: int = 200) -> httpx.Response:
     body = {"success": True, "data": data}
     if next_cursor is not None:
         body["nextCursor"] = next_cursor
-    return httpx.Response(200, json=body)
+    return httpx.Response(status, json=body)
 
 
 def error_envelope(status: int, message: str) -> httpx.Response:

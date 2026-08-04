@@ -21,14 +21,18 @@ def test_list_tokens_null_array(archil, router):
 
 
 def test_create_token_returns_full_value(archil, router):
-    router.set(lambda req: ok_envelope({"id": "t1", "name": "ci", "token": "key-secret"}))
+    router.set(
+        lambda req: ok_envelope(
+            {"id": "t1", "name": "ci", "token": "key-secret"}, status=201
+        )
+    )
     created = archil.tokens.create(name="ci", description="bot")
     assert created.token == "key-secret"
     assert router.requests[-1].json == {"name": "ci", "description": "bot"}
 
 
 def test_delete_token(archil, router):
-    router.set(lambda req: ok_envelope(None))
+    router.set(lambda req: ok_envelope({"message": "Token deleted"}))
     archil.tokens.delete("t1")
     assert router.requests[-1].method == "DELETE"
     assert router.requests[-1].path == "/api/tokens/t1"
