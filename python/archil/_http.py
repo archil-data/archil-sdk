@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Any, Optional, Union
+from typing import Optional, TypeVar, Union
 from urllib.parse import quote
 
 import httpx
@@ -14,6 +14,7 @@ from ._version import USER_AGENT
 from .errors import ArchilApiError
 
 BodyType = Union[str, bytes, bytearray, memoryview]
+ResponseType = TypeVar("ResponseType")
 
 
 # Default request timeout (seconds) applied to every control-plane and S3 call.
@@ -95,7 +96,7 @@ class _Transport:
             )
         return self._s3
 
-    def unwrap(self, response: Response[Any]) -> Any:
+    def unwrap(self, response: Response[Union[ErrorResponse, ResponseType]]) -> ResponseType:
         parsed = response.parsed
         if isinstance(parsed, ErrorResponse):
             code = None if isinstance(parsed.code, Unset) else parsed.code

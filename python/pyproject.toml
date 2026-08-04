@@ -31,11 +31,10 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.14",
     "synchronicity[compile]>=0.12.3",
-    "mypy>=1.11",
-    "pyright>=1.1.390",
     "openai-agents>=0.0.1",
     "openai<2.45",
     "langchain-core>=0.3",
+    "ty>=0.0.66",
 ]
 
 [tool.uv.build-backend]

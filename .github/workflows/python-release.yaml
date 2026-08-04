@@ -60,9 +60,7 @@ jobs:
 
       - name: Type-check public API
         working-directory: python
-        run: |
-          uv run --no-sync mypy tests/typing_smoke.py
-          uv run --no-sync pyright tests/typing_smoke.py
+        run: uv run --no-sync ty check tests/typing_smoke.py
 
       - name: Build
         working-directory: python
