@@ -183,8 +183,12 @@ class _Disk:
         return self._data.last_accessed
 
     @property
-    def data_size(self) -> Optional[int]:
-        return self._data.data_size
+    def active_data_bytes(self) -> Optional[int]:
+        return self._data.active_data_bytes
+
+    @property
+    def total_data_bytes(self) -> Optional[int]:
+        return self._data.total_data_bytes
 
     @property
     def monthly_usage(self) -> Optional[str]:
