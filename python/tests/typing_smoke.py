@@ -18,6 +18,7 @@ from archil import (
     S3CompatibleMount,
     S3Mount,
     TokenUser,
+    Unset,
     Workspace,
 )
 
@@ -43,7 +44,7 @@ def sync_usage() -> None:
     if d.status == "available":  # DiskStatus literal — typos would be a type error
         pass
     user = d.add_user(TokenUser(nickname="ci"))
-    d.remove_user("token", user.identifier or "")
+    d.remove_user("token", "" if isinstance(user.identifier, Unset) else user.identifier)
     delegations: list[Delegation] = d.list_delegations()
     if delegations:
         d.revoke_delegation(delegations[0])

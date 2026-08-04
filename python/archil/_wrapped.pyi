@@ -3,6 +3,21 @@ import archil._http
 import archil._models
 import archil._workspace
 import archil.agent_tools._toolset
+import archil_openapi.models.api_response_share_url_data
+import archil_openapi.models.api_response_token_created_data
+import archil_openapi.models.api_token_response
+import archil_openapi.models.authorized_user
+import archil_openapi.models.connected_client
+import archil_openapi.models.delegation_entry
+import archil_openapi.models.disk_metrics
+import archil_openapi.models.disk_response
+import archil_openapi.models.disk_response_capabilities_item
+import archil_openapi.models.disk_response_status
+import archil_openapi.models.exec_disk_result
+import archil_openapi.models.grep_disk_result
+import archil_openapi.models.mount_response
+import archil_openapi.types
+import datetime
 import typing
 import typing_extensions
 
@@ -28,7 +43,7 @@ class Archil:
         ...
 
     class __exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, disks: dict[str, typing.Union[object, str, archil._archil.ExecMountSpec]], command: str) -> archil._models.ExecResult:
+        def __call__(self, /, *, disks: dict[str, typing.Union[object, str, archil._archil.ExecMountSpec]], command: str) -> archil_openapi.models.exec_disk_result.ExecDiskResult:
             """Run a command in a container with multiple disks mounted
             simultaneously, each at its own relative path under ``/mnt/archil``.
             Blocks until the command completes and returns its stdout, stderr, exit
@@ -36,7 +51,7 @@ class Archil:
             """
             ...
 
-        async def aio(self, /, *, disks: dict[str, typing.Union[object, str, archil._archil.ExecMountSpec]], command: str) -> archil._models.ExecResult:
+        async def aio(self, /, *, disks: dict[str, typing.Union[object, str, archil._archil.ExecMountSpec]], command: str) -> archil_openapi.models.exec_disk_result.ExecDiskResult:
             """Run a command in a container with multiple disks mounted
             simultaneously, each at its own relative path under ``/mnt/archil``.
             Blocks until the command completes and returns its stdout, stderr, exit
@@ -327,7 +342,7 @@ class Disk:
     directly to block (``disk.put_object(...)``), or use the ``.aio`` attribute
     to get a coroutine (``await disk.put_object.aio(...)``).
     """
-    def __init__(self, transport: archil._http._Transport, region: str, data: archil._models.DiskData) -> None:
+    def __init__(self, transport: archil._http._Transport, region: str, data: archil_openapi.models.disk_response.DiskResponse) -> None:
         ...
 
     def __repr__(self) -> str:
@@ -346,7 +361,7 @@ class Disk:
         ...
 
     @property
-    def status(self) -> typing.Literal['available', 'creating', 'deleting', 'deleted', 'failed']:
+    def status(self) -> archil_openapi.models.disk_response_status.DiskResponseStatus:
         ...
 
     @property
@@ -358,58 +373,58 @@ class Disk:
         ...
 
     @property
-    def created_at(self) -> str:
+    def created_at(self) -> datetime.datetime:
         ...
 
     @property
-    def fs_handler_status(self) -> typing.Optional[str]:
+    def fs_handler_status(self) -> typing.Union[archil_openapi.types.Unset, str]:
         ...
 
     @property
-    def last_accessed(self) -> typing.Optional[str]:
+    def last_accessed(self) -> typing.Union[archil_openapi.types.Unset, datetime.datetime]:
         ...
 
     @property
-    def active_data_bytes(self) -> typing.Optional[int]:
+    def active_data_bytes(self) -> typing.Union[archil_openapi.types.Unset, int]:
         ...
 
     @property
-    def total_data_bytes(self) -> typing.Optional[int]:
+    def total_data_bytes(self) -> typing.Union[archil_openapi.types.Unset, int]:
         ...
 
     @property
-    def monthly_usage(self) -> typing.Optional[str]:
+    def monthly_usage(self) -> typing.Union[archil_openapi.types.Unset, str]:
         ...
 
     @property
-    def mounts(self) -> typing.Optional[list[archil._models.MountResponse]]:
+    def mounts(self) -> typing.Union[archil_openapi.types.Unset, list[archil_openapi.models.mount_response.MountResponse]]:
         ...
 
     @property
-    def metrics(self) -> typing.Optional[archil._models.DiskMetrics]:
+    def metrics(self) -> typing.Union[archil_openapi.types.Unset, archil_openapi.models.disk_metrics.DiskMetrics]:
         ...
 
     @property
-    def connected_clients(self) -> typing.Optional[list[archil._models.ConnectedClient]]:
+    def connected_clients(self) -> typing.Union[archil_openapi.types.Unset, list[archil_openapi.models.connected_client.ConnectedClient]]:
         ...
 
     @property
-    def authorized_users(self) -> typing.Optional[list[archil._models.AuthorizedUser]]:
+    def authorized_users(self) -> typing.Union[archil_openapi.types.Unset, list[archil_openapi.models.authorized_user.AuthorizedUser]]:
         ...
 
     @property
-    def allowed_ips(self) -> typing.Optional[list[str]]:
+    def allowed_ips(self) -> typing.Union[archil_openapi.types.Unset, list[str]]:
         ...
 
     @property
-    def capabilities(self) -> typing.Optional[list[str]]:
+    def capabilities(self) -> typing.Union[archil_openapi.types.Unset, list[archil_openapi.models.disk_response_capabilities_item.DiskResponseCapabilitiesItem]]:
         ...
 
     class __add_user_spec(typing_extensions.Protocol):
-        def __call__(self, /, user: typing.Union[archil._models.TokenUser, archil._models.AwsStsUser, dict]) -> archil._models.AuthorizedUser:
+        def __call__(self, /, user: typing.Union[archil._models.TokenUser, archil._models.AwsStsUser, dict]) -> archil_openapi.models.authorized_user.AuthorizedUser:
             ...
 
-        async def aio(self, /, user: typing.Union[archil._models.TokenUser, archil._models.AwsStsUser, dict]) -> archil._models.AuthorizedUser:
+        async def aio(self, /, user: typing.Union[archil._models.TokenUser, archil._models.AwsStsUser, dict]) -> archil_openapi.models.authorized_user.AuthorizedUser:
             ...
 
     add_user: __add_user_spec
@@ -424,13 +439,13 @@ class Disk:
     remove_user: __remove_user_spec
 
     class __create_token_spec(typing_extensions.Protocol):
-        def __call__(self, /, nickname: str) -> archil._models.AuthorizedUser:
+        def __call__(self, /, nickname: str) -> archil_openapi.models.authorized_user.AuthorizedUser:
             """Create a token user and return it, including the one-time ``token`` and
             its ``identifier``. The token is shown exactly once.
             """
             ...
 
-        async def aio(self, /, nickname: str) -> archil._models.AuthorizedUser:
+        async def aio(self, /, nickname: str) -> archil_openapi.models.authorized_user.AuthorizedUser:
             """Create a token user and return it, including the one-time ``token`` and
             its ``identifier``. The token is shown exactly once.
             """
@@ -448,22 +463,22 @@ class Disk:
     remove_token_user: __remove_token_user_spec
 
     class __list_delegations_spec(typing_extensions.Protocol):
-        def __call__(self, /) -> list[archil._models.Delegation]:
+        def __call__(self, /) -> list[archil_openapi.models.delegation_entry.DelegationEntry]:
             """List the delegations currently held on this disk."""
             ...
 
-        async def aio(self, /) -> list[archil._models.Delegation]:
+        async def aio(self, /) -> list[archil_openapi.models.delegation_entry.DelegationEntry]:
             """List the delegations currently held on this disk."""
             ...
 
     list_delegations: __list_delegations_spec
 
     class __revoke_delegation_spec(typing_extensions.Protocol):
-        def __call__(self, /, delegation: archil._models.Delegation) -> None:
+        def __call__(self, /, delegation: archil_openapi.models.delegation_entry.DelegationEntry) -> None:
             """Forcibly revoke a delegation identified by its client and inode."""
             ...
 
-        async def aio(self, /, delegation: archil._models.Delegation) -> None:
+        async def aio(self, /, delegation: archil_openapi.models.delegation_entry.DelegationEntry) -> None:
             """Forcibly revoke a delegation identified by its client and inode."""
             ...
 
@@ -555,13 +570,13 @@ class Disk:
     wait_until_ready: __wait_until_ready_spec
 
     class __exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, command: str) -> archil._models.ExecResult:
+        def __call__(self, /, command: str) -> archil_openapi.models.exec_disk_result.ExecDiskResult:
             """Execute a command in a container with this disk mounted. Blocks until
             the command completes and returns stdout, stderr, and exit code.
             """
             ...
 
-        async def aio(self, /, command: str) -> archil._models.ExecResult:
+        async def aio(self, /, command: str) -> archil_openapi.models.exec_disk_result.ExecDiskResult:
             """Execute a command in a container with this disk mounted. Blocks until
             the command completes and returns stdout, stderr, and exit code.
             """
@@ -570,14 +585,14 @@ class Disk:
     exec: __exec_spec
 
     class __grep_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
+        def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil_openapi.models.grep_disk_result.GrepDiskResult:
             """Constant-time parallel grep across files on this disk. The returned
             ``stopped_reason`` says whether the search ran to completion or
             short-circuited on ``max_results`` / ``max_duration_seconds``.
             """
             ...
 
-        async def aio(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
+        async def aio(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil_openapi.models.grep_disk_result.GrepDiskResult:
             """Constant-time parallel grep across files on this disk. The returned
             ``stopped_reason`` says whether the search ran to completion or
             short-circuited on ``max_results`` / ``max_duration_seconds``.
@@ -587,7 +602,7 @@ class Disk:
     grep: __grep_spec
 
     class __share_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str, *, expires_in: typing.Optional[int] = None) -> archil._models.ShareUrl:
+        def __call__(self, /, key: str, *, expires_in: typing.Optional[int] = None) -> archil_openapi.models.api_response_share_url_data.ApiResponseShareUrlData:
             """Create a signed, time-limited URL that lets anyone download a single
             file from this disk without authentication. The returned URL embeds a
             cryptographically signed token carrying the disk, the file's key, and an
@@ -600,7 +615,7 @@ class Disk:
             """
             ...
 
-        async def aio(self, /, key: str, *, expires_in: typing.Optional[int] = None) -> archil._models.ShareUrl:
+        async def aio(self, /, key: str, *, expires_in: typing.Optional[int] = None) -> archil_openapi.models.api_response_share_url_data.ApiResponseShareUrlData:
             """Create a signed, time-limited URL that lets anyone download a single
             file from this disk without authentication. The returned URL embeds a
             cryptographically signed token carrying the disk, the file's key, and an
@@ -924,19 +939,19 @@ class Tokens:
         ...
 
     class __list_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil._models.ApiTokenResponse]:
+        def __call__(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil_openapi.models.api_token_response.ApiTokenResponse]:
             ...
 
-        async def aio(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil._models.ApiTokenResponse]:
+        async def aio(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil_openapi.models.api_token_response.ApiTokenResponse]:
             ...
 
     list: __list_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str, description: typing.Optional[str] = None) -> archil._models.ApiTokenResponse:
+        def __call__(self, /, *, name: str, description: typing.Optional[str] = None) -> archil_openapi.models.api_response_token_created_data.ApiResponseTokenCreatedData:
             ...
 
-        async def aio(self, /, *, name: str, description: typing.Optional[str] = None) -> archil._models.ApiTokenResponse:
+        async def aio(self, /, *, name: str, description: typing.Optional[str] = None) -> archil_openapi.models.api_response_token_created_data.ApiResponseTokenCreatedData:
             ...
 
     create: __create_spec
@@ -1038,19 +1053,19 @@ class Workspace:
     _list_one: ___list_one_spec
 
     class __grep_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
+        def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil_openapi.models.grep_disk_result.GrepDiskResult:
             ...
 
-        async def aio(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
+        async def aio(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil_openapi.models.grep_disk_result.GrepDiskResult:
             ...
 
     grep: __grep_spec
 
     class __exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, command: str) -> archil._models.ExecResult:
+        def __call__(self, /, command: str) -> archil_openapi.models.exec_disk_result.ExecDiskResult:
             ...
 
-        async def aio(self, /, command: str) -> archil._models.ExecResult:
+        async def aio(self, /, command: str) -> archil_openapi.models.exec_disk_result.ExecDiskResult:
             ...
 
     exec: __exec_spec

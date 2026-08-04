@@ -2,299 +2,187 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Optional, Union
+from typing import Any, Optional, Union
 
-# ---------------------------------------------------------------------------
-# Output models — parsed from the control-plane JSON (camelCase) into snake_case
-# Python dataclasses. Each carries a from_json classmethod; unknown fields are
-# ignored so a server that adds fields doesn't break older clients.
-# ---------------------------------------------------------------------------
+from archil_openapi.models.authorized_user import AuthorizedUser
+from archil_openapi.models.aws_sts_user import AwsStsUser as OpenApiAwsStsUser
+from archil_openapi.models.aws_sts_user_type import AwsStsUserType
+from archil_openapi.models.azure_blob_storage import AzureBlobStorage
+from archil_openapi.models.azure_blob_storage_type import AzureBlobStorageType
+from archil_openapi.models.cloudflare_r2 import CloudflareR2
+from archil_openapi.models.cloudflare_r2_type import CloudflareR2Type
+from archil_openapi.models.google_cloud_storage import GoogleCloudStorage
+from archil_openapi.models.google_cloud_storage_type import GoogleCloudStorageType
+from archil_openapi.models.s3 import S3
+from archil_openapi.models.s3_compatible import S3Compatible
+from archil_openapi.models.s3_compatible_type import S3CompatibleType
+from archil_openapi.models.s3_type import S3Type
+from archil_openapi.models.token_user import TokenUser as OpenApiTokenUser
+from archil_openapi.models.token_user_type import TokenUserType
+from archil_openapi.types import UNSET
 
 
-@dataclass(frozen=True)
-class AuthorizedUser:
-    type: Optional[str] = None
-    principal: Optional[str] = None
-    nickname: Optional[str] = None
-    token_suffix: Optional[str] = None
-    token: Optional[str] = None
-    identifier: Optional[str] = None
-    created_at: Optional[str] = None
+def _optional(value: Any) -> Any:
+    return UNSET if value is None else value
 
-    @classmethod
-    def from_json(cls, d: dict) -> "AuthorizedUser":
-        return cls(
-            type=d.get("type"),
-            principal=d.get("principal"),
-            nickname=d.get("nickname"),
-            token_suffix=d.get("tokenSuffix"),
-            token=d.get("token"),
-            identifier=d.get("identifier"),
-            created_at=d.get("createdAt"),
+
+# These thin subclasses keep the SDK's existing ergonomic constructors while
+# delegating the fields and wire serialization to archil-openapi.
+class S3Mount(S3):
+    def __init__(
+        self,
+        bucket_name: str,
+        access_key_id: Optional[str] = None,
+        secret_access_key: Optional[str] = None,
+        session_token: Optional[str] = None,
+        bucket_prefix: Optional[str] = None,
+        bucket_region: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+            type_=S3Type.S3,
+            bucket_name=bucket_name,
+            access_key_id=_optional(access_key_id),
+            secret_access_key=_optional(secret_access_key),
+            session_token=_optional(session_token),
+            bucket_prefix=_optional(bucket_prefix),
+            bucket_region=_optional(bucket_region),
         )
 
 
-@dataclass(frozen=True)
-class MountConfigResponse:
-    bucket_name: Optional[str] = None
-    bucket_endpoint: Optional[str] = None
-    bucket_prefix: Optional[str] = None
-    session_id: Optional[str] = None
-
-    @classmethod
-    def from_json(cls, d: dict) -> "MountConfigResponse":
-        return cls(
-            bucket_name=d.get("bucketName"),
-            bucket_endpoint=d.get("bucketEndpoint"),
-            bucket_prefix=d.get("bucketPrefix"),
-            session_id=d.get("sessionId"),
+class GCSMount(GoogleCloudStorage):
+    def __init__(
+        self,
+        bucket_name: str,
+        access_key_id: str,
+        secret_access_key: str,
+        bucket_prefix: Optional[str] = None,
+        bucket_region: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+            type_=GoogleCloudStorageType.GCS,
+            bucket_name=bucket_name,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            bucket_prefix=_optional(bucket_prefix),
+            bucket_region=_optional(bucket_region),
         )
 
 
-@dataclass(frozen=True)
-class MountResponse:
-    id: Optional[str] = None
-    type: Optional[str] = None
-    path: Optional[str] = None
-    name: Optional[str] = None
-    access_mode: Optional[str] = None
-    config: Optional[MountConfigResponse] = None
-    connection_status: Optional[str] = None
-    auth_error: Optional[str] = None
-    authorization_type: Optional[str] = None
-
-    @classmethod
-    def from_json(cls, d: dict) -> "MountResponse":
-        config = d.get("config")
-        return cls(
-            id=d.get("id"),
-            type=d.get("type"),
-            path=d.get("path"),
-            name=d.get("name"),
-            access_mode=d.get("accessMode"),
-            config=MountConfigResponse.from_json(config) if config is not None else None,
-            connection_status=d.get("connectionStatus"),
-            auth_error=d.get("authError"),
-            authorization_type=d.get("authorizationType"),
+class R2Mount(CloudflareR2):
+    def __init__(
+        self,
+        bucket_name: str,
+        bucket_endpoint: str,
+        access_key_id: str,
+        secret_access_key: str,
+        bucket_prefix: Optional[str] = None,
+        bucket_region: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+            type_=CloudflareR2Type.R2,
+            bucket_name=bucket_name,
+            bucket_endpoint=bucket_endpoint,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            bucket_prefix=_optional(bucket_prefix),
+            bucket_region=_optional(bucket_region),
         )
 
 
-@dataclass(frozen=True)
-class DiskMetrics:
-    data_transfer: Optional[str] = None
-    requests: Optional[str] = None
-    avg_response_time: Optional[str] = None
-
-    @classmethod
-    def from_json(cls, d: dict) -> "DiskMetrics":
-        return cls(
-            data_transfer=d.get("dataTransfer"),
-            requests=d.get("requests"),
-            avg_response_time=d.get("avgResponseTime"),
+class S3CompatibleMount(S3Compatible):
+    def __init__(
+        self,
+        bucket_name: str,
+        bucket_endpoint: str,
+        access_key_id: str,
+        secret_access_key: str,
+        bucket_prefix: Optional[str] = None,
+        bucket_region: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+            type_=S3CompatibleType.S3_COMPATIBLE,
+            bucket_name=bucket_name,
+            bucket_endpoint=bucket_endpoint,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            bucket_prefix=_optional(bucket_prefix),
+            bucket_region=_optional(bucket_region),
         )
 
 
-@dataclass(frozen=True)
-class ConnectedClient:
-    id: Optional[str] = None
-    ip_address: Optional[str] = None
-    connected_at: Optional[str] = None
-
-    @classmethod
-    def from_json(cls, d: dict) -> "ConnectedClient":
-        return cls(
-            id=d.get("id"),
-            ip_address=d.get("ipAddress"),
-            connected_at=d.get("connectedAt"),
+class AzureBlobMount(AzureBlobStorage):
+    def __init__(
+        self,
+        container_name: str,
+        tenant_id: str,
+        client_id: str,
+        client_secret: str,
+        endpoint: Optional[str] = None,
+        storage_account_name: Optional[str] = None,
+        bucket_prefix: Optional[str] = None,
+    ) -> None:
+        super().__init__(
+            type_=AzureBlobStorageType.AZURE_BLOB,
+            container_name=container_name,
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=client_secret,
+            endpoint=_optional(endpoint),
+            storage_account_name=_optional(storage_account_name),
+            bucket_prefix=_optional(bucket_prefix),
         )
 
 
-@dataclass(frozen=True)
-class Delegation:
-    client_id: str
-    inode_id: int
-    is_pending: bool
-    is_orphaned: bool
-    path: Optional[str] = None
+MountConfig = Union[S3Mount, GCSMount, R2Mount, S3CompatibleMount, AzureBlobMount]
 
-    @classmethod
-    def from_json(cls, d: dict) -> "Delegation":
-        return cls(
-            client_id=d["clientId"],
-            inode_id=d["inodeId"],
-            path=d.get("path"),
-            is_pending=d["isPending"],
-            is_orphaned=d["isOrphaned"],
+
+class TokenUser(OpenApiTokenUser):
+    def __init__(
+        self,
+        nickname: str,
+        principal: Optional[str] = None,
+        token_suffix: Optional[str] = None,
+        ttl: Optional[str] = None,
+        expires_at: Optional[datetime] = None,
+        one_use: Optional[bool] = None,
+        read_only: Optional[bool] = None,
+    ) -> None:
+        super().__init__(
+            type_=TokenUserType.TOKEN,
+            nickname=nickname,
+            principal=_optional(principal),
+            token_suffix=_optional(token_suffix),
+            ttl=_optional(ttl),
+            expires_at=_optional(expires_at),
+            one_use=_optional(one_use),
+            read_only=_optional(read_only),
         )
 
 
-DiskStatus = Literal["available", "creating", "deleting", "deleted", "failed"]
-
-
-@dataclass(frozen=True)
-class DiskData:
-    """The full disk record returned by the control plane. Exposed field-by-field
-    as read-only properties on a ``Disk``."""
-
-    id: str
-    name: str
-    organization: str
-    status: "DiskStatus"
-    provider: str
-    region: str
-    created_at: str
-    fs_handler_status: Optional[str] = None
-    last_accessed: Optional[str] = None
-    active_data_bytes: Optional[int] = None
-    total_data_bytes: Optional[int] = None
-    monthly_usage: Optional[str] = None
-    mounts: Optional[list[MountResponse]] = None
-    metrics: Optional[DiskMetrics] = None
-    connected_clients: Optional[list[ConnectedClient]] = None
-    authorized_users: Optional[list[AuthorizedUser]] = None
-    allowed_ips: Optional[list[str]] = None
-    capabilities: Optional[list[str]] = None
-
-    @classmethod
-    def from_json(cls, d: dict) -> "DiskData":
-        mounts = d.get("mounts")
-        metrics = d.get("metrics")
-        clients = d.get("connectedClients")
-        users = d.get("authorizedUsers")
-        return cls(
-            id=d["id"],
-            name=d["name"],
-            organization=d["organization"],
-            status=d["status"],
-            provider=d["provider"],
-            region=d["region"],
-            created_at=d["createdAt"],
-            fs_handler_status=d.get("fsHandlerStatus"),
-            last_accessed=d.get("lastAccessed"),
-            active_data_bytes=d.get("activeDataBytes"),
-            total_data_bytes=d.get("totalDataBytes"),
-            monthly_usage=d.get("monthlyUsage"),
-            # `is not None` (not truthiness) so a present-but-empty array `[]` is
-            # preserved as `[]`, distinct from a missing/null field (-> None),
-            # matching the TS SDK and the allowed_ips field.
-            mounts=[MountResponse.from_json(m) for m in mounts] if mounts is not None else None,
-            metrics=DiskMetrics.from_json(metrics) if metrics is not None else None,
-            connected_clients=(
-                [ConnectedClient.from_json(c) for c in clients] if clients is not None else None
-            ),
-            authorized_users=(
-                [AuthorizedUser.from_json(u) for u in users] if users is not None else None
-            ),
-            allowed_ips=d.get("allowedIps"),
-            capabilities=d.get("capabilities"),
+class AwsStsUser(OpenApiAwsStsUser):
+    def __init__(
+        self,
+        principal: str,
+        ttl: Optional[str] = None,
+        expires_at: Optional[datetime] = None,
+        one_use: Optional[bool] = None,
+        read_only: Optional[bool] = None,
+    ) -> None:
+        super().__init__(
+            type_=AwsStsUserType.AWSSTS,
+            principal=principal,
+            ttl=_optional(ttl),
+            expires_at=_optional(expires_at),
+            one_use=_optional(one_use),
+            read_only=_optional(read_only),
         )
 
 
-@dataclass(frozen=True)
-class ExecTiming:
-    total_ms: int
-    queue_ms: int
-    execute_ms: int
-
-    @classmethod
-    def from_json(cls, d: dict) -> "ExecTiming":
-        return cls(
-            total_ms=d["totalMs"],
-            queue_ms=d["queueMs"],
-            execute_ms=d["executeMs"],
-        )
+DiskUser = Union[TokenUser, AwsStsUser]
 
 
-@dataclass(frozen=True)
-class ExecResult:
-    exit_code: int
-    stdout: str
-    stderr: str
-    timing: ExecTiming
-
-    @classmethod
-    def from_json(cls, d: dict) -> "ExecResult":
-        return cls(
-            exit_code=d["exitCode"],
-            stdout=d["stdout"],
-            stderr=d["stderr"],
-            timing=ExecTiming.from_json(d["timing"]),
-        )
-
-
-GrepStoppedReason = Literal["completed", "incomplete", "max_results", "deadline", "list_failed"]
-
-
-@dataclass(frozen=True)
-class GrepMatch:
-    file: str
-    line: int
-    text: str
-
-    @classmethod
-    def from_json(cls, d: dict) -> "GrepMatch":
-        return cls(file=d["file"], line=d["line"], text=d["text"])
-
-
-@dataclass(frozen=True)
-class GrepResult:
-    matches: list[GrepMatch]
-    stopped_reason: str
-    files_scanned: int
-    containers_dispatched: int
-    compute_seconds_used: float
-    duration_ms: int
-    listing_ms: int
-    grep_ms: int
-
-    @classmethod
-    def from_json(cls, d: dict) -> "GrepResult":
-        return cls(
-            matches=[GrepMatch.from_json(m) for m in (d.get("matches") or [])],
-            stopped_reason=d["stoppedReason"],
-            files_scanned=d["filesScanned"],
-            containers_dispatched=d["containersDispatched"],
-            compute_seconds_used=d["computeSecondsUsed"],
-            duration_ms=d["durationMs"],
-            listing_ms=d["listingMs"],
-            grep_ms=d["grepMs"],
-        )
-
-
-@dataclass(frozen=True)
-class ApiTokenResponse:
-    id: Optional[str] = None
-    name: Optional[str] = None
-    description: Optional[str] = None
-    token_suffix: Optional[str] = None
-    created_at: Optional[str] = None
-    last_used_at: Optional[str] = None
-    # Only present in the create response — the full token, shown exactly once.
-    token: Optional[str] = None
-
-    @classmethod
-    def from_json(cls, d: dict) -> "ApiTokenResponse":
-        return cls(
-            id=d.get("id"),
-            name=d.get("name"),
-            description=d.get("description"),
-            token_suffix=d.get("tokenSuffix"),
-            created_at=d.get("createdAt"),
-            last_used_at=d.get("lastUsedAt"),
-            token=d.get("token"),
-        )
-
-
-@dataclass(frozen=True)
-class ShareUrl:
-    url: str
-    expires_in: int
-
-    @classmethod
-    def from_json(cls, d: dict) -> "ShareUrl":
-        return cls(url=d["url"], expires_in=d["expiresIn"])
-
-
+# S3 gateway models are SDK-specific and are not part of the control-plane
+# OpenAPI schema.
 @dataclass(frozen=True)
 class S3Object:
     key: str
@@ -413,154 +301,6 @@ class DeleteObjectsError:
 class DeleteObjectsResult:
     deleted: list[str]
     errors: list[DeleteObjectsError]
-
-
-# ---------------------------------------------------------------------------
-# Input models — mounts and disk users. Each carries a to_json that emits the
-# camelCase shape the control plane expects, including the ``type`` discriminator.
-# ---------------------------------------------------------------------------
-
-
-def _drop_none(d: dict) -> dict:
-    return {k: v for k, v in d.items() if v is not None}
-
-
-@dataclass
-class S3Mount:
-    bucket_name: str
-    access_key_id: Optional[str] = None
-    secret_access_key: Optional[str] = None
-    session_token: Optional[str] = None
-    bucket_prefix: Optional[str] = None
-
-    def to_json(self) -> dict:
-        return _drop_none(
-            {
-                "type": "s3",
-                "bucketName": self.bucket_name,
-                "accessKeyId": self.access_key_id,
-                "secretAccessKey": self.secret_access_key,
-                "sessionToken": self.session_token,
-                "bucketPrefix": self.bucket_prefix,
-            }
-        )
-
-
-@dataclass
-class GCSMount:
-    bucket_name: str
-    access_key_id: str
-    secret_access_key: str
-    bucket_prefix: Optional[str] = None
-
-    def to_json(self) -> dict:
-        return _drop_none(
-            {
-                "type": "gcs",
-                "bucketName": self.bucket_name,
-                "accessKeyId": self.access_key_id,
-                "secretAccessKey": self.secret_access_key,
-                "bucketPrefix": self.bucket_prefix,
-            }
-        )
-
-
-@dataclass
-class R2Mount:
-    bucket_name: str
-    bucket_endpoint: str
-    access_key_id: str
-    secret_access_key: str
-    bucket_prefix: Optional[str] = None
-
-    def to_json(self) -> dict:
-        return _drop_none(
-            {
-                "type": "r2",
-                "bucketName": self.bucket_name,
-                "bucketEndpoint": self.bucket_endpoint,
-                "accessKeyId": self.access_key_id,
-                "secretAccessKey": self.secret_access_key,
-                "bucketPrefix": self.bucket_prefix,
-            }
-        )
-
-
-@dataclass
-class S3CompatibleMount:
-    bucket_name: str
-    bucket_endpoint: str
-    access_key_id: str
-    secret_access_key: str
-    bucket_prefix: Optional[str] = None
-
-    def to_json(self) -> dict:
-        return _drop_none(
-            {
-                "type": "s3-compatible",
-                "bucketName": self.bucket_name,
-                "bucketEndpoint": self.bucket_endpoint,
-                "accessKeyId": self.access_key_id,
-                "secretAccessKey": self.secret_access_key,
-                "bucketPrefix": self.bucket_prefix,
-            }
-        )
-
-
-@dataclass
-class AzureBlobMount:
-    container_name: str
-    tenant_id: str
-    client_id: str
-    client_secret: str
-    endpoint: Optional[str] = None
-    storage_account_name: Optional[str] = None
-    bucket_prefix: Optional[str] = None
-
-    def to_json(self) -> dict:
-        return _drop_none(
-            {
-                "type": "azure-blob",
-                "containerName": self.container_name,
-                "endpoint": self.endpoint,
-                "storageAccountName": self.storage_account_name,
-                "tenantId": self.tenant_id,
-                "clientId": self.client_id,
-                "clientSecret": self.client_secret,
-                "bucketPrefix": self.bucket_prefix,
-            }
-        )
-
-
-MountConfig = Union[S3Mount, GCSMount, R2Mount, S3CompatibleMount, AzureBlobMount]
-
-
-@dataclass
-class TokenUser:
-    nickname: str
-    principal: Optional[str] = None
-    token_suffix: Optional[str] = None
-
-    def to_json(self) -> dict:
-        return _drop_none(
-            {
-                "type": "token",
-                "nickname": self.nickname,
-                "principal": self.principal,
-                "tokenSuffix": self.token_suffix,
-            }
-        )
-
-
-@dataclass
-class AwsStsUser:
-    principal: str
-
-    def to_json(self) -> dict:
-        return {"type": "awssts", "principal": self.principal}
-
-
-DiskUser = Union[TokenUser, AwsStsUser]
 
 
 @dataclass(frozen=True)

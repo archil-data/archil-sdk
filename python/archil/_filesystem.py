@@ -16,8 +16,11 @@ from __future__ import annotations
 
 from typing import Optional, Protocol, runtime_checkable
 
+from archil_openapi.models.exec_disk_result import ExecDiskResult as ExecResult
+from archil_openapi.models.grep_disk_result import GrepDiskResult as GrepResult
+
 from ._http import BodyType
-from ._models import ExecResult, GrepResult, ListObjectsResult, PutObjectResult
+from ._models import ListObjectsResult, PutObjectResult
 
 
 @runtime_checkable

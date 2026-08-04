@@ -20,8 +20,13 @@ import asyncio
 from dataclasses import dataclass
 from typing import List, Optional
 
+from archil_openapi.models.exec_disk_result import ExecDiskResult as ExecResult
+from archil_openapi.models.grep_disk_result import GrepDiskResult as GrepResult
+from archil_openapi.models.grep_match import GrepMatch
+from archil_openapi.models.grep_stopped_reason import GrepStoppedReason
+
 from ._http import BodyType
-from ._models import ExecResult, GrepMatch, GrepResult, ListObjectsResult, PutObjectResult, S3Object
+from ._models import ListObjectsResult, PutObjectResult, S3Object
 from ._paths import to_segments
 from ._synchronizer import translate_in, translate_out
 
@@ -288,7 +293,7 @@ class _Workspace:
         )
         return GrepResult(
             matches=matches[:max_results],
-            stopped_reason=stopped_reason,
+            stopped_reason=GrepStoppedReason(stopped_reason),
             files_scanned=files_scanned,
             containers_dispatched=containers_dispatched,
             compute_seconds_used=compute_seconds_used,
