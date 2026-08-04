@@ -12,7 +12,8 @@ DISK_JSON = {
     "provider": "aws",
     "region": "aws-us-east-1",
     "createdAt": "2026-01-01T00:00:00Z",
-    "dataSize": 1234,
+    "activeDataBytes": 1234,
+    "totalDataBytes": 5678,
     "allowedIps": ["10.0.0.0/8"],
 }
 
@@ -23,7 +24,8 @@ def test_list_disks(archil, router):
     assert [d.id for d in disks] == ["dsk-1", "dsk-2"]
     assert isinstance(disks[0], Disk)
     assert disks[0].name == "my-disk"
-    assert disks[0].data_size == 1234
+    assert disks[0].active_data_bytes == 1234
+    assert disks[0].total_data_bytes == 5678
     assert disks[0].allowed_ips == ["10.0.0.0/8"]
     # auth header carries the single key- prefix
     assert router.requests[0].headers["authorization"] == "key-test"

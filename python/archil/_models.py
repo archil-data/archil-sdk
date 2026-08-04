@@ -145,7 +145,8 @@ class DiskData:
     created_at: str
     fs_handler_status: Optional[str] = None
     last_accessed: Optional[str] = None
-    data_size: Optional[int] = None
+    active_data_bytes: Optional[int] = None
+    total_data_bytes: Optional[int] = None
     monthly_usage: Optional[str] = None
     mounts: Optional[list[MountResponse]] = None
     metrics: Optional[DiskMetrics] = None
@@ -170,7 +171,8 @@ class DiskData:
             created_at=d["createdAt"],
             fs_handler_status=d.get("fsHandlerStatus"),
             last_accessed=d.get("lastAccessed"),
-            data_size=d.get("dataSize"),
+            active_data_bytes=d.get("activeDataBytes"),
+            total_data_bytes=d.get("totalDataBytes"),
             monthly_usage=d.get("monthlyUsage"),
             # `is not None` (not truthiness) so a present-but-empty array `[]` is
             # preserved as `[]`, distinct from a missing/null field (-> None),

@@ -370,7 +370,11 @@ class Disk:
         ...
 
     @property
-    def data_size(self) -> typing.Optional[int]:
+    def active_data_bytes(self) -> typing.Optional[int]:
+        ...
+
+    @property
+    def total_data_bytes(self) -> typing.Optional[int]:
         ...
 
     @property
