@@ -17,6 +17,8 @@ import type {
   GrepDiskResult,
   GrepMatch,
   GrepStoppedReason,
+  CreateShareUrlRequest,
+  ShareUrlResult as ShareUrlResultSchema,
 } from "./types.js";
 
 export interface MountOptions {
@@ -59,20 +61,8 @@ export interface GrepOptions {
   maxResults?: number;
 }
 
-export interface ShareUrlOptions {
-  /**
-   * Lifetime of the URL in seconds — any positive integer, up to 604800
-   * (7 days). Defaults to 86400 (24 hours).
-   */
-  expiresIn?: number;
-}
-
-export interface ShareUrlResult {
-  /** Public, signed, time-limited URL that downloads the file. */
-  url: string;
-  /** Lifetime of the URL in seconds. */
-  expiresIn: number;
-}
+export type ShareUrlOptions = Omit<CreateShareUrlRequest, "key">;
+export type ShareUrlResult = ShareUrlResultSchema;
 
 export interface ListObjectsOptions {
   /**
@@ -354,6 +344,9 @@ export class Disk implements FileSystem {
   readonly createdAt: string;
   readonly fsHandlerStatus?: string;
   readonly lastAccessed?: string;
+  readonly activeDataBytes?: number;
+  readonly totalDataBytes?: number;
+  /** @deprecated Use totalDataBytes. */
   readonly dataSize?: number;
   readonly monthlyUsage?: string;
   readonly mounts?: MountResponse[];
@@ -382,7 +375,9 @@ export class Disk implements FileSystem {
     this.createdAt = data.createdAt;
     this.fsHandlerStatus = data.fsHandlerStatus;
     this.lastAccessed = data.lastAccessed;
-    this.dataSize = data.dataSize;
+    this.activeDataBytes = data.activeDataBytes;
+    this.totalDataBytes = data.totalDataBytes;
+    this.dataSize = data.totalDataBytes;
     this.monthlyUsage = data.monthlyUsage;
     this.mounts = data.mounts;
     this.metrics = data.metrics;
@@ -405,6 +400,8 @@ export class Disk implements FileSystem {
       createdAt: this.createdAt,
       fsHandlerStatus: this.fsHandlerStatus,
       lastAccessed: this.lastAccessed,
+      activeDataBytes: this.activeDataBytes,
+      totalDataBytes: this.totalDataBytes,
       dataSize: this.dataSize,
       monthlyUsage: this.monthlyUsage,
       mounts: this.mounts,
@@ -581,23 +578,12 @@ export class Disk implements FileSystem {
    *              integer, max 604800 = 7 days). Defaults to 24h.
    */
   async share(key: string, opts: ShareUrlOptions = {}): Promise<ShareUrlResult> {
-    // The key and expiry go in the JSON body, so no path/query encoding is
-    // needed for keys containing "/" or other reserved characters. The share
-    // route isn't part of the typed control-plane API, so the call is untyped
-    // (the response is still validated and unwrapped below).
-    const body: { key: string; expiresIn?: number } = { key };
-    if (opts.expiresIn !== undefined) body.expiresIn = opts.expiresIn;
-
-    const call = this._client.POST as unknown as (
-      url: string,
-      init: Record<string, unknown>,
-    ) => Promise<{
-      data?: { success: boolean; data?: ShareUrlResult; error?: string };
-      error?: unknown;
-      response: Response;
-    }>;
-
-    return unwrap<ShareUrlResult>(call(`/api/disks/${this.id}/share`, { body }));
+    return unwrap<ShareUrlResult>(
+      this._client.POST("/api/disks/{id}/share", {
+        params: { path: { id: this.id } },
+        body: { key, ...opts },
+      }),
+    );
   }
 
   /**
