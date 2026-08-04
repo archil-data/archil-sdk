@@ -61,7 +61,7 @@ export interface GrepOptions {
   maxResults?: number;
 }
 
-export type ShareUrlOptions = Omit<CreateShareUrlRequest, "key">;
+export type ShareUrlOptions = Omit<CreateShareUrlRequest, "path">;
 export type ShareUrlResult = ShareUrlResultSchema;
 
 export interface ListObjectsOptions {
@@ -581,7 +581,7 @@ export class Disk implements FileSystem {
     return unwrap<ShareUrlResult>(
       this._client.POST("/api/disks/{id}/share", {
         params: { path: { id: this.id } },
-        body: { key, ...opts },
+        body: { path: key, ...opts },
       }),
     );
   }

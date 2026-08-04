@@ -426,7 +426,7 @@ class _Disk:
                 self.id,
                 client=self._transport.openapi,
                 body=CreateShareUrlRequest(
-                    key=key,
+                    path=key,
                     expires_in=UNSET if expires_in is None else expires_in,
                 ),
             )

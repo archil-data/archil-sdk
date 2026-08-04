@@ -207,8 +207,8 @@ def test_share_default_expiry(archil, router):
     req = router.requests[-1]
     assert req.method == "POST"
     assert req.path == "/api/disks/dsk-1/share"
-    # Key goes in the body; no expiresIn sent when the caller omits it (server defaults).
-    assert req.json == {"key": "reports/2026-01/data.pdf"}
+    # Path goes in the body; no expiresIn sent when the caller omits it (server defaults).
+    assert req.json == {"path": "reports/2026-01/data.pdf"}
 
 
 def test_share_explicit_expiry_in_body(archil, router):
@@ -220,7 +220,7 @@ def test_share_explicit_expiry_in_body(archil, router):
     assert result.expires_in == 90
     req = router.requests[-1]
     assert req.path == "/api/disks/dsk-1/share"
-    assert req.json == {"key": "my docs/q&a.txt", "expiresIn": 90}
+    assert req.json == {"path": "my docs/q&a.txt", "expiresIn": 90}
 
 
 def test_archil_exec_payload_shapes(archil, router):
