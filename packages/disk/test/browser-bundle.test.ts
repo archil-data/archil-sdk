@@ -591,9 +591,9 @@ test("SDK runs in a browser sandbox: share() signs a control-plane URL", async (
   const shareCall = calls.find((c) => c.url.endsWith("/api/disks/dsk-1/share"));
   assert.ok(shareCall, "share() should POST to the control-plane share route");
   assert.equal(shareCall.method, "POST");
-  // Path + expiry travel in the JSON body, so a key with "/" and reserved
+  // Key + expiry travel in the JSON body, so a key with "/" and reserved
   // characters needs no path/query encoding.
-  assert.deepEqual(shareCall.body, { path: "a/b c&d.txt", expiresIn: 90 });
+  assert.deepEqual(shareCall.body, { key: "a/b c&d.txt", expiresIn: 90 });
 });
 
 test("missing credentials throw a clear error, not a process crash", async () => {
