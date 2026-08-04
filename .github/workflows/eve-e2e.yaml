@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/eve-e2e.yaml'
   workflow_dispatch:
 
 jobs:
@@ -13,8 +19,9 @@ jobs:
     env:
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       ARCHIL_API_KEY: ${{ secrets.ARCHIL_API_KEY }}
-      ARCHIL_REGION: ${{ secrets.ARCHIL_REGION }}
-      ARCHIL_E2E_DISK_ID: ${{ secrets.ARCHIL_E2E_DISK_ID }}
+      ARCHIL_REGION: ${{ vars.ARCHIL_REGION }}
+      ARCHIL_BASE_URL: ${{ vars.ARCHIL_BASE_URL }}
+      ARCHIL_S3_BASE_URL: ${{ vars.ARCHIL_S3_BASE_URL }}
       ARCHIL_E2E_ROOT_PREFIX: archil-e2e/github/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v7

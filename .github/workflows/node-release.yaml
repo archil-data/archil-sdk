@@ -1,15 +1,22 @@
-name: Release
+name: Node Release
 
 on:
   push:
     branches:
       - main
+    paths:
+      - 'packages/**'
+      - '.changeset/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/node-release.yaml'
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
-    name: Release
+    name: Release Node packages
     runs-on: ubuntu-latest
     permissions:
       contents: write

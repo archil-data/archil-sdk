@@ -2,7 +2,7 @@
 
 This private package is an Eve eval fixture for the `@archildata/eve` `createDiskTools` integration.
 
-It reuses a configured Archil test disk and isolates fixture state under an Eve-specific root prefix. The eval uses a real Eve agent model and asks the agent to complete a multi-turn disk task through the Eve filesystem tools created by `createDiskTools`.
+It creates a temporary Archil test disk and isolates fixture state under an Eve-specific root prefix. The eval uses a real Eve agent model and asks the agent to complete a multi-turn disk task through the Eve filesystem tools created by `createDiskTools`. The disk is deleted when the eval finishes.
 
 This fixture intentionally fails loudly when the Archil disk configuration is missing. It should not skip Archil tool coverage.
 
@@ -13,15 +13,14 @@ pnpm run build
 
 ARCHIL_API_KEY=... \
 ARCHIL_REGION=... \
+ARCHIL_BASE_URL=... \
+ARCHIL_S3_BASE_URL=... \
 AI_GATEWAY_API_KEY=... \
-ARCHIL_E2E_DISK_ID=... \
 pnpm --filter @archildata/eve-e2e eval
 ```
 
 Optional env:
 
-- `ARCHIL_BASE_URL`: control-plane override used by `disk`.
-- `ARCHIL_S3_BASE_URL`: S3 endpoint override used by `disk`.
 - `ARCHIL_E2E_ROOT_PREFIX`: disk prefix for fixture state. Defaults to a local unique prefix.
 - `EVE_E2E_MODEL`: gateway model id. Defaults to `openai/gpt-5.4-nano`.
 
@@ -38,5 +37,11 @@ Configure these repository secrets:
 
 - `AI_GATEWAY_API_KEY`
 - `ARCHIL_API_KEY`
+
+And these repository variables for the target fleet:
+
 - `ARCHIL_REGION`
-- `ARCHIL_E2E_DISK_ID`
+- `ARCHIL_BASE_URL`
+- `ARCHIL_S3_BASE_URL`
+
+The workflow creates a temporary disk for each run and deletes it afterward.

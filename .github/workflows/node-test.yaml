@@ -1,14 +1,28 @@
-name: Test
+name: Node Test
 
 on:
   push:
     branches:
       - main
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/node-test.yaml'
+      - '.github/workflows/node-release.yaml'
   pull_request:
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/node-test.yaml'
+      - '.github/workflows/node-release.yaml'
 
 jobs:
   test:
-    name: Test
+    name: Node Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -32,4 +46,3 @@ jobs:
 
       - name: Test
         run: pnpm run test
-

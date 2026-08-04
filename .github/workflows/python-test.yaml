@@ -1,0 +1,84 @@
+name: Python Test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'python/**'
+      - '.github/workflows/python-test.yaml'
+      - '.github/workflows/python-release.yaml'
+  pull_request:
+    paths:
+      - 'python/**'
+      - '.github/workflows/python-test.yaml'
+      - '.github/workflows/python-release.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          working-directory: python
+
+      - name: Install dependencies
+        working-directory: python
+        run: |
+          uv venv
+          uv pip install -e '.[dev]'
+
+      - name: Test
+        working-directory: python
+        run: uv run --no-sync pytest -q
+
+      - name: Lint
+        working-directory: python
+        run: uv run --no-sync ruff check .
+
+      - name: Type-check public API
+        working-directory: python
+        run: |
+          uv run --no-sync mypy tests/typing_smoke.py
+          uv run --no-sync pyright tests/typing_smoke.py
+
+      - name: Build
+        working-directory: python
+        run: uv build
+
+  integration:
+    name: Test/staging fleet
+    runs-on: ubuntu-latest
+    env:
+      ARCHIL_API_KEY: ${{ secrets.ARCHIL_API_KEY }}
+      ARCHIL_REGION: ${{ vars.ARCHIL_REGION }}
+      ARCHIL_BASE_URL: ${{ vars.ARCHIL_BASE_URL }}
+      ARCHIL_S3_BASE_URL: ${{ vars.ARCHIL_S3_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: '3.12'
+          working-directory: python
+
+      - name: Install package
+        working-directory: python
+        run: |
+          uv venv
+          uv pip install -e .
+
+      - name: Run integration test
+        working-directory: python
+        run: uv run --no-sync python integration/sdk_integration_test.py

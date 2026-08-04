@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "eval": "eve eval"
+    "eval": "node scripts/eval.mjs"
   },
   "dependencies": {
     "@archildata/eve": "workspace:*",
