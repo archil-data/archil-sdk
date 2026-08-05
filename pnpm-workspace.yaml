@@ -9,6 +9,8 @@ minimumReleaseAgeExclude:
   - ai@7.0.5
   - eve@0.17.1
   - eve@0.20.0
+  - '@puppeteer/browsers@3.1.0'
+  - puppeteer-core@25.5.0
 
 catalog:
   typescript: ^6.0.3
