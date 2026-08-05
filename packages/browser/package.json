@@ -1,0 +1,54 @@
+{
+  "name": "@archildata/browser",
+  "version": "0.0.0",
+  "description": "Run a persistent Chromium browser in an Archil sandbox",
+  "keywords": [
+    "archil",
+    "browser",
+    "chrome",
+    "chromium",
+    "cdp"
+  ],
+  "homepage": "https://archil.com",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/archil-data/archil-sdk"
+  },
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "example:screenshot": "tsx examples/screenshot.ts",
+    "typecheck": "tsc --noEmit",
+    "test:integration": "tsx integration/puppeteer.ts"
+  },
+  "peerDependencies": {
+    "disk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.33",
+    "disk": "workspace:*",
+    "puppeteer-core": "25.5.0",
+    "tsdown": "catalog:",
+    "tsx": "^4.23.0",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">= 22"
+  }
+}
