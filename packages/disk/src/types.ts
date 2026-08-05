@@ -34,4 +34,7 @@ export type GrepDiskResult = components["schemas"]["GrepDiskResult"];
 export type GrepMatch = components["schemas"]["GrepMatch"];
 export type GrepStoppedReason = components["schemas"]["GrepStoppedReason"];
 
+export type CreateShareUrlRequest = components["schemas"]["CreateShareUrlRequest"];
+export type ShareUrlResult = components["schemas"]["ApiResponse_ShareUrl"]["data"];
+
 export type DiskStatus = DiskResponse["status"];

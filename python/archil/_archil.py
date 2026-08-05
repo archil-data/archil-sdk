@@ -4,6 +4,10 @@ import os
 from dataclasses import dataclass
 from typing import Optional, Union
 
+from archil_openapi.api.disks import exec_ as exec_disks
+from archil_openapi.models.exec_request import ExecRequest
+from archil_openapi.models.exec_request_disks import ExecRequestDisks
+
 from ._disks import _Disks
 from ._http import _Transport
 from ._models import ExecResult
@@ -113,10 +117,16 @@ class _Archil:
                 payload[rel_path] = entry
             else:
                 payload[rel_path] = _disk_id(mount)
-        data = await self._transport.request_json(
-            "POST", "/api/exec", json={"disks": payload, "command": command}
+        response = self._transport.unwrap(
+            await exec_disks.asyncio_detailed(
+                client=self._transport.openapi,
+                body=ExecRequest(
+                    disks=ExecRequestDisks.from_dict(payload),
+                    command=command,
+                ),
+            )
         )
-        return ExecResult.from_json(data)
+        return ExecResult.from_json(response.data.to_dict())
 
     def workspace(self, mounts: dict[str, ExecMount]) -> "_Workspace":
         """Build a :class:`Workspace`: a filesystem spanning several disks at once.

@@ -5,9 +5,8 @@ from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
 # ---------------------------------------------------------------------------
-# Output models — parsed from the control-plane JSON (camelCase) into snake_case
-# Python dataclasses. Each carries a from_json classmethod; unknown fields are
-# ignored so a server that adds fields doesn't break older clients.
+# Output models — parsed from the generated control-plane response models into
+# the SDK's stable, None-based public dataclasses.
 # ---------------------------------------------------------------------------
 
 
@@ -417,7 +416,7 @@ class DeleteObjectsResult:
 
 # ---------------------------------------------------------------------------
 # Input models — mounts and disk users. Each carries a to_json that emits the
-# camelCase shape the control plane expects, including the ``type`` discriminator.
+# camelCase shape consumed by the generated request models.
 # ---------------------------------------------------------------------------
 
 

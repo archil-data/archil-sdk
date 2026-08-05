@@ -168,20 +168,30 @@ def test_create_disk_returns_translated_disk_and_token(archil, router):
     }
 
 
-def test_disk_preserves_empty_arrays_vs_missing(archil, router):
-    # Present-but-empty arrays stay [] (distinct from missing -> None).
+def test_disk_preserves_empty_arrays(archil, router):
     router.set(lambda req: ok_envelope({**DISK_JSON, "mounts": [], "connectedClients": [], "authorizedUsers": []}))
     d = archil.disks.get("dsk-1")
     assert d.mounts == [] and d.connected_clients == [] and d.authorized_users == []
-    # Missing arrays -> None.
-    router.set(lambda req: ok_envelope(DISK_JSON))  # DISK_JSON has none of these keys
-    d2 = archil.disks.get("dsk-1")
-    assert d2.mounts is None and d2.connected_clients is None and d2.authorized_users is None
 
 
-def test_list_disks_null_data(archil, router):
-    # Empty account: Go nil slice serializes as JSON null, not [].
-    router.set(lambda req: ok_envelope(None))
+def test_public_models_use_none_for_missing_optional_fields(archil, router):
+    router.set(lambda req: ok_envelope(DISK_JSON))
+    disk = archil.disks.get("dsk-1")
+
+    assert disk.fs_handler_status is None
+    assert disk.last_accessed is None
+    assert disk.metrics is None
+    assert disk.monthly_usage is None
+    assert S3CompatibleMount(
+        bucket_name="b",
+        bucket_endpoint="http://e",
+        access_key_id="ak",
+        secret_access_key="sk",
+    ).bucket_prefix is None
+
+
+def test_list_disks_empty_data(archil, router):
+    router.set(lambda req: ok_envelope([]))
     assert archil.disks.list() == []
 
 

@@ -7,6 +7,8 @@ def test_list_tokens(archil, router):
     assert tokens[0].id == "t1"
     assert tokens[0].name == "ci"
     assert tokens[0].token_suffix == "abcd"
+    assert tokens[0].description is None
+    assert tokens[0].last_used_at is None
 
 
 def test_list_tokens_empty(archil, router):
@@ -21,14 +23,18 @@ def test_list_tokens_null_array(archil, router):
 
 
 def test_create_token_returns_full_value(archil, router):
-    router.set(lambda req: ok_envelope({"id": "t1", "name": "ci", "token": "key-secret"}))
+    router.set(
+        lambda req: ok_envelope(
+            {"id": "t1", "name": "ci", "token": "key-secret"}, status=201
+        )
+    )
     created = archil.tokens.create(name="ci", description="bot")
     assert created.token == "key-secret"
     assert router.requests[-1].json == {"name": "ci", "description": "bot"}
 
 
 def test_delete_token(archil, router):
-    router.set(lambda req: ok_envelope(None))
+    router.set(lambda req: ok_envelope({"message": "Token deleted"}))
     archil.tokens.delete("t1")
     assert router.requests[-1].method == "DELETE"
     assert router.requests[-1].path == "/api/tokens/t1"

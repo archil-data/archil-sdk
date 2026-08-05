@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Any, Optional, Union
+from typing import Optional, TypeVar, Union
 from urllib.parse import quote
 
 import httpx
+from archil_openapi import AuthenticatedClient
+from archil_openapi.models.error_response import ErrorResponse
+from archil_openapi.types import Response, Unset
 
 from ._version import USER_AGENT
 from .errors import ArchilApiError
 
 BodyType = Union[str, bytes, bytearray, memoryview]
+ResponseType = TypeVar("ResponseType")
 
 
 # Default request timeout (seconds) applied to every control-plane and S3 call.
@@ -67,18 +71,15 @@ class _Transport:
         # without a live server while still exercising the real client stack.
         self._transport = transport
         self._timeout = timeout
-        self._cp: Optional[httpx.AsyncClient] = None
+        self.openapi = AuthenticatedClient(
+            base_url=self._base_url,
+            token=_auth_header(api_key),
+            prefix="",
+            headers={"User-Agent": USER_AGENT},
+            timeout=timeout,
+            httpx_args={"transport": transport},
+        )
         self._s3: Optional[httpx.AsyncClient] = None
-
-    def _cp_client(self) -> httpx.AsyncClient:
-        if self._cp is None:
-            self._cp = httpx.AsyncClient(
-                base_url=self._base_url,
-                headers=self._headers,
-                transport=self._transport,
-                timeout=self._timeout,
-            )
-        return self._cp
 
     def _s3_client(self) -> httpx.AsyncClient:
         if not self._s3_base_url:
@@ -95,59 +96,16 @@ class _Transport:
             )
         return self._s3
 
-    async def request_json(
-        self,
-        method: str,
-        path: str,
-        *,
-        params: Optional[dict] = None,
-        json: Optional[Any] = None,
-    ) -> Any:
-        """Send a control-plane request and unwrap the ``{success, data}``
-        envelope, returning ``data``. Raises ArchilApiError on transport failure
-        or a ``success: false`` body."""
-        body = await self._request_envelope(method, path, params=params, json=json)
-        return body.get("data")
-
-    async def request_json_page(
-        self,
-        method: str,
-        path: str,
-        *,
-        params: Optional[dict] = None,
-    ) -> tuple[Any, Optional[str]]:
-        """Like :meth:`request_json`, but also return the envelope's
-        ``nextCursor`` (``None`` on the last page or from a server that doesn't
-        paginate)."""
-        body = await self._request_envelope(method, path, params=params, json=None)
-        return body.get("data"), body.get("nextCursor")
-
-    async def request_empty(
-        self,
-        method: str,
-        path: str,
-        *,
-        params: Optional[dict] = None,
-        json: Optional[Any] = None,
-    ) -> None:
-        await self._request_envelope(method, path, params=params, json=json)
-
-    async def _request_envelope(self, method, path, *, params, json) -> dict:
-        # Drop None-valued query params so optional args don't serialize as "None".
-        clean_params = {k: v for k, v in (params or {}).items() if v is not None} or None
-        resp = await self._cp_client().request(method, path, params=clean_params, json=json)
-        body: Optional[dict]
-        try:
-            body = resp.json()
-        except ValueError:
-            body = None
-        if not body or not body.get("success"):
-            message = (body or {}).get("error") or f"API request failed with status {resp.status_code}"
-            # Surface a machine-readable `code` when the control plane provides one
-            # (consistent with ArchilS3Error.code), rather than always None.
-            code = body.get("code") if body else None
-            raise ArchilApiError(message, resp.status_code, code)
-        return body
+    def unwrap(self, response: Response[Union[ErrorResponse, ResponseType]]) -> ResponseType:
+        parsed = response.parsed
+        if isinstance(parsed, ErrorResponse):
+            code = None if isinstance(parsed.code, Unset) else parsed.code
+            raise ArchilApiError(parsed.error, response.status_code, code)
+        if parsed is None:
+            raise ArchilApiError(
+                f"API request failed with status {response.status_code}", response.status_code
+            )
+        return parsed
 
     async def s3_request(
         self,
@@ -219,9 +177,7 @@ class _Transport:
         raise last_error
 
     async def aclose(self) -> None:
-        if self._cp is not None:
-            await self._cp.aclose()
-            self._cp = None
+        await self.openapi.get_async_httpx_client().aclose()
         if self._s3 is not None:
             await self._s3.aclose()
             self._s3 = None

@@ -6,6 +6,24 @@ from email.utils import parsedate_to_datetime
 from typing import AsyncIterator, List, Literal, Optional, Union
 from xml.etree.ElementTree import ParseError
 
+from archil_openapi.api.disk_configuration import (
+    get_allowed_i_ps,
+    list_delegations,
+    revoke_delegation,
+    set_allowed_i_ps,
+)
+from archil_openapi.api.disk_users import add_disk_user, remove_disk_user
+from archil_openapi.api.disks import create_share_url, delete_disk, exec_disk, get_disk, grep_disk
+from archil_openapi.models.aws_sts_user import AwsStsUser as OpenApiAwsStsUser
+from archil_openapi.models.create_share_url_request import CreateShareUrlRequest
+from archil_openapi.models.exec_disk_request import ExecDiskRequest
+from archil_openapi.models.grep_disk_request import GrepDiskRequest
+from archil_openapi.models.remove_disk_user_user_type import RemoveDiskUserUserType
+from archil_openapi.models.revoke_delegation_request import RevokeDelegationRequest
+from archil_openapi.models.set_allowed_i_ps_body import SetAllowedIPsBody
+from archil_openapi.models.token_user import TokenUser as OpenApiTokenUser
+from archil_openapi.types import UNSET
+
 from ._http import BodyType, _Transport
 from ._models import (
     AuthorizedUser,
@@ -90,8 +108,11 @@ def _safe_int(value: Optional[str], default: int = 0) -> int:
         return default
 
 
-def _user_payload(user: Union[DiskUser, dict]) -> dict:
-    return user if isinstance(user, dict) else user.to_json()
+def _user_request(user: Union[DiskUser, dict]) -> Union[OpenApiAwsStsUser, OpenApiTokenUser]:
+    payload = user if isinstance(user, dict) else user.to_json()
+    if payload["type"] == "token":
+        return OpenApiTokenUser.from_dict(payload)
+    return OpenApiAwsStsUser.from_dict(payload)
 
 
 # S3's per-request cap on DeleteObjects keys; larger inputs are auto-batched.
@@ -221,25 +242,36 @@ class _Disk:
     # --- User & access management ------------------------------------------
 
     async def add_user(self, user: Union[DiskUser, dict]) -> AuthorizedUser:
-        data = await self._transport.request_json(
-            "POST", f"/api/disks/{self.id}/users", json=_user_payload(user)
+        response = self._transport.unwrap(
+            await add_disk_user.asyncio_detailed(
+                self.id,
+                client=self._transport.openapi,
+                body=_user_request(user),
+            )
         )
-        return AuthorizedUser.from_json(data)
+        return AuthorizedUser.from_json(response.data.to_dict())
 
     async def remove_user(self, user_type: Literal["token", "awssts"], identifier: str) -> None:
-        await self._transport.request_empty(
-            "DELETE",
-            f"/api/disks/{self.id}/users/{user_type}",
-            params={"identifier": identifier},
+        self._transport.unwrap(
+            await remove_disk_user.asyncio_detailed(
+                self.id,
+                RemoveDiskUserUserType(user_type),
+                client=self._transport.openapi,
+                identifier=identifier,
+            )
         )
 
     async def create_token(self, nickname: str) -> AuthorizedUser:
         """Create a token user and return it, including the one-time ``token`` and
         its ``identifier``. The token is shown exactly once."""
-        data = await self._transport.request_json(
-            "POST", f"/api/disks/{self.id}/users", json={"type": "token", "nickname": nickname}
+        response = self._transport.unwrap(
+            await add_disk_user.asyncio_detailed(
+                self.id,
+                client=self._transport.openapi,
+                body=OpenApiTokenUser.from_dict({"type": "token", "nickname": nickname}),
+            )
         )
-        user = AuthorizedUser.from_json(data)
+        user = AuthorizedUser.from_json(response.data.to_dict())
         if not user.token or not user.identifier:
             raise RuntimeError("Server did not return a generated token")
         return user
@@ -249,33 +281,39 @@ class _Disk:
 
     async def list_delegations(self) -> list[Delegation]:
         """List the delegations currently held on this disk."""
-        data = await self._transport.request_json(
-            "GET", f"/api/disks/{self.id}/delegations"
+        response = self._transport.unwrap(
+            await list_delegations.asyncio_detailed(self.id, client=self._transport.openapi)
         )
-        return [Delegation.from_json(d) for d in data["delegations"]]
+        return [Delegation.from_json(item.to_dict()) for item in response.data.delegations]
 
     async def revoke_delegation(self, delegation: Delegation) -> None:
         """Forcibly revoke a delegation identified by its client and inode."""
-        await self._transport.request_empty(
-            "POST",
-            f"/api/disks/{self.id}/revoke-delegation",
-            json={
-                "clientId": delegation.client_id,
-                "inodeId": delegation.inode_id,
-            },
+        self._transport.unwrap(
+            await revoke_delegation.asyncio_detailed(
+                self.id,
+                client=self._transport.openapi,
+                body=RevokeDelegationRequest(
+                    client_id=delegation.client_id,
+                    inode_id=delegation.inode_id,
+                ),
+            )
         )
 
     async def get_allowed_ips(self) -> list[str]:
-        data = await self._transport.request_json("GET", f"/api/disks/{self.id}/allowed-ips")
-        # `or []`: an empty allowlist can serialize as JSON `null`; callers
-        # (add/remove_allowed_ip) iterate the result, so never hand back None.
-        return (data or {}).get("allowedIps") or []
+        response = self._transport.unwrap(
+            await get_allowed_i_ps.asyncio_detailed(self.id, client=self._transport.openapi)
+        )
+        return response.data.allowed_ips
 
     async def set_allowed_ips(self, allowed_ips: list[str]) -> list[str]:
-        data = await self._transport.request_json(
-            "PUT", f"/api/disks/{self.id}/allowed-ips", json={"allowedIps": allowed_ips}
+        response = self._transport.unwrap(
+            await set_allowed_i_ps.asyncio_detailed(
+                self.id,
+                client=self._transport.openapi,
+                body=SetAllowedIPsBody(allowed_ips=allowed_ips),
+            )
         )
-        return (data or {}).get("allowedIps") or []
+        return response.data.allowed_ips
 
     async def add_allowed_ip(self, ip: str) -> list[str]:
         current = await self.get_allowed_ips()
@@ -288,14 +326,22 @@ class _Disk:
         return await self.set_allowed_ips([i for i in current if i != ip])
 
     async def delete(self) -> None:
-        await self._transport.request_empty("DELETE", f"/api/disks/{self.id}")
+        self._transport.unwrap(
+            await delete_disk.asyncio_detailed(self.id, client=self._transport.openapi)
+        )
 
     async def refresh(self) -> "_Disk":
         """Re-fetch this disk and return a fresh snapshot. A ``Disk`` is immutable,
         so the returned object reflects the current state — the original is
         unchanged. Rebind: ``disk = disk.refresh()``."""
-        data = await self._transport.request_json("GET", f"/api/disks/{self.id}")
-        return _Disk(self._transport, self._archil_region, DiskData.from_json(data))
+        response = self._transport.unwrap(
+            await get_disk.asyncio_detailed(self.id, client=self._transport.openapi)
+        )
+        return _Disk(
+            self._transport,
+            self._archil_region,
+            DiskData.from_json(response.data.to_dict()),
+        )
 
     async def wait_until_ready(
         self, *, timeout: float = 300.0, poll_interval: float = 2.0
@@ -325,10 +371,14 @@ class _Disk:
     async def exec(self, command: str) -> ExecResult:
         """Execute a command in a container with this disk mounted. Blocks until
         the command completes and returns stdout, stderr, and exit code."""
-        data = await self._transport.request_json(
-            "POST", f"/api/disks/{self.id}/exec", json={"command": command}
+        response = self._transport.unwrap(
+            await exec_disk.asyncio_detailed(
+                self.id,
+                client=self._transport.openapi,
+                body=ExecDiskRequest(command=command),
+            )
         )
-        return ExecResult.from_json(data)
+        return ExecResult.from_json(response.data.to_dict())
 
     async def grep(
         self,
@@ -343,19 +393,21 @@ class _Disk:
         """Constant-time parallel grep across files on this disk. The returned
         ``stopped_reason`` says whether the search ran to completion or
         short-circuited on ``max_results`` / ``max_duration_seconds``."""
-        data = await self._transport.request_json(
-            "POST",
-            f"/api/disks/{self.id}/grep",
-            json={
-                "directory": directory,
-                "pattern": pattern,
-                "recursive": recursive,
-                "maxDurationSeconds": max_duration_seconds,
-                "concurrency": concurrency,
-                "maxResults": max_results,
-            },
+        response = self._transport.unwrap(
+            await grep_disk.asyncio_detailed(
+                self.id,
+                client=self._transport.openapi,
+                body=GrepDiskRequest(
+                    directory=directory,
+                    pattern=pattern,
+                    recursive=recursive,
+                    max_duration_seconds=max_duration_seconds,
+                    concurrency=concurrency,
+                    max_results=max_results,
+                ),
+            )
         )
-        return GrepResult.from_json(data)
+        return GrepResult.from_json(response.data.to_dict())
 
     # --- Sharing -----------------------------------------------------------
 
@@ -369,15 +421,17 @@ class _Disk:
         at most 604800 = 7 days). Defaults to 24 hours.
 
         Async: ``await disk.share.aio(key)``."""
-        # The key and expiry travel in the JSON body, so keys containing "/" or
-        # other reserved characters need no path/query encoding.
-        body: dict = {"key": key}
-        if expires_in is not None:
-            body["expiresIn"] = expires_in
-        data = await self._transport.request_json(
-            "POST", f"/api/disks/{self.id}/share", json=body
+        response = self._transport.unwrap(
+            await create_share_url.asyncio_detailed(
+                self.id,
+                client=self._transport.openapi,
+                body=CreateShareUrlRequest(
+                    key=key,
+                    expires_in=UNSET if expires_in is None else expires_in,
+                ),
+            )
         )
-        return ShareUrl.from_json(data)
+        return ShareUrl.from_json(response.data.to_dict())
 
     # --- Agent tools -------------------------------------------------------
 
