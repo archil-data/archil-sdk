@@ -3,12 +3,11 @@ from __future__ import annotations
 from typing import Optional
 
 from archil_openapi.api.api_tokens import create_api_token, delete_api_token, list_api_tokens
-from archil_openapi.models.api_response_token_created_data import ApiResponseTokenCreatedData
-from archil_openapi.models.api_token_response import ApiTokenResponse
 from archil_openapi.models.create_api_token_request import CreateApiTokenRequest
 from archil_openapi.types import UNSET
 
 from ._http import _Transport
+from ._models import ApiTokenResponse
 
 
 class _Tokens:
@@ -32,11 +31,9 @@ class _Tokens:
                 cursor=UNSET if cursor is None else cursor,
             )
         )
-        return response.data.tokens
+        return [ApiTokenResponse.from_json(token.to_dict()) for token in response.data.tokens]
 
-    async def create(
-        self, *, name: str, description: Optional[str] = None
-    ) -> ApiResponseTokenCreatedData:
+    async def create(self, *, name: str, description: Optional[str] = None) -> ApiTokenResponse:
         response = self._transport.unwrap(
             await create_api_token.asyncio_detailed(
                 client=self._transport.openapi,
@@ -46,7 +43,7 @@ class _Tokens:
                 ),
             )
         )
-        return response.data
+        return ApiTokenResponse.from_json(response.data.to_dict())
 
     async def delete(self, id: str) -> None:
         self._transport.unwrap(

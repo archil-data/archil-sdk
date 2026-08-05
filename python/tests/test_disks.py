@@ -174,6 +174,22 @@ def test_disk_preserves_empty_arrays(archil, router):
     assert d.mounts == [] and d.connected_clients == [] and d.authorized_users == []
 
 
+def test_public_models_use_none_for_missing_optional_fields(archil, router):
+    router.set(lambda req: ok_envelope(DISK_JSON))
+    disk = archil.disks.get("dsk-1")
+
+    assert disk.fs_handler_status is None
+    assert disk.last_accessed is None
+    assert disk.metrics is None
+    assert disk.monthly_usage is None
+    assert S3CompatibleMount(
+        bucket_name="b",
+        bucket_endpoint="http://e",
+        access_key_id="ak",
+        secret_access_key="sk",
+    ).bucket_prefix is None
+
+
 def test_list_disks_empty_data(archil, router):
     router.set(lambda req: ok_envelope([]))
     assert archil.disks.list() == []

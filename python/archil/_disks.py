@@ -8,7 +8,7 @@ from archil_openapi.types import UNSET, Unset
 
 from ._disk import _Disk
 from ._http import _Transport
-from ._models import CreateDiskResult, DiskPage, MountConfig
+from ._models import AuthorizedUser, CreateDiskResult, DiskData, DiskPage, MountConfig
 from ._synchronizer import translate_out
 
 # Server-side maximum page size for GET /api/disks (requests above it are clamped).
@@ -37,7 +37,10 @@ class _Disks:
                 name=UNSET if name is None else name,
             )
         )
-        disks = [_Disk(self._transport, self._region, disk) for disk in response.data]
+        disks = [
+            _Disk(self._transport, self._region, DiskData.from_json(disk.to_dict()))
+            for disk in response.data
+        ]
         next_cursor = None if isinstance(response.next_cursor, Unset) else response.next_cursor
         return disks, next_cursor
 
@@ -96,7 +99,7 @@ class _Disks:
         response = self._transport.unwrap(
             await get_disk.asyncio_detailed(id, client=self._transport.openapi)
         )
-        return _Disk(self._transport, self._region, response.data)
+        return _Disk(self._transport, self._region, DiskData.from_json(response.data.to_dict()))
 
     async def create(
         self,
@@ -109,14 +112,16 @@ class _Disks:
 
         Returns the Disk, the one-time token (save it — it cannot be retrieved
         again), and the token identifier for later management."""
+        body: dict = {"name": name}
+        if mounts is not None:
+            body["mounts"] = [m.to_json() for m in mounts]
+        if allowed_ips is not None:
+            body["allowedIps"] = allowed_ips
+
         response = self._transport.unwrap(
             await create_disk.asyncio_detailed(
                 client=self._transport.openapi,
-                body=CreateDiskRequest(
-                    name=name,
-                    mounts=UNSET if mounts is None else list(mounts),
-                    allowed_ips=UNSET if allowed_ips is None else allowed_ips,
-                ),
+                body=CreateDiskRequest.from_dict(body),
             )
         )
         created = response.data
@@ -124,21 +129,15 @@ class _Disks:
             raise RuntimeError("API returned success but no diskId")
         disk_id = created.disk_id
 
-        authorized_users = (
-            [] if isinstance(created.authorized_users, Unset) else created.authorized_users
-        )
-        token_user = next(
-            (u for u in authorized_users if not isinstance(u.token, Unset)), None
-        )
+        authorized_users = [
+            AuthorizedUser.from_json(user.to_dict()) for user in (created.authorized_users or [])
+        ]
+        token_user = next((u for u in authorized_users if u.token), None)
 
         disk = await self.get(disk_id)
         return CreateDiskResult(
             disk=translate_out(disk),
-            token=None if token_user is None else token_user.token,
-            token_identifier=(
-                None
-                if token_user is None or isinstance(token_user.identifier, Unset)
-                else token_user.identifier
-            ),
+            token=token_user.token if token_user else None,
+            token_identifier=token_user.identifier if token_user else None,
             authorized_users=authorized_users,
         )

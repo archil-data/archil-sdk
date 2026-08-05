@@ -13,41 +13,35 @@ Modal uses), so there is one source of truth and no duplicated sync/async logic.
 import threading
 from typing import Optional, Sequence
 
-from archil_openapi.models.api_response_share_url_data import ApiResponseShareUrlData as ShareUrl
-from archil_openapi.models.api_response_token_created_data import (
-    ApiResponseTokenCreatedData as ApiTokenCreated,
-)
-from archil_openapi.models.api_token_response import ApiTokenResponse
-from archil_openapi.models.authorized_user import AuthorizedUser
-from archil_openapi.models.connected_client import ConnectedClient
-from archil_openapi.models.delegation_entry import DelegationEntry as Delegation
-from archil_openapi.models.disk_metrics import DiskMetrics
-from archil_openapi.models.disk_response import DiskResponse as DiskData
-from archil_openapi.models.disk_response_status import DiskResponseStatus as DiskStatus
-from archil_openapi.models.exec_disk_result import ExecDiskResult as ExecResult
-from archil_openapi.models.exec_timing import ExecTiming
-from archil_openapi.models.grep_disk_result import GrepDiskResult as GrepResult
-from archil_openapi.models.grep_match import GrepMatch
-from archil_openapi.models.grep_stopped_reason import GrepStoppedReason
-from archil_openapi.models.mount_config_response import MountConfigResponse
-from archil_openapi.models.mount_response import MountResponse
-from archil_openapi.types import UNSET, Unset
-
 from ._archil import ExecMount, ExecMountSpec
 from ._filesystem import FileSystem
 from ._version import __version__
 from ._models import (
+    ApiTokenResponse,
+    AuthorizedUser,
     AwsStsUser,
     AzureBlobMount,
     CompletedMultipartUpload,
+    ConnectedClient,
     CreateDiskResult,
+    Delegation,
     DeleteObjectsError,
     DeleteObjectsResult,
+    DiskData,
+    DiskMetrics,
     DiskPage,
+    DiskStatus,
     DiskUser,
+    ExecResult,
+    ExecTiming,
     GCSMount,
+    GrepMatch,
+    GrepResult,
+    GrepStoppedReason,
     ListObjectsResult,
     MountConfig,
+    MountConfigResponse,
+    MountResponse,
     MultipartUpload,
     MultipartUploadListing,
     MultipartUploadSummary,
@@ -59,6 +53,7 @@ from ._models import (
     S3CompatibleMount,
     S3Mount,
     S3Object,
+    ShareUrl,
     TokenUser,
     UploadPart,
 )
@@ -102,7 +97,6 @@ __all__ = [
     "Delegation",
     "AuthorizedUser",
     "ApiTokenResponse",
-    "ApiTokenCreated",
     "ExecResult",
     "ExecTiming",
     "GrepMatch",
@@ -124,8 +118,6 @@ __all__ = [
     "DeleteObjectsResult",
     "CreateDiskResult",
     "DiskPage",
-    "UNSET",
-    "Unset",
     # module-level helpers
     "configure",
     "create_disk",
@@ -207,7 +199,7 @@ def list_api_keys(
     return _client().tokens.list(limit=limit, cursor=cursor)
 
 
-def create_api_key(*, name: str, description: Optional[str] = None) -> ApiTokenCreated:
+def create_api_key(*, name: str, description: Optional[str] = None) -> ApiTokenResponse:
     return _client().tokens.create(name=name, description=description)
 
 

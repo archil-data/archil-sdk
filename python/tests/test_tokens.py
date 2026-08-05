@@ -7,6 +7,8 @@ def test_list_tokens(archil, router):
     assert tokens[0].id == "t1"
     assert tokens[0].name == "ci"
     assert tokens[0].token_suffix == "abcd"
+    assert tokens[0].description is None
+    assert tokens[0].last_used_at is None
 
 
 def test_list_tokens_empty(archil, router):

@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from typing import Optional, Union
 
 from archil_openapi.api.disks import exec_ as exec_disks
-from archil_openapi.models.exec_disk_result import ExecDiskResult as ExecResult
 from archil_openapi.models.exec_request import ExecRequest
 from archil_openapi.models.exec_request_disks import ExecRequestDisks
 
 from ._disks import _Disks
 from ._http import _Transport
+from ._models import ExecResult
 from ._regions import derive_s3_base_url, resolve_base_url
 from ._tokens import _Tokens
 
@@ -126,7 +126,7 @@ class _Archil:
                 ),
             )
         )
-        return response.data
+        return ExecResult.from_json(response.data.to_dict())
 
     def workspace(self, mounts: dict[str, ExecMount]) -> "_Workspace":
         """Build a :class:`Workspace`: a filesystem spanning several disks at once.

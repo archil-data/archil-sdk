@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import AsyncIterator, List, Literal, Optional, Union
 from xml.etree.ElementTree import ParseError
@@ -15,35 +14,32 @@ from archil_openapi.api.disk_configuration import (
 )
 from archil_openapi.api.disk_users import add_disk_user, remove_disk_user
 from archil_openapi.api.disks import create_share_url, delete_disk, exec_disk, get_disk, grep_disk
-from archil_openapi.models.api_response_share_url_data import ApiResponseShareUrlData as ShareUrl
-from archil_openapi.models.authorized_user import AuthorizedUser
 from archil_openapi.models.aws_sts_user import AwsStsUser as OpenApiAwsStsUser
-from archil_openapi.models.connected_client import ConnectedClient
 from archil_openapi.models.create_share_url_request import CreateShareUrlRequest
-from archil_openapi.models.delegation_entry import DelegationEntry as Delegation
-from archil_openapi.models.disk_metrics import DiskMetrics
-from archil_openapi.models.disk_response import DiskResponse as DiskData
-from archil_openapi.models.disk_response_capabilities_item import DiskResponseCapabilitiesItem
-from archil_openapi.models.disk_response_status import DiskResponseStatus as DiskStatus
 from archil_openapi.models.exec_disk_request import ExecDiskRequest
-from archil_openapi.models.exec_disk_result import ExecDiskResult as ExecResult
 from archil_openapi.models.grep_disk_request import GrepDiskRequest
-from archil_openapi.models.grep_disk_result import GrepDiskResult as GrepResult
-from archil_openapi.models.mount_response import MountResponse
 from archil_openapi.models.remove_disk_user_user_type import RemoveDiskUserUserType
 from archil_openapi.models.revoke_delegation_request import RevokeDelegationRequest
 from archil_openapi.models.set_allowed_i_ps_body import SetAllowedIPsBody
 from archil_openapi.models.token_user import TokenUser as OpenApiTokenUser
-from archil_openapi.models.token_user_type import TokenUserType
-from archil_openapi.types import UNSET, Unset
+from archil_openapi.types import UNSET
 
 from ._http import BodyType, _Transport
 from ._models import (
+    AuthorizedUser,
     CompletedMultipartUpload,
+    ConnectedClient,
+    Delegation,
     DeleteObjectsError,
     DeleteObjectsResult,
+    DiskData,
+    DiskMetrics,
+    DiskStatus,
     DiskUser,
+    ExecResult,
+    GrepResult,
     ListObjectsResult,
+    MountResponse,
     MultipartUpload,
     MultipartUploadListing,
     MultipartUploadSummary,
@@ -52,6 +48,7 @@ from ._models import (
     PartListing,
     PutObjectResult,
     S3Object,
+    ShareUrl,
     UploadPart,
 )
 from ._s3xml import (
@@ -112,9 +109,7 @@ def _safe_int(value: Optional[str], default: int = 0) -> int:
 
 
 def _user_request(user: Union[DiskUser, dict]) -> Union[OpenApiAwsStsUser, OpenApiTokenUser]:
-    if isinstance(user, (OpenApiAwsStsUser, OpenApiTokenUser)):
-        return user
-    payload = user
+    payload = user if isinstance(user, dict) else user.to_json()
     if payload["type"] == "token":
         return OpenApiTokenUser.from_dict(payload)
     return OpenApiAwsStsUser.from_dict(payload)
@@ -197,51 +192,51 @@ class _Disk:
         return self._data.region
 
     @property
-    def created_at(self) -> datetime:
+    def created_at(self) -> str:
         return self._data.created_at
 
     @property
-    def fs_handler_status(self) -> Union[Unset, str]:
+    def fs_handler_status(self) -> Optional[str]:
         return self._data.fs_handler_status
 
     @property
-    def last_accessed(self) -> Union[Unset, datetime]:
+    def last_accessed(self) -> Optional[str]:
         return self._data.last_accessed
 
     @property
-    def active_data_bytes(self) -> Union[Unset, int]:
+    def active_data_bytes(self) -> Optional[int]:
         return self._data.active_data_bytes
 
     @property
-    def total_data_bytes(self) -> Union[Unset, int]:
+    def total_data_bytes(self) -> Optional[int]:
         return self._data.total_data_bytes
 
     @property
-    def monthly_usage(self) -> Union[Unset, str]:
+    def monthly_usage(self) -> Optional[str]:
         return self._data.monthly_usage
 
     @property
-    def mounts(self) -> Union[Unset, list[MountResponse]]:
+    def mounts(self) -> Optional[list[MountResponse]]:
         return self._data.mounts
 
     @property
-    def metrics(self) -> Union[Unset, DiskMetrics]:
+    def metrics(self) -> Optional[DiskMetrics]:
         return self._data.metrics
 
     @property
-    def connected_clients(self) -> Union[Unset, list[ConnectedClient]]:
+    def connected_clients(self) -> Optional[list[ConnectedClient]]:
         return self._data.connected_clients
 
     @property
-    def authorized_users(self) -> Union[Unset, list[AuthorizedUser]]:
+    def authorized_users(self) -> Optional[list[AuthorizedUser]]:
         return self._data.authorized_users
 
     @property
-    def allowed_ips(self) -> Union[Unset, list[str]]:
+    def allowed_ips(self) -> Optional[list[str]]:
         return self._data.allowed_ips
 
     @property
-    def capabilities(self) -> Union[Unset, list[DiskResponseCapabilitiesItem]]:
+    def capabilities(self) -> Optional[list[str]]:
         return self._data.capabilities
 
     # --- User & access management ------------------------------------------
@@ -254,7 +249,7 @@ class _Disk:
                 body=_user_request(user),
             )
         )
-        return response.data
+        return AuthorizedUser.from_json(response.data.to_dict())
 
     async def remove_user(self, user_type: Literal["token", "awssts"], identifier: str) -> None:
         self._transport.unwrap(
@@ -273,11 +268,11 @@ class _Disk:
             await add_disk_user.asyncio_detailed(
                 self.id,
                 client=self._transport.openapi,
-                body=OpenApiTokenUser(type_=TokenUserType.TOKEN, nickname=nickname),
+                body=OpenApiTokenUser.from_dict({"type": "token", "nickname": nickname}),
             )
         )
-        user = response.data
-        if isinstance(user.token, Unset) or isinstance(user.identifier, Unset):
+        user = AuthorizedUser.from_json(response.data.to_dict())
+        if not user.token or not user.identifier:
             raise RuntimeError("Server did not return a generated token")
         return user
 
@@ -289,7 +284,7 @@ class _Disk:
         response = self._transport.unwrap(
             await list_delegations.asyncio_detailed(self.id, client=self._transport.openapi)
         )
-        return response.data.delegations
+        return [Delegation.from_json(item.to_dict()) for item in response.data.delegations]
 
     async def revoke_delegation(self, delegation: Delegation) -> None:
         """Forcibly revoke a delegation identified by its client and inode."""
@@ -342,7 +337,11 @@ class _Disk:
         response = self._transport.unwrap(
             await get_disk.asyncio_detailed(self.id, client=self._transport.openapi)
         )
-        return _Disk(self._transport, self._archil_region, response.data)
+        return _Disk(
+            self._transport,
+            self._archil_region,
+            DiskData.from_json(response.data.to_dict()),
+        )
 
     async def wait_until_ready(
         self, *, timeout: float = 300.0, poll_interval: float = 2.0
@@ -379,7 +378,7 @@ class _Disk:
                 body=ExecDiskRequest(command=command),
             )
         )
-        return response.data
+        return ExecResult.from_json(response.data.to_dict())
 
     async def grep(
         self,
@@ -408,7 +407,7 @@ class _Disk:
                 ),
             )
         )
-        return response.data
+        return GrepResult.from_json(response.data.to_dict())
 
     # --- Sharing -----------------------------------------------------------
 
@@ -432,7 +431,7 @@ class _Disk:
                 ),
             )
         )
-        return response.data
+        return ShareUrl.from_json(response.data.to_dict())
 
     # --- Agent tools -------------------------------------------------------
 

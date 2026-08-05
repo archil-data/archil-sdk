@@ -13,9 +13,8 @@ import asyncio
 
 import pytest
 
-from archil import GrepMatch, GrepResult, GrepStoppedReason
 from archil._archil import ExecMountSpec
-from archil._models import ListObjectsResult, S3Object
+from archil._models import GrepMatch, GrepResult, ListObjectsResult, S3Object
 from archil._paths import to_segments
 from archil._workspace import _Workspace
 
@@ -51,7 +50,7 @@ class _FakeDisk:
     async def grep(self, *, directory, **_):
         self.calls["grep_dir"] = directory
         return GrepResult(
-            matches=[], stopped_reason=GrepStoppedReason.COMPLETED, files_scanned=0,
+            matches=[], stopped_reason="completed", files_scanned=0,
             containers_dispatched=0, compute_seconds_used=0.0,
             duration_ms=0, listing_ms=0, grep_ms=0,
         )
@@ -203,7 +202,7 @@ class _MatchingDisk:
     async def grep(self, *, directory, **_):
         return GrepResult(
             matches=[GrepMatch("a.txt", 1, "x"), GrepMatch("b.txt", 2, "x")],
-            stopped_reason=GrepStoppedReason.COMPLETED, files_scanned=1, containers_dispatched=0,
+            stopped_reason="completed", files_scanned=1, containers_dispatched=0,
             compute_seconds_used=0.0, duration_ms=0, listing_ms=0, grep_ms=0,
         )
 
