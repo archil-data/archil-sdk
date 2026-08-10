@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
-import { afterEach, test, vi } from "vitest";
+import { test } from "vitest";
 import type { ApiClient } from "../src/client.js";
-import {
-  Sandbox,
-  SandboxExec,
-  SandboxStartError,
-  SandboxWaitTimeoutError,
-} from "../src/sandbox.js";
+import { Sandbox, SandboxExec } from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
 
 const now = "2026-07-22T12:00:00Z";
@@ -45,10 +40,6 @@ function ok(data: unknown) {
     response: new Response(null, { status: 200 }),
   };
 }
-
-afterEach(() => {
-  vi.useRealTimers();
-});
 
 test("Sandboxes translates list/create inputs and wraps camelCase snapshots", async () => {
   const calls: Array<{ method: string; path: string; options: any }> = [];
@@ -102,7 +93,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
       method: "POST",
       path: "/api/sandboxes",
       options: {
-        params: { query: { wait: false } },
+        params: { query: { wait: true } },
         body: {
           vcpu_count: 8,
           mem_size_mib: 16384,
@@ -142,232 +133,63 @@ test("sandbox snapshots expose API timestamps as Date objects", () => {
   assert.equal(sandbox.createdAt.toISOString(), "2026-07-22T12:00:00.000Z");
 });
 
-test("create polls pending sandboxes until they are running", async () => {
-  vi.useFakeTimers();
-  let gets = 0;
-  let postOptions: unknown;
-  const client = {
-    POST: async (_path: string, options: unknown) => {
-      postOptions = options;
-      return ok(sandboxWire());
-    },
-    GET: async () => {
-      gets++;
-      return ok(sandboxWire("running"));
-    },
-  } as unknown as ApiClient;
-
-  const resultPromise = new Sandboxes(client).create();
-  await vi.advanceTimersByTimeAsync(500);
-  const result = await resultPromise;
-  assert.equal(result.status, "running");
-  assert.equal(gets, 1);
-  assert.deepEqual((postOptions as any).params.query, { wait: false });
-});
-
-test("failed create carries the created sandbox", async () => {
-  const client = {
-    POST: async () => ok({ ...sandboxWire("failed"), exit_reason: "boot failed" }),
-  } as unknown as ApiClient;
-
-  await assert.rejects(
-    new Sandboxes(client).create(),
-    (error: unknown) => {
-      assert.ok(error instanceof SandboxStartError);
-      assert.equal(error.latest.id, "0198-sandbox");
-      assert.equal(error.latest.status, "failed");
-      assert.equal(error.latest.exitReason, "boot failed");
-      return true;
-    },
-  );
-});
-
-test("start throws a timeout carrying the latest sandbox snapshot", async () => {
-  const client = {
-    POST: async () => ok(sandboxWire()),
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire() as any, client);
-
-  await assert.rejects(
-    sandbox.start({ timeoutMs: 0 }),
-    (error: unknown) => {
-      assert.ok(error instanceof SandboxWaitTimeoutError);
-      assert.equal(error.operation, "start");
-      assert.equal(error.timeoutMs, 0);
-      assert.ok(error.latest instanceof Sandbox);
-      assert.equal(error.latest.status, "pending");
-      return true;
-    },
-  );
-});
-
-test("start fails immediately when startup enters an inactive state", async () => {
-  const client = {
-    POST: async () => ok({ ...sandboxWire("failed"), exit_reason: "boot failed" }),
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire() as any, client);
-
-  await assert.rejects(
-    sandbox.start(),
-    (error: any) => {
-      assert.equal(error.code, "SANDBOX_START_FAILED");
-      assert.match(error.message, /boot failed/);
-      return true;
-    },
-  );
-});
-
-test("stop polls stopping sandboxes until they are stopped", async () => {
-  vi.useFakeTimers();
-  let gets = 0;
-  const client = {
-    POST: async () => ok(sandboxWire("stopping")),
-    GET: async () => {
-      gets++;
-      return ok(sandboxWire("stopped"));
-    },
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("running") as any, client);
-
-  const resultPromise = sandbox.stop();
-  await vi.advanceTimersByTimeAsync(500);
-  const result = await resultPromise;
-  assert.equal(result, sandbox); // mutates and returns the same object
-  assert.equal(sandbox.status, "stopped");
-  assert.equal(gets, 1);
-});
-
-test("stop timeout carries the latest stopping sandbox", async () => {
-  const client = {
-    POST: async () => ok(sandboxWire("stopping")),
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("running") as any, client);
-
-  await assert.rejects(
-    sandbox.stop({ timeoutMs: 0 }),
-    (error: unknown) => {
-      assert.ok(error instanceof SandboxWaitTimeoutError);
-      assert.equal(error.operation, "stop");
-      assert.equal(error.timeoutMs, 0);
-      assert.ok(error.latest instanceof Sandbox);
-      assert.equal(error.latest.status, "stopping");
-      return true;
-    },
-  );
-});
-
-test("pause polls pausing sandboxes until they are paused", async () => {
-  vi.useFakeTimers();
-  let gets = 0;
-  let captured: { path: string; options: unknown } | undefined;
+test("sandbox lifecycle methods return the server response without polling", async () => {
+  const calls: Array<{ path: string; options: any }> = [];
   const client = {
     POST: async (path: string, options: unknown) => {
-      captured = { path, options };
-      return ok(sandboxWire("pausing"));
-    },
-    GET: async () => {
-      gets++;
-      return ok(sandboxWire("paused"));
-    },
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("running") as any, client);
-
-  const resultPromise = sandbox.pause();
-  await vi.advanceTimersByTimeAsync(500);
-  const result = await resultPromise;
-  assert.equal(result, sandbox);
-  assert.equal(result.status, "paused");
-  assert.equal(gets, 1);
-  assert.deepEqual(captured, {
-    path: "/api/sandboxes/{sid}/pause",
-    options: { params: { path: { sid: "0198-sandbox" } } },
-  });
-});
-
-test("resume polls pending sandboxes until they are running", async () => {
-  vi.useFakeTimers();
-  let gets = 0;
-  let captured: { path: string; options: unknown } | undefined;
-  const client = {
-    POST: async (path: string, options: unknown) => {
-      captured = { path, options };
+      calls.push({ path, options });
+      if (path.endsWith("/stop")) return ok(sandboxWire("stopping"));
+      if (path.endsWith("/pause")) return ok(sandboxWire("pausing"));
       return ok(sandboxWire("pending"));
     },
-    GET: async () => {
-      gets++;
-      return ok(sandboxWire("running"));
-    },
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("paused") as any, client);
-
-  const resultPromise = sandbox.resume();
-  await vi.advanceTimersByTimeAsync(500);
-  const result = await resultPromise;
-  assert.equal(result, sandbox);
-  assert.equal(result.status, "running");
-  assert.equal(gets, 1);
-  assert.deepEqual(captured, {
-    path: "/api/sandboxes/{sid}/resume",
-    options: {
-      params: {
-        path: { sid: "0198-sandbox" },
-        query: { wait: false },
-      },
-    },
-  });
-});
-
-test("pause and resume timeouts carry the latest sandbox", async () => {
-  const client = {
-    POST: async (path: string) =>
-      ok(sandboxWire(path.endsWith("/pause") ? "pausing" : "pending")),
   } as unknown as ApiClient;
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  await assert.rejects(
-    sandbox.pause({ timeoutMs: 0 }),
-    (error: unknown) => {
-      assert.ok(error instanceof SandboxWaitTimeoutError);
-      assert.equal(error.operation, "pause");
-      assert.equal(error.timeoutMs, 0);
-      assert.equal(error.latest, sandbox);
-      assert.equal(error.latest.status, "pausing");
-      return true;
+  assert.equal((await sandbox.start()).status, "pending");
+  assert.equal((await sandbox.stop()).status, "stopping");
+  assert.equal((await sandbox.pause()).status, "pausing");
+  assert.equal((await sandbox.resume()).status, "pending");
+  assert.deepEqual(calls, [
+    {
+      path: "/api/sandboxes/{sid}/start",
+      options: { params: { path: { sid: "0198-sandbox" }, query: { wait: true } } },
     },
-  );
-
-  await assert.rejects(
-    sandbox.resume({ timeoutMs: 0 }),
-    (error: unknown) => {
-      assert.ok(error instanceof SandboxWaitTimeoutError);
-      assert.equal(error.operation, "resume");
-      assert.equal(error.timeoutMs, 0);
-      assert.equal(error.latest, sandbox);
-      assert.equal(error.latest.status, "pending");
-      return true;
+    {
+      path: "/api/sandboxes/{sid}/stop",
+      options: { params: { path: { sid: "0198-sandbox" } } },
     },
-  );
+    {
+      path: "/api/sandboxes/{sid}/pause",
+      options: { params: { path: { sid: "0198-sandbox" } } },
+    },
+    {
+      path: "/api/sandboxes/{sid}/resume",
+      options: { params: { path: { sid: "0198-sandbox" }, query: { wait: true } } },
+    },
+  ]);
 });
 
-test("sandbox lifecycle waits default to a 30 second timeout", async () => {
-  vi.useFakeTimers();
+test("create, start, and resume can opt out of server-side waiting", async () => {
+  const calls: Array<{ path: string; options: any }> = [];
   const client = {
-    POST: async () => ok(sandboxWire("pausing")),
-    GET: async () => ok(sandboxWire("pausing")),
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("running") as any, client);
-
-  const rejection = assert.rejects(
-    sandbox.pause(),
-    (error: unknown) => {
-      assert.ok(error instanceof SandboxWaitTimeoutError);
-      assert.equal(error.operation, "pause");
-      assert.equal(error.timeoutMs, 30_000);
-      return true;
+    POST: async (path: string, options: unknown) => {
+      calls.push({ path, options });
+      return ok(sandboxWire("pending"));
     },
+  } as unknown as ApiClient;
+
+  const created = await new Sandboxes(client).create({}, { wait: false });
+  await created.start({ wait: false });
+  await created.resume({ wait: false });
+
+  assert.deepEqual(
+    calls.map(({ path, options }) => ({ path, wait: options.params.query.wait })),
+    [
+      { path: "/api/sandboxes", wait: false },
+      { path: "/api/sandboxes/{sid}/start", wait: false },
+      { path: "/api/sandboxes/{sid}/resume", wait: false },
+    ],
   );
-  await vi.advanceTimersByTimeAsync(30_000);
-  await rejection;
 });
 
 test("exec translates options", async () => {
@@ -392,7 +214,7 @@ test("exec translates options", async () => {
     options: {
       params: {
         path: { sid: "0198-sandbox" },
-        query: { wait: false },
+        query: { wait: true },
       },
       body: {
         command: "echo hello",
@@ -452,46 +274,19 @@ test("sandbox exec objects refresh and cancel themselves", async () => {
   });
 });
 
-test("exec polls to a terminal result", async () => {
-  vi.useFakeTimers();
-  let gets = 0;
+test("exec can return immediately without polling", async () => {
   let postOptions: any;
   const client = {
     POST: async (_path: string, options: unknown) => {
       postOptions = options;
       return ok(execWire());
     },
-    GET: async () => {
-      gets++;
-      return ok(execWire("completed"));
-    },
   } as unknown as ApiClient;
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const resultPromise = sandbox.exec("echo hello");
-  await vi.advanceTimersByTimeAsync(500);
-  const result = await resultPromise;
-  assert.equal(result.status, "completed");
-  assert.equal(result.stdout, "hello\n");
-  assert.equal(gets, 1);
+  const result = await sandbox.exec("echo hello", { wait: false });
+  assert.equal(result.status, "running");
   assert.deepEqual(postOptions.params.query, { wait: false });
-});
-
-test("exec timeout carries the latest running exec", async () => {
-  const client = {
-    POST: async () => ok(execWire()),
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("running") as any, client);
-
-  await assert.rejects(
-    sandbox.exec("echo hello", { timeoutMs: 0 }),
-    (error: unknown) => {
-      assert.ok(error instanceof SandboxWaitTimeoutError);
-      assert.equal(error.operation, "exec");
-      assert.equal(error.latest.status, "running");
-      return true;
-    },
-  );
 });
 
 test("sandbox instance methods use the owning sandbox id", async () => {
