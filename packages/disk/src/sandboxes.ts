@@ -12,9 +12,9 @@ import {
 } from "./sandbox.js";
 
 export interface CreateSandboxRequest {
-  /** Number of virtual CPUs allocated to the sandbox. Defaults to 1. */
+  /** Number of virtual CPUs allocated to the sandbox, from 1 to 32. Defaults to 1. */
   vcpuCount?: number;
-  /** Memory allocated to the sandbox in MiB. Defaults to 2048. */
+  /** Memory allocated to the sandbox in MiB, from 256 to 65536. Defaults to 2048. */
   memSizeMiB?: number;
   /**
    * Public Linux OCI image reference for the sandbox's root filesystem.
