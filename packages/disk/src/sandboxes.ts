@@ -6,6 +6,7 @@ import {
   Sandbox,
   type SandboxWire,
   type SandboxWaitOptions,
+  waitForSandboxStart,
 } from "./sandbox.js";
 
 export interface CreateSandboxRequest {
@@ -83,6 +84,7 @@ export class Sandboxes {
         body: body as components["schemas"]["CreateSandboxRequest"],
       }),
     );
-    return new Sandbox(data as SandboxWire, this._client);
+    const sandbox = new Sandbox(data as SandboxWire, this._client);
+    return options.wait === false ? sandbox : waitForSandboxStart(sandbox);
   }
 }

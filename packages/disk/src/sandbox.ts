@@ -48,8 +48,8 @@ export interface SandboxExecResponse {
 
 export interface SandboxWaitOptions {
   /**
-   * Ask the server to wait for the operation to finish. Defaults to true.
-   * The returned resource may still be pending if the server's wait budget expires.
+   * Wait for the operation to finish. Defaults to true.
+   * The SDK polls if the server's wait budget expires first.
    */
   wait?: boolean;
 }
@@ -59,6 +59,12 @@ export type SandboxExecOptions = {
   env?: Record<string, string>;
   timeoutSeconds?: number;
 } & SandboxWaitOptions;
+
+const POLL_INTERVAL_MS = 500;
+
+function sleep(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+}
 
 export class SandboxExec {
   sandboxId!: string;
@@ -212,7 +218,8 @@ export class Sandbox {
         params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
       }),
     );
-    return this._apply(data);
+    this._apply(data);
+    return options.wait === false ? this : waitForSandboxStart(this);
   }
 
   /** Stop this sandbox. */
@@ -242,7 +249,8 @@ export class Sandbox {
         params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
       }),
     );
-    return this._apply(data);
+    this._apply(data);
+    return options.wait === false ? this : waitForSandboxStart(this);
   }
 
   async exec(command: string, options: SandboxExecOptions = {}): Promise<SandboxExec> {
@@ -260,7 +268,14 @@ export class Sandbox {
         },
       }),
     );
-    return new SandboxExec(data, this._client);
+    const exec = new SandboxExec(data, this._client);
+    if (options.wait === false) return exec;
+
+    while (exec.status === "running") {
+      await sleep();
+      await exec.refresh();
+    }
+    return exec;
   }
 
   async listExecs(): Promise<SandboxExec[]> {
@@ -291,4 +306,13 @@ export class Sandbox {
     );
     return new SandboxExec(data, this._client);
   }
+}
+
+/** @internal Continue waiting if the server returned before startup completed. */
+export async function waitForSandboxStart(sandbox: Sandbox): Promise<Sandbox> {
+  while (sandbox.status === "pending") {
+    await sleep();
+    await sandbox.refresh();
+  }
+  return sandbox;
 }

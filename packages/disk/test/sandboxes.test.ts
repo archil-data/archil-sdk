@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { afterEach, test, vi } from "vitest";
 import type { ApiClient } from "../src/client.js";
 import { Sandbox, SandboxExec } from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
@@ -40,6 +40,10 @@ function ok(data: unknown) {
     response: new Response(null, { status: 200 }),
   };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 test("Sandboxes translates list/create inputs and wraps camelCase snapshots", async () => {
   const calls: Array<{ method: string; path: string; options: any }> = [];
@@ -133,9 +137,11 @@ test("sandbox snapshots expose API timestamps as Date objects", () => {
   assert.equal(sandbox.createdAt.toISOString(), "2026-07-22T12:00:00.000Z");
 });
 
-test("sandbox lifecycle methods return the server response without polling", async () => {
+test("sandbox lifecycle methods poll only after the server wait expires", async () => {
+  vi.useFakeTimers();
   const calls: Array<{ path: string; options: any }> = [];
   const client = {
+    GET: async () => ok(sandboxWire("running")),
     POST: async (path: string, options: unknown) => {
       calls.push({ path, options });
       if (path.endsWith("/stop")) return ok(sandboxWire("stopping"));
@@ -145,10 +151,14 @@ test("sandbox lifecycle methods return the server response without polling", asy
   } as unknown as ApiClient;
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  assert.equal((await sandbox.start()).status, "pending");
+  const starting = sandbox.start();
+  await vi.advanceTimersByTimeAsync(500);
+  assert.equal((await starting).status, "running");
   assert.equal((await sandbox.stop()).status, "stopping");
   assert.equal((await sandbox.pause()).status, "pausing");
-  assert.equal((await sandbox.resume()).status, "pending");
+  const resuming = sandbox.resume();
+  await vi.advanceTimersByTimeAsync(500);
+  assert.equal((await resuming).status, "running");
   assert.deepEqual(calls, [
     {
       path: "/api/sandboxes/{sid}/start",
@@ -167,6 +177,25 @@ test("sandbox lifecycle methods return the server response without polling", asy
       options: { params: { path: { sid: "0198-sandbox" }, query: { wait: true } } },
     },
   ]);
+});
+
+test("create polls when the server returns a pending sandbox", async () => {
+  vi.useFakeTimers();
+  let gets = 0;
+  const client = {
+    POST: async () => ok(sandboxWire("pending")),
+    GET: async () => {
+      gets++;
+      return ok(sandboxWire("running"));
+    },
+  } as unknown as ApiClient;
+
+  const creating = new Sandboxes(client).create();
+  await vi.advanceTimersByTimeAsync(500);
+  const sandbox = await creating;
+
+  assert.equal(sandbox.status, "running");
+  assert.equal(gets, 1);
 });
 
 test("create, start, and resume can opt out of server-side waiting", async () => {
@@ -287,6 +316,26 @@ test("exec can return immediately without polling", async () => {
   const result = await sandbox.exec("echo hello", { wait: false });
   assert.equal(result.status, "running");
   assert.deepEqual(postOptions.params.query, { wait: false });
+});
+
+test("exec polls when the server wait returns a running exec", async () => {
+  vi.useFakeTimers();
+  let gets = 0;
+  const client = {
+    POST: async () => ok(execWire("running")),
+    GET: async () => {
+      gets++;
+      return ok(execWire("completed"));
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const executing = sandbox.exec("echo hello");
+  await vi.advanceTimersByTimeAsync(500);
+  const result = await executing;
+
+  assert.equal(result.status, "completed");
+  assert.equal(gets, 1);
 });
 
 test("sandbox instance methods use the owning sandbox id", async () => {

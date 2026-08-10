@@ -94,7 +94,7 @@ console.log(result.stdout);
 await sandbox.start();
 await sandbox.resume();
 
-// Skip the server-side wait when you want the initial state immediately.
+// Return the initial state immediately instead of waiting for completion.
 const runningExec = await sandbox.exec("sleep 60", { wait: false });
 
 // Stop and pause return the state accepted by the server (usually
@@ -109,10 +109,10 @@ const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB.
 
-`create`, `start`, `resume`, and `exec` ask the server to wait by default. Pass
-`{ wait: false }` to return as soon as the operation is accepted. The server may
-still return a pending resource when its wait budget expires. `stop` and `pause`
-return their immediate server response without polling.
+`create`, `start`, `resume`, and `exec` wait for completion by default. The server
+handles the initial wait; if its wait budget expires first, the SDK continues
+polling. Pass `{ wait: false }` to return as soon as the operation is accepted.
+`stop` and `pause` return their immediate server response without polling.
 
 API keys live at the account level, so those helpers are top-level:
 

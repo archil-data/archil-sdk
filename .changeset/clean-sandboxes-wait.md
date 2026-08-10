@@ -2,4 +2,4 @@
 "disk": minor
 ---
 
-Delegate sandbox waiting to the server, default `wait` to true, and remove client-side polling and timeout errors.
+Default `wait` to true, delegate the initial wait to the server, and poll only if the server's wait budget expires.
