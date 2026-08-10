@@ -84,6 +84,8 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
   });
 
   const created = await sandboxes.create({
+    vcpuCount: 8,
+    memSizeMiB: 16 * 1024,
     baseImage: "ubuntu:26.04",
     env: { NODE_ENV: "test" },
     maxTtlSeconds: 600,
@@ -102,6 +104,8 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
       options: {
         params: { query: { wait: false } },
         body: {
+          vcpu_count: 8,
+          mem_size_mib: 16384,
           base_image: "ubuntu:26.04",
           env: { NODE_ENV: "test" },
           max_ttl_seconds: 600,
