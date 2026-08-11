@@ -100,6 +100,53 @@ if d.object_exists("reports/2026-01/data.json"):
 d.delete_object("reports/2026-01/data.json")
 ```
 
+#### POSIX ownership and directories
+
+Pass `uid`, `gid`, and `mode` when the files will be used by a non-root process:
+
+```python
+d.put_object(
+    "path/a/b/file.txt",
+    "hello",
+    uid=1000,
+    gid=1001,
+    mode=0o640,
+)
+```
+
+If `path/` already exists as `2000:2000 0700` and `a/` and `b/` are missing,
+the resulting tree is:
+
+| Path | Owner | Mode | Result |
+| --- | --- | --- | --- |
+| `path/` | `2000:2000` | `0700` | Existing directory; unchanged |
+| `path/a/` | `1000:1001` | `0755` | Implicit parent created by the upload |
+| `path/a/b/` | `1000:1001` | `0755` | Implicit parent created by the upload |
+| `path/a/b/file.txt` | `1000:1001` | `0640` | Published file with the requested attributes |
+
+The requested file mode never applies to implicit parents; they use `0755` so
+they remain traversable. Existing directories are never re-owned or re-moded,
+so in this example a FUSE process running as uid 1000 still cannot traverse the
+pre-existing `path/` directory.
+
+Create an explicit directory by putting an empty directory-marker key ending in
+`/`:
+
+```python
+d.put_object(
+    "path/a/private/",
+    b"",
+    uid=4000,
+    gid=4001,
+    mode=0o750,
+)
+```
+
+This creates `private/` as `4000:4001 0750`. If the marker already exists, its
+attributes are unchanged. When attributes are omitted, files default to
+`root:root 0644` and directories to `root:root 0755`. Automatic multipart
+uploads and append-created files use the same directory rules.
+
 `list_objects` auto-paginates by default, returning every matching key. The first argument is a key prefix; a non-recursive listing (the default) returns the immediate level as `objects` plus subdirectory `common_prefixes`:
 
 ```python

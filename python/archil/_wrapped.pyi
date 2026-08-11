@@ -696,8 +696,11 @@ class Disk:
 
             Optional ``mode`` / ``uid`` / ``gid`` set the POSIX attributes of the
             published file (e.g. ``mode=0o644, uid=1000, gid=1000`` for a non-root
-            agent sandbox). Defaults are server-side (currently ``root:root`` mode
-            ``0644``).
+            agent sandbox). Missing parent directories inherit ``uid`` / ``gid``
+            with mode ``0755``; existing directories remain unchanged. A key ending
+            in ``/`` creates an explicit directory marker whose leaf uses the
+            requested attributes. Defaults are ``root:root 0644`` for files and
+            ``root:root 0755`` for directories.
 
             Async: ``await disk.put_object.aio(key, body)``.
             """
@@ -721,8 +724,11 @@ class Disk:
 
             Optional ``mode`` / ``uid`` / ``gid`` set the POSIX attributes of the
             published file (e.g. ``mode=0o644, uid=1000, gid=1000`` for a non-root
-            agent sandbox). Defaults are server-side (currently ``root:root`` mode
-            ``0644``).
+            agent sandbox). Missing parent directories inherit ``uid`` / ``gid``
+            with mode ``0755``; existing directories remain unchanged. A key ending
+            in ``/`` creates an explicit directory marker whose leaf uses the
+            requested attributes. Defaults are ``root:root 0644`` for files and
+            ``root:root 0755`` for directories.
 
             Async: ``await disk.put_object.aio(key, body)``.
             """
@@ -765,7 +771,8 @@ class Disk:
 
             When the object does not yet exist, optional ``mode`` / ``uid`` / ``gid``
             set the POSIX attributes of the newly created file (same headers as
-            ``put_object``). They are ignored when appending to an existing object.
+            ``put_object``); missing parents inherit ``uid`` / ``gid`` with mode
+            ``0755``. Existing files and directories are unchanged.
 
             Async: ``await disk.append_object.aio(key, body)``.
             """
@@ -788,7 +795,8 @@ class Disk:
 
             When the object does not yet exist, optional ``mode`` / ``uid`` / ``gid``
             set the POSIX attributes of the newly created file (same headers as
-            ``put_object``). They are ignored when appending to an existing object.
+            ``put_object``); missing parents inherit ``uid`` / ``gid`` with mode
+            ``0755``. Existing files and directories are unchanged.
 
             Async: ``await disk.append_object.aio(key, body)``.
             """
