@@ -86,6 +86,8 @@ export async function unwrapEmpty(
 ): Promise<void> {
   const { data: body, error, response } = await promise;
 
+  if (!error && response.status === 204) return;
+
   if (error || !body) {
     const errBody = error as { error?: string } | undefined;
     throw new ArchilApiError(

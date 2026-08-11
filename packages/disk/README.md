@@ -84,6 +84,7 @@ const client = new archil.Archil({
   region: "aws-us-east-1",
 });
 const sandbox = await client.sandboxes.create({
+  name: "prepared-environment",
   vcpuCount: 4,
   memSizeMiB: 8192,
 });
@@ -97,10 +98,11 @@ await sandbox.resume();
 // Return the initial state immediately instead of waiting for completion.
 const runningExec = await sandbox.exec("sleep 60", { wait: false });
 
-// Stop and pause return the state accepted by the server (usually
-// `stopping` / `pausing`); use refresh() when you need a later snapshot.
 await sandbox.stop();
-// await sandbox.pause(); // alternative when preserving memory state
+const fork = await sandbox.fork({ name: "agent-task" });
+const connection = await fork.createConnection();
+await fork.stop();
+await fork.delete();
 
 const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
@@ -109,10 +111,10 @@ const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB.
 
-`create`, `start`, `resume`, and `exec` wait for completion by default. The server
-handles the initial wait; if its wait budget expires first, the SDK continues
-polling. Pass `{ wait: false }` to return as soon as the operation is accepted.
-`stop` and `pause` return their immediate server response without polling.
+`create`, `start`, `stop`, `pause`, `resume`, `fork`, and `exec` wait for
+completion by default. The server handles the initial wait; if its wait budget
+expires first, the SDK continues polling. Pass `{ wait: false }` to return as
+soon as the operation is accepted.
 
 API keys live at the account level, so those helpers are top-level:
 

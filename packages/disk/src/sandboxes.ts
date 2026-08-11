@@ -10,6 +10,8 @@ import {
 } from "./sandbox.js";
 
 export interface CreateSandboxRequest {
+  /** Name for the sandbox. The server generates one when omitted. */
+  name?: string;
   /** Number of virtual CPUs allocated to the sandbox, from 1 to 32. Defaults to 1. */
   vcpuCount?: number;
   /** Memory allocated to the sandbox in MiB, from 256 to 65536. Defaults to 2048. */
@@ -71,6 +73,7 @@ export class Sandboxes {
     options: SandboxWaitOptions = {},
   ): Promise<Sandbox> {
     const body = {
+      name: request.name,
       vcpu_count: request.vcpuCount,
       mem_size_mib: request.memSizeMiB,
       base_image: request.baseImage,

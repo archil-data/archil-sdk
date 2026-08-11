@@ -354,6 +354,9 @@ export class Disk implements FileSystem {
   readonly createdAt: string;
   readonly fsHandlerStatus?: string;
   readonly lastAccessed?: string;
+  readonly activeDataBytes?: number;
+  readonly totalDataBytes?: number;
+  /** @deprecated Use {@link activeDataBytes}. */
   readonly dataSize?: number;
   readonly monthlyUsage?: string;
   readonly mounts?: MountResponse[];
@@ -382,7 +385,9 @@ export class Disk implements FileSystem {
     this.createdAt = data.createdAt;
     this.fsHandlerStatus = data.fsHandlerStatus;
     this.lastAccessed = data.lastAccessed;
-    this.dataSize = data.dataSize;
+    this.activeDataBytes = data.activeDataBytes;
+    this.totalDataBytes = data.totalDataBytes;
+    this.dataSize = data.activeDataBytes;
     this.monthlyUsage = data.monthlyUsage;
     this.mounts = data.mounts;
     this.metrics = data.metrics;
@@ -405,7 +410,8 @@ export class Disk implements FileSystem {
       createdAt: this.createdAt,
       fsHandlerStatus: this.fsHandlerStatus,
       lastAccessed: this.lastAccessed,
-      dataSize: this.dataSize,
+      activeDataBytes: this.activeDataBytes,
+      totalDataBytes: this.totalDataBytes,
       monthlyUsage: this.monthlyUsage,
       mounts: this.mounts,
       metrics: this.metrics,

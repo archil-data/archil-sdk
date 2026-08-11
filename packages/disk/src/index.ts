@@ -22,11 +22,13 @@ export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js"
 export { Sandbox, SandboxExec } from "./sandbox.js";
 export type {
   SandboxEndpoint,
+  SandboxConnectionInfo,
   SandboxExecOptions,
   SandboxExecResponse,
   SandboxExecStatus,
   SandboxResponse,
   SandboxStatus,
+  SandboxForkOptions,
   SandboxWaitOptions,
 } from "./sandbox.js";
 

@@ -1,6 +1,6 @@
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
-import { unwrap } from "./client.js";
+import { unwrap, unwrapEmpty } from "./client.js";
 
 /** @internal */
 export type SandboxWire = components["schemas"]["Sandbox"];
@@ -18,9 +18,12 @@ export interface SandboxEndpoint {
 
 export interface SandboxResponse {
   id: string;
+  name: string;
   status: SandboxStatus;
   vcpuCount: number;
   memSizeMiB: number;
+  baseImage: string;
+  platform?: "arm64" | "amd64";
   maxTtlSeconds: number;
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
@@ -52,6 +55,16 @@ export interface SandboxWaitOptions {
    * The SDK polls if the server's wait budget expires first.
    */
   wait?: boolean;
+}
+
+export interface SandboxForkOptions extends SandboxWaitOptions {
+  /** Name for the fork. The server generates one when omitted. */
+  name?: string;
+}
+
+export interface SandboxConnectionInfo {
+  url: string;
+  expiresAt: Date;
 }
 
 export type SandboxExecOptions = {
@@ -143,9 +156,12 @@ export class SandboxExec {
 
 export class Sandbox {
   id!: string;
+  name!: string;
   status!: SandboxStatus;
   vcpuCount!: number;
   memSizeMiB!: number;
+  baseImage!: string;
+  platform?: "arm64" | "amd64";
   maxTtlSeconds!: number;
   maxConcurrentExecs!: number;
   endpoints?: SandboxEndpoint[];
@@ -168,9 +184,12 @@ export class Sandbox {
   /** @internal Overwrite this sandbox's fields in place from a fresh wire snapshot. */
   private _apply(data: SandboxWire): this {
     this.id = data.sandbox_id;
+    this.name = data.name;
     this.status = data.status;
     this.vcpuCount = data.vcpu_count;
     this.memSizeMiB = data.mem_size_mib;
+    this.baseImage = data.base_image;
+    this.platform = data.platform;
     this.maxTtlSeconds = data.max_ttl_seconds;
     this.maxConcurrentExecs = data.max_concurrent_execs;
     this.endpoints = data.endpoints?.map((endpoint) => ({ ...endpoint }));
@@ -186,9 +205,12 @@ export class Sandbox {
   toJSON(): SandboxResponse {
     return {
       id: this.id,
+      name: this.name,
       status: this.status,
       vcpuCount: this.vcpuCount,
       memSizeMiB: this.memSizeMiB,
+      baseImage: this.baseImage,
+      platform: this.platform,
       maxTtlSeconds: this.maxTtlSeconds,
       maxConcurrentExecs: this.maxConcurrentExecs,
       endpoints: this.endpoints?.map((endpoint) => ({ ...endpoint })),
@@ -223,23 +245,25 @@ export class Sandbox {
   }
 
   /** Stop this sandbox. */
-  async stop() {
+  async stop(options: SandboxWaitOptions = {}) {
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/stop", {
         params: { path: { sid: this.id } },
       }),
     );
-    return this._apply(data);
+    this._apply(data);
+    return options.wait === false ? this : waitWhileSandboxStatus(this, "stopping");
   }
 
   /** Pause this sandbox, preserving its CPU and memory state. */
-  async pause() {
+  async pause(options: SandboxWaitOptions = {}) {
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/pause", {
         params: { path: { sid: this.id } },
       }),
     );
-    return this._apply(data);
+    this._apply(data);
+    return options.wait === false ? this : waitWhileSandboxStatus(this, "pausing");
   }
 
   /** Resume this sandbox from its preserved CPU and memory state. */
@@ -251,6 +275,37 @@ export class Sandbox {
     );
     this._apply(data);
     return options.wait === false ? this : waitForSandboxStart(this);
+  }
+
+  /** Create an isolated writable branch from this sandbox's current state. */
+  async fork(options: SandboxForkOptions = {}): Promise<Sandbox> {
+    const data = await unwrap(
+      this._client.POST("/api/sandboxes/{sid}/fork", {
+        params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
+        body: options.name === undefined ? undefined : { name: options.name },
+      }),
+    );
+    const fork = new Sandbox(data, this._client);
+    return options.wait === false ? fork : waitForSandboxStart(fork);
+  }
+
+  /** Create a short-lived signed WebSocket URL for an interactive shell. */
+  async createConnection(): Promise<SandboxConnectionInfo> {
+    const data = await unwrap(
+      this._client.POST("/api/sandboxes/{sid}/connections", {
+        params: { path: { sid: this.id } },
+      }),
+    );
+    return { url: data.url, expiresAt: new Date(data.expires_at) };
+  }
+
+  /** Delete this sandbox and its backing disk. */
+  async delete(): Promise<void> {
+    await unwrapEmpty(
+      this._client.DELETE("/api/sandboxes/{sid}", {
+        params: { path: { sid: this.id } },
+      }),
+    );
   }
 
   async exec(command: string, options: SandboxExecOptions = {}): Promise<SandboxExec> {
@@ -310,7 +365,14 @@ export class Sandbox {
 
 /** @internal Continue waiting if the server returned before startup completed. */
 export async function waitForSandboxStart(sandbox: Sandbox): Promise<Sandbox> {
-  while (sandbox.status === "pending") {
+  return waitWhileSandboxStatus(sandbox, "pending");
+}
+
+async function waitWhileSandboxStatus(
+  sandbox: Sandbox,
+  status: SandboxStatus,
+): Promise<Sandbox> {
+  while (sandbox.status === status) {
     await sleep();
     await sandbox.refresh();
   }
