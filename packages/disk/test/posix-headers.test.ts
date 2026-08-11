@@ -88,6 +88,18 @@ test("putObject sends x-archil POSIX headers, mode in octal", async () => {
   });
 });
 
+test("putObject preserves a directory-marker path and sends POSIX headers", async () => {
+  await withMockedS3(async (disk, requests) => {
+    await disk.putObject("path/a/private/", "", { mode: 0o750, uid: 4000, gid: 4001 });
+    const put = requests.find((r) => r.method === "PUT");
+    assert.ok(put, "expected a PUT request");
+    assert.equal(put.url.pathname, "/dsk-1/path/a/private/");
+    assert.equal(put.headers.get("x-archil-mode"), "750");
+    assert.equal(put.headers.get("x-archil-uid"), "4000");
+    assert.equal(put.headers.get("x-archil-gid"), "4001");
+  });
+});
+
 test("putObject sends no x-archil headers when POSIX attrs are omitted", async () => {
   await withMockedS3(async (disk, requests) => {
     await disk.putObject("plain.txt", "hi", "text/plain");

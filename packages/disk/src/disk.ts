@@ -288,11 +288,13 @@ export interface DeleteObjectsResult {
 
 /**
  * POSIX attributes to set on a newly created object, sent to the S3 gateway as
- * `x-archil-*` headers. All optional — anything omitted falls back to the
- * server-side defaults (currently `root:root`, mode `0644`).
+ * `x-archil-*` headers. Missing parent directories inherit `uid` / `gid` and
+ * use mode `0755`; existing directories are unchanged. All fields are optional
+ * — new files default to `root:root 0644`, while directory markers default to
+ * `root:root 0755`.
  */
 export interface PosixCreateAttrs {
-  /** POSIX mode bits for the created file, e.g. `0o644`. Sent in octal. */
+  /** POSIX mode bits for the created file or directory marker. Sent in octal. */
   mode?: number;
   /** Owning user id, e.g. `1000`. */
   uid?: number;
@@ -658,7 +660,10 @@ export class Disk implements FileSystem {
    *
    * Optional `mode` / `uid` / `gid` set the POSIX attributes of the published
    * file (e.g. `{ mode: 0o644, uid: 1000, gid: 1000 }` for a non-root agent
-   * sandbox). Defaults are server-side (currently `root:root` mode `0644`).
+   * sandbox). Missing parent directories inherit `uid` / `gid` with mode
+   * `0755`; existing directories remain unchanged. A key ending in `/` creates
+   * an explicit directory marker whose leaf uses the requested attributes.
+   * Defaults are `root:root 0644` for files and `root:root 0755` for directories.
    *
    * @param key      Path on the disk (e.g. "reports/2026-01/data.json")
    * @param body     Contents as a string, Uint8Array/Buffer, or ArrayBuffer
@@ -758,7 +763,8 @@ export class Disk implements FileSystem {
    *
    * When the object does not yet exist, optional `mode` / `uid` / `gid` set the
    * POSIX attributes of the newly created file (same headers as
-   * {@link putObject}); they have no effect on an append to an existing object.
+   * {@link putObject}); missing parents inherit `uid` / `gid` with mode `0755`.
+   * Existing files and directories are unchanged.
    *
    * @param key      Path on the disk (e.g. "logs/app.log")
    * @param body     Bytes to append (string, Uint8Array/Buffer, or ArrayBuffer)

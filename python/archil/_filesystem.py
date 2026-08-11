@@ -41,7 +41,8 @@ class FileSystem(Protocol):
         gid: Optional[int] = None,
     ) -> PutObjectResult:
         """Create or overwrite an object. Optional ``mode``/``uid``/``gid`` set
-        POSIX attributes on the published file."""
+        POSIX attributes on the published leaf and ownership on missing parent
+        directories; existing directories are unchanged."""
         ...
 
     def delete_object(self, key: str) -> None:

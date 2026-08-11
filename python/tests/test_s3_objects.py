@@ -164,6 +164,16 @@ def test_put_sends_posix_create_headers(archil, s3, router):
     assert put.headers.get("x-archil-gid") == "1000"
 
 
+def test_put_directory_marker_preserves_path_and_sends_posix_headers(archil, s3, router):
+    d = _disk(archil)
+    d.put_object("path/a/private/", b"", mode=0o750, uid=4000, gid=4001)
+    put = next(r for r in router.requests if r.method == "PUT")
+    assert put.path == "/dsk-1/path/a/private/"
+    assert put.headers.get("x-archil-mode") == "750"
+    assert put.headers.get("x-archil-uid") == "4000"
+    assert put.headers.get("x-archil-gid") == "4001"
+
+
 def test_put_content_type_is_optional(archil, s3, router):
     d = _disk(archil)
     # Omitted → no Content-Type header is sent (the gateway picks the default).
