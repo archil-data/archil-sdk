@@ -83,7 +83,10 @@ const client = new archil.Archil({
   apiKey: process.env.ARCHIL_API_KEY,
   region: "aws-us-east-1",
 });
-const sandbox = await client.sandboxes.create();
+const sandbox = await client.sandboxes.create({
+  vcpuCount: 4,
+  memSizeMiB: 8192,
+});
 
 const result = await sandbox.exec("uname -a");
 console.log(result.stdout);
@@ -96,6 +99,9 @@ await sandbox.resume();
 const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
+
+Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
+`vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB.
 
 `create`, `start`, `stop`, `pause`, `resume`, and `exec` wait up to 30 seconds by default.
 Set `timeoutMs` to change the limit. A `SandboxWaitTimeoutError` includes the latest

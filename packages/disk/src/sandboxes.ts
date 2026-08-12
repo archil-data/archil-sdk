@@ -12,6 +12,10 @@ import {
 } from "./sandbox.js";
 
 export interface CreateSandboxRequest {
+  /** Number of virtual CPUs allocated to the sandbox, from 1 to 32. Defaults to 1. */
+  vcpuCount?: number;
+  /** Memory allocated to the sandbox in MiB, from 256 to 65536. Defaults to 2048. */
+  memSizeMiB?: number;
   /**
    * Public Linux OCI image reference for the sandbox's root filesystem.
    * Docker Hub shorthand and any public registry are accepted; the tag
@@ -73,6 +77,8 @@ export class Sandboxes {
     const deadline = Date.now() + timeoutMs;
 
     const body = {
+      vcpu_count: request.vcpuCount,
+      mem_size_mib: request.memSizeMiB,
       base_image: request.baseImage,
       env: request.env,
       max_ttl_seconds: request.maxTtlSeconds,
