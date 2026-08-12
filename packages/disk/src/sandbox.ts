@@ -73,6 +73,18 @@ export type SandboxExecOptions = {
   timeoutSeconds?: number;
 } & SandboxWaitOptions;
 
+export interface SandboxPtyOptions {
+  pty: true;
+  cols?: number;
+  rows?: number;
+  onData?: (data: string) => void;
+}
+
+export interface SandboxPtyResult {
+  /** Unavailable when a runtime closes without reporting the process status. */
+  exitCode?: number;
+}
+
 const POLL_INTERVAL_MS = 500;
 
 function sleep(): Promise<void> {
@@ -151,6 +163,78 @@ export class SandboxExec {
       }),
     );
     return this._apply(data);
+  }
+}
+
+export class SandboxPty {
+  private readonly _socket: WebSocket;
+  private readonly _completion: Promise<SandboxPtyResult>;
+
+  /** @internal */
+  constructor(socket: WebSocket, onData?: (data: string) => void) {
+    this._socket = socket;
+    this._completion = new Promise((resolve) => {
+      socket.addEventListener("message", (event) => {
+        if (typeof event.data === "string") onData?.(event.data);
+      });
+      socket.addEventListener(
+        "close",
+        (event) => {
+          const match = /^process exited with code (-?\d+)$/.exec(event.reason);
+          resolve({ exitCode: match ? Number(match[1]) : undefined });
+        },
+        { once: true },
+      );
+    });
+  }
+
+  /** @internal */
+  static connect(
+    url: string,
+    command: string,
+    options: SandboxPtyOptions,
+  ): Promise<SandboxPty> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      const handleError = () => reject(new Error("Interactive exec connection failed"));
+      socket.addEventListener("error", handleError, { once: true });
+      socket.addEventListener(
+        "open",
+        () => {
+          socket.removeEventListener("error", handleError);
+          const pty = new SandboxPty(socket, options.onData);
+          pty._send({
+            type: "resize",
+            cols: options.cols ?? 80,
+            rows: options.rows ?? 24,
+          });
+          const quotedCommand = `'${command.replaceAll("'", `'"'"'`)}'`;
+          pty._send({ type: "input", data: `eval ${quotedCommand}; exit $?\n` });
+          resolve(pty);
+        },
+        { once: true },
+      );
+    });
+  }
+
+  async sendInput(data: string): Promise<void> {
+    this._send({ type: "input", data });
+  }
+
+  async resize(size: { cols: number; rows: number }): Promise<void> {
+    this._send({ type: "resize", ...size });
+  }
+
+  wait(): Promise<SandboxPtyResult> {
+    return this._completion;
+  }
+
+  close(): void {
+    this._socket.close();
+  }
+
+  private _send(message: Record<string, unknown>): void {
+    this._socket.send(JSON.stringify(message));
   }
 }
 
@@ -308,7 +392,17 @@ export class Sandbox {
     );
   }
 
-  async exec(command: string, options: SandboxExecOptions = {}): Promise<SandboxExec> {
+  async exec(command: string, options: SandboxPtyOptions): Promise<SandboxPty>;
+  async exec(command: string, options?: SandboxExecOptions): Promise<SandboxExec>;
+  async exec(
+    command: string,
+    options: SandboxExecOptions | SandboxPtyOptions = {},
+  ): Promise<SandboxExec | SandboxPty> {
+    if ("pty" in options) {
+      const connection = await this.createConnection();
+      return SandboxPty.connect(connection.url, command, options);
+    }
+
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/execs", {
         params: {
