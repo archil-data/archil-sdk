@@ -3,11 +3,9 @@ import type { ApiClient } from "./client.js";
 import { unwrap } from "./client.js";
 import type { Disk } from "./disk.js";
 import {
-  DEFAULT_SANDBOX_TIMEOUT_MS,
   Sandbox,
   type SandboxWire,
   type SandboxWaitOptions,
-  validateTimeoutMs,
   waitForSandboxStart,
 } from "./sandbox.js";
 
@@ -72,10 +70,6 @@ export class Sandboxes {
     request: CreateSandboxRequest = {},
     options: SandboxWaitOptions = {},
   ): Promise<Sandbox> {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_SANDBOX_TIMEOUT_MS;
-    validateTimeoutMs(timeoutMs);
-    const deadline = Date.now() + timeoutMs;
-
     const body = {
       vcpu_count: request.vcpuCount,
       mem_size_mib: request.memSizeMiB,
@@ -86,11 +80,11 @@ export class Sandboxes {
     };
     const data = await unwrap(
       this._client.POST("/api/sandboxes", {
-        params: { query: { wait: false } },
+        params: { query: { wait: options.wait ?? true } },
         body: body as components["schemas"]["CreateSandboxRequest"],
       }),
     );
     const sandbox = new Sandbox(data as SandboxWire, this._client);
-    return waitForSandboxStart(sandbox, deadline, timeoutMs);
+    return options.wait === false ? sandbox : waitForSandboxStart(sandbox);
   }
 }
