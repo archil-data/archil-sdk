@@ -366,6 +366,8 @@ export class Disk implements FileSystem {
   readonly connectedClients?: ConnectedClient[];
   readonly authorizedUsers?: AuthorizedUser[];
   readonly allowedIps?: string[];
+  /** Root-directory POSIX attributes recorded at creation, if any. */
+  readonly rootAttrs?: { uid?: number; gid?: number; mode?: number };
 
   /** @internal */
   private readonly _client: ApiClient;
@@ -396,6 +398,8 @@ export class Disk implements FileSystem {
     this.connectedClients = data.connectedClients;
     this.authorizedUsers = data.authorizedUsers;
     this.allowedIps = data.allowedIps;
+    // Cast until @archildata/api-types ships the field (same pattern as allowedIps reads).
+    this.rootAttrs = (data as { rootAttrs?: Disk["rootAttrs"] }).rootAttrs;
     this._client = client;
     this._archilRegion = archilRegion;
     this._s3BaseUrl = s3BaseUrl ?? "";
@@ -420,6 +424,7 @@ export class Disk implements FileSystem {
       connectedClients: this.connectedClients,
       authorizedUsers: this.authorizedUsers,
       allowedIps: this.allowedIps,
+      rootAttrs: this.rootAttrs,
     } as DiskResponse;
   }
 

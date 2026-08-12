@@ -192,6 +192,24 @@ attributes are unchanged. When attributes are omitted, files default to
 `root:root 0644` and directories to `root:root 0755`. Automatic multipart
 uploads and append-created files use the same directory rules.
 
+The disk **root** itself defaults to `root:root 0755`, which means an
+unprivileged process cannot create entries directly under the mount root. To
+avoid a post-mount `chown`, set the root's owner and mode when creating the
+disk (creation-time only; a later `chown`/`chmod` through a mount changes the
+live attributes as usual):
+
+```ts
+const { disk } = await archil.createDisk({
+  name: "my-disk",
+  rootAttrs: { uid: 1000, gid: 1000, mode: 0o755 },
+});
+```
+
+`mode` is octal (pass `0o750`, not `750`). On regions that don't support
+`rootAttrs` yet the field is ignored and the disk is created with the
+defaults — check the `rootAttrs` field on the created disk to confirm it
+was applied.
+
 `listObjects` auto-paginates by default, returning every matching key. The first
 argument is a key prefix; a non-recursive listing (the default) returns the
 immediate level as `objects` plus subdirectory `commonPrefixes`:

@@ -162,19 +162,29 @@ class Disks:
     get: __get_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str, mounts: typing.Optional[typing.Sequence[typing.Union[archil._models.S3Mount, archil._models.GCSMount, archil._models.R2Mount, archil._models.S3CompatibleMount, archil._models.AzureBlobMount]]] = None, allowed_ips: typing.Optional[list[str]] = None) -> archil._models.CreateDiskResult:
+        def __call__(self, /, *, name: str, mounts: typing.Optional[typing.Sequence[typing.Union[archil._models.S3Mount, archil._models.GCSMount, archil._models.R2Mount, archil._models.S3CompatibleMount, archil._models.AzureBlobMount]]] = None, allowed_ips: typing.Optional[list[str]] = None, root_attrs: typing.Optional[archil._models.RootAttrs] = None) -> archil._models.CreateDiskResult:
             """Create a new disk with an auto-generated mount token.
 
             Returns the Disk, the one-time token (save it — it cannot be retrieved
             again), and the token identifier for later management.
+
+            ``root_attrs`` sets the POSIX owner and mode of the disk's root
+            directory (e.g. ``RootAttrs(uid=1000, gid=1000, mode=0o755)`` so an
+            unprivileged process can create entries under the mount root without
+            a post-mount ``chown``). Creation-time only.
             """
             ...
 
-        async def aio(self, /, *, name: str, mounts: typing.Optional[typing.Sequence[typing.Union[archil._models.S3Mount, archil._models.GCSMount, archil._models.R2Mount, archil._models.S3CompatibleMount, archil._models.AzureBlobMount]]] = None, allowed_ips: typing.Optional[list[str]] = None) -> archil._models.CreateDiskResult:
+        async def aio(self, /, *, name: str, mounts: typing.Optional[typing.Sequence[typing.Union[archil._models.S3Mount, archil._models.GCSMount, archil._models.R2Mount, archil._models.S3CompatibleMount, archil._models.AzureBlobMount]]] = None, allowed_ips: typing.Optional[list[str]] = None, root_attrs: typing.Optional[archil._models.RootAttrs] = None) -> archil._models.CreateDiskResult:
             """Create a new disk with an auto-generated mount token.
 
             Returns the Disk, the one-time token (save it — it cannot be retrieved
             again), and the token identifier for later management.
+
+            ``root_attrs`` sets the POSIX owner and mode of the disk's root
+            directory (e.g. ``RootAttrs(uid=1000, gid=1000, mode=0o755)`` so an
+            unprivileged process can create entries under the mount root without
+            a post-mount ``chown``). Creation-time only.
             """
             ...
 
@@ -399,6 +409,11 @@ class Disk:
 
     @property
     def allowed_ips(self) -> typing.Optional[list[str]]:
+        ...
+
+    @property
+    def root_attrs(self) -> typing.Optional[archil._models.RootAttrs]:
+        """Root-directory POSIX attributes recorded at creation, if any."""
         ...
 
     @property

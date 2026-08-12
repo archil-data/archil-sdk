@@ -28,6 +28,7 @@ from ._models import (
     ObjectMetadata,
     PartInfo,
     PartListing,
+    RootAttrs,
     PutObjectResult,
     S3Object,
     ShareUrl,
@@ -213,6 +214,11 @@ class _Disk:
     @property
     def allowed_ips(self) -> Optional[list[str]]:
         return self._data.allowed_ips
+
+    @property
+    def root_attrs(self) -> Optional[RootAttrs]:
+        """Root-directory POSIX attributes recorded at creation, if any."""
+        return self._data.root_attrs
 
     @property
     def capabilities(self) -> Optional[list[str]]:
