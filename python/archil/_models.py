@@ -555,7 +555,7 @@ class RootAttrs:
     def to_json(self) -> dict:
         if self.mode is not None and not 0 <= self.mode <= 0o777:
             raise ValueError(
-                f"mode must be permission bits only (0..0o777), got 0o{self.mode:o}"
+                f"mode must be permission bits only (0..0o777), got {self.mode}"
                 " — note mode is octal: pass 0o750, not 750"
             )
         for field_name, value in (("uid", self.uid), ("gid", self.gid)):
