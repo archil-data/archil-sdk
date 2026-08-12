@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import type { ApiClient } from "../src/client.js";
-import { Sandbox, SandboxExec } from "../src/sandbox.js";
+import { Sandbox, SandboxExec, SandboxPty } from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
 
 const now = "2026-07-22T12:00:00Z";
@@ -46,7 +46,60 @@ function ok(data: unknown) {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
+
+class TestWebSocket {
+  static instances: TestWebSocket[] = [];
+
+  readonly url: string;
+  readonly sent: string[] = [];
+  private readonly listeners = new Map<
+    string,
+    Array<{ listener: (event: any) => void; once: boolean }>
+  >();
+
+  constructor(url: string) {
+    this.url = url;
+    TestWebSocket.instances.push(this);
+    queueMicrotask(() => this.emit("open", {}));
+  }
+
+  addEventListener(
+    type: string,
+    listener: (event: any) => void,
+    options?: AddEventListenerOptions,
+  ) {
+    this.listeners.set(type, [
+      ...(this.listeners.get(type) ?? []),
+      { listener, once: options?.once ?? false },
+    ]);
+  }
+
+  removeEventListener(type: string, listener: (event: any) => void) {
+    this.listeners.set(
+      type,
+      (this.listeners.get(type) ?? []).filter((entry) => entry.listener !== listener),
+    );
+  }
+
+  send(data: string) {
+    this.sent.push(data);
+  }
+
+  close() {
+    this.emit("close", { code: 1000, reason: "", wasClean: true });
+  }
+
+  emit(type: string, event: any) {
+    const entries = this.listeners.get(type) ?? [];
+    this.listeners.set(
+      type,
+      entries.filter((entry) => !entry.once),
+    );
+    for (const { listener } of entries) listener(event);
+  }
+}
 
 test("Sandboxes translates list/create inputs and wraps camelCase snapshots", async () => {
   const calls: Array<{ method: string; path: string; options: any }> = [];
@@ -340,6 +393,50 @@ test("exec translates options", async () => {
       },
     },
   });
+});
+
+test("interactive exec connects a PTY and exposes input, resize, and completion", async () => {
+  const output: string[] = [];
+  const client = {
+    POST: async () =>
+      ok({
+        url: "wss://sandbox.example/connect?token=signed",
+        expires_at: now,
+      }),
+  } as unknown as ApiClient;
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const process = await sandbox.exec("echo 'hello' && codex", {
+    pty: true,
+    cols: 120,
+    rows: 40,
+    onData: (data) => output.push(data),
+  });
+  assert.ok(process instanceof SandboxPty);
+
+  const socket = TestWebSocket.instances[0];
+  socket.emit("message", { data: "hello\n" });
+  await process.sendInput("Review this repository\n");
+  await process.resize({ cols: 160, rows: 50 });
+  socket.emit("close", {
+    code: 1000,
+    reason: "process exited with code 17",
+    wasClean: true,
+  });
+
+  assert.deepEqual(output, ["hello\n"]);
+  assert.deepEqual(await process.wait(), { exitCode: 17 });
+  assert.deepEqual(
+    socket.sent.map((message) => JSON.parse(message)),
+    [
+      { type: "resize", cols: 120, rows: 40 },
+      { type: "input", data: `eval 'echo '"'"'hello'"'"' && codex'; exit $?\n` },
+      { type: "input", data: "Review this repository\n" },
+      { type: "resize", cols: 160, rows: 50 },
+    ],
+  );
 });
 
 test("sandbox exec objects refresh and cancel themselves", async () => {
