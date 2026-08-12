@@ -20,6 +20,8 @@ function diskJson(i: number) {
     provider: "aws",
     region: "aws-us-east-1",
     createdAt: "2026-01-01T00:00:00Z",
+    activeDataBytes: 1234,
+    totalDataBytes: 5678,
   };
 }
 
@@ -57,6 +59,9 @@ test("list() follows nextCursor until exhausted", async () => {
   );
   const result = await d.list();
   assert.deepEqual(result.map((x) => x.id), ["dsk-1", "dsk-2", "dsk-3"]);
+  assert.equal(result[0].activeDataBytes, 1234);
+  assert.equal(result[0].totalDataBytes, 5678);
+  assert.equal(result[0].dataSize, 1234);
   assert.deepEqual(queries, [
     { limit: 100, cursor: undefined, name: undefined },
     { limit: 100, cursor: "c1", name: undefined },

@@ -1,6 +1,6 @@
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
-import { unwrap } from "./client.js";
+import { unwrap, unwrapEmpty } from "./client.js";
 
 /** @internal */
 export type SandboxWire = components["schemas"]["Sandbox"];
@@ -18,9 +18,12 @@ export interface SandboxEndpoint {
 
 export interface SandboxResponse {
   id: string;
+  name: string;
   status: SandboxStatus;
   vcpuCount: number;
   memSizeMiB: number;
+  baseImage: string;
+  platform?: "arm64" | "amd64";
   maxTtlSeconds: number;
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
@@ -54,11 +57,33 @@ export interface SandboxWaitOptions {
   wait?: boolean;
 }
 
+export interface SandboxForkOptions extends SandboxWaitOptions {
+  /** Name for the fork. The server generates one when omitted. */
+  name?: string;
+}
+
+export interface SandboxConnectionInfo {
+  url: string;
+  expiresAt: Date;
+}
+
 export type SandboxExecOptions = {
   commandTty?: boolean;
   env?: Record<string, string>;
   timeoutSeconds?: number;
 } & SandboxWaitOptions;
+
+export interface SandboxPtyOptions {
+  pty: true;
+  cols?: number;
+  rows?: number;
+  onData?: (data: string) => void;
+}
+
+export interface SandboxPtyResult {
+  /** Unavailable when a runtime closes without reporting the process status. */
+  exitCode?: number;
+}
 
 const POLL_INTERVAL_MS = 500;
 
@@ -141,11 +166,86 @@ export class SandboxExec {
   }
 }
 
+export class SandboxPty {
+  private readonly _socket: WebSocket;
+  private readonly _completion: Promise<SandboxPtyResult>;
+
+  /** @internal */
+  constructor(socket: WebSocket, onData?: (data: string) => void) {
+    this._socket = socket;
+    this._completion = new Promise((resolve) => {
+      socket.addEventListener("message", (event) => {
+        if (typeof event.data === "string") onData?.(event.data);
+      });
+      socket.addEventListener(
+        "close",
+        (event) => {
+          const match = /^process exited with code (-?\d+)$/.exec(event.reason);
+          resolve({ exitCode: match ? Number(match[1]) : undefined });
+        },
+        { once: true },
+      );
+    });
+  }
+
+  /** @internal */
+  static connect(
+    url: string,
+    command: string,
+    options: SandboxPtyOptions,
+  ): Promise<SandboxPty> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      const handleError = () => reject(new Error("Interactive exec connection failed"));
+      socket.addEventListener("error", handleError, { once: true });
+      socket.addEventListener(
+        "open",
+        () => {
+          socket.removeEventListener("error", handleError);
+          const pty = new SandboxPty(socket, options.onData);
+          pty._send({
+            type: "resize",
+            cols: options.cols ?? 80,
+            rows: options.rows ?? 24,
+          });
+          const quotedCommand = `'${command.replaceAll("'", `'"'"'`)}'`;
+          pty._send({ type: "input", data: `eval ${quotedCommand}; exit $?\n` });
+          resolve(pty);
+        },
+        { once: true },
+      );
+    });
+  }
+
+  async sendInput(data: string): Promise<void> {
+    this._send({ type: "input", data });
+  }
+
+  async resize(size: { cols: number; rows: number }): Promise<void> {
+    this._send({ type: "resize", ...size });
+  }
+
+  wait(): Promise<SandboxPtyResult> {
+    return this._completion;
+  }
+
+  close(): void {
+    this._socket.close();
+  }
+
+  private _send(message: Record<string, unknown>): void {
+    this._socket.send(JSON.stringify(message));
+  }
+}
+
 export class Sandbox {
   id!: string;
+  name!: string;
   status!: SandboxStatus;
   vcpuCount!: number;
   memSizeMiB!: number;
+  baseImage!: string;
+  platform?: "arm64" | "amd64";
   maxTtlSeconds!: number;
   maxConcurrentExecs!: number;
   endpoints?: SandboxEndpoint[];
@@ -168,9 +268,12 @@ export class Sandbox {
   /** @internal Overwrite this sandbox's fields in place from a fresh wire snapshot. */
   private _apply(data: SandboxWire): this {
     this.id = data.sandbox_id;
+    this.name = data.name;
     this.status = data.status;
     this.vcpuCount = data.vcpu_count;
     this.memSizeMiB = data.mem_size_mib;
+    this.baseImage = data.base_image;
+    this.platform = data.platform;
     this.maxTtlSeconds = data.max_ttl_seconds;
     this.maxConcurrentExecs = data.max_concurrent_execs;
     this.endpoints = data.endpoints?.map((endpoint) => ({ ...endpoint }));
@@ -186,9 +289,12 @@ export class Sandbox {
   toJSON(): SandboxResponse {
     return {
       id: this.id,
+      name: this.name,
       status: this.status,
       vcpuCount: this.vcpuCount,
       memSizeMiB: this.memSizeMiB,
+      baseImage: this.baseImage,
+      platform: this.platform,
       maxTtlSeconds: this.maxTtlSeconds,
       maxConcurrentExecs: this.maxConcurrentExecs,
       endpoints: this.endpoints?.map((endpoint) => ({ ...endpoint })),
@@ -223,23 +329,25 @@ export class Sandbox {
   }
 
   /** Stop this sandbox. */
-  async stop() {
+  async stop(options: SandboxWaitOptions = {}) {
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/stop", {
         params: { path: { sid: this.id } },
       }),
     );
-    return this._apply(data);
+    this._apply(data);
+    return options.wait === false ? this : waitWhileSandboxStatus(this, "stopping");
   }
 
   /** Pause this sandbox, preserving its CPU and memory state. */
-  async pause() {
+  async pause(options: SandboxWaitOptions = {}) {
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/pause", {
         params: { path: { sid: this.id } },
       }),
     );
-    return this._apply(data);
+    this._apply(data);
+    return options.wait === false ? this : waitWhileSandboxStatus(this, "pausing");
   }
 
   /** Resume this sandbox from its preserved CPU and memory state. */
@@ -253,7 +361,48 @@ export class Sandbox {
     return options.wait === false ? this : waitForSandboxStart(this);
   }
 
-  async exec(command: string, options: SandboxExecOptions = {}): Promise<SandboxExec> {
+  /** Create an isolated writable branch from this sandbox's current state. */
+  async fork(options: SandboxForkOptions = {}): Promise<Sandbox> {
+    const data = await unwrap(
+      this._client.POST("/api/sandboxes/{sid}/fork", {
+        params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
+        body: options.name === undefined ? undefined : { name: options.name },
+      }),
+    );
+    const fork = new Sandbox(data, this._client);
+    return options.wait === false ? fork : waitForSandboxStart(fork);
+  }
+
+  /** Create a short-lived signed WebSocket URL for an interactive shell. */
+  async createConnection(): Promise<SandboxConnectionInfo> {
+    const data = await unwrap(
+      this._client.POST("/api/sandboxes/{sid}/connections", {
+        params: { path: { sid: this.id } },
+      }),
+    );
+    return { url: data.url, expiresAt: new Date(data.expires_at) };
+  }
+
+  /** Delete this sandbox and its backing disk. */
+  async delete(): Promise<void> {
+    await unwrapEmpty(
+      this._client.DELETE("/api/sandboxes/{sid}", {
+        params: { path: { sid: this.id } },
+      }),
+    );
+  }
+
+  async exec(command: string, options: SandboxPtyOptions): Promise<SandboxPty>;
+  async exec(command: string, options?: SandboxExecOptions): Promise<SandboxExec>;
+  async exec(
+    command: string,
+    options: SandboxExecOptions | SandboxPtyOptions = {},
+  ): Promise<SandboxExec | SandboxPty> {
+    if ("pty" in options) {
+      const connection = await this.createConnection();
+      return SandboxPty.connect(connection.url, command, options);
+    }
+
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/execs", {
         params: {
@@ -310,7 +459,14 @@ export class Sandbox {
 
 /** @internal Continue waiting if the server returned before startup completed. */
 export async function waitForSandboxStart(sandbox: Sandbox): Promise<Sandbox> {
-  while (sandbox.status === "pending") {
+  return waitWhileSandboxStatus(sandbox, "pending");
+}
+
+async function waitWhileSandboxStatus(
+  sandbox: Sandbox,
+  status: SandboxStatus,
+): Promise<Sandbox> {
+  while (sandbox.status === status) {
     await sleep();
     await sandbox.refresh();
   }
