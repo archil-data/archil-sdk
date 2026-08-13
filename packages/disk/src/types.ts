@@ -8,6 +8,7 @@ export type ConnectedClient = components["schemas"]["ConnectedClient"];
 export type AuthorizedUser = components["schemas"]["AuthorizedUser"];
 
 export type CreateDiskRequest = components["schemas"]["CreateDiskRequest"];
+export type RootAttrs = components["schemas"]["RootAttrs"];
 export type MountConfig = components["schemas"]["MountConfig"];
 export type S3Mount = components["schemas"]["S3Mount"];
 export type GCSMount = components["schemas"]["GCSMount"];

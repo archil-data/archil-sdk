@@ -8,6 +8,7 @@ import type {
   DiskUser,
   AuthorizedUser,
   MountResponse,
+  RootAttrs,
   DiskMetrics,
   ConnectedClient,
   Delegation,
@@ -367,7 +368,7 @@ export class Disk implements FileSystem {
   readonly authorizedUsers?: AuthorizedUser[];
   readonly allowedIps?: string[];
   /** Root-directory POSIX attributes recorded at creation, if any. */
-  readonly rootAttrs?: { uid?: number; gid?: number; mode?: number };
+  readonly rootAttrs?: RootAttrs;
 
   /** @internal */
   private readonly _client: ApiClient;
@@ -398,8 +399,7 @@ export class Disk implements FileSystem {
     this.connectedClients = data.connectedClients;
     this.authorizedUsers = data.authorizedUsers;
     this.allowedIps = data.allowedIps;
-    // Cast until @archildata/api-types ships the field (same pattern as allowedIps reads).
-    this.rootAttrs = (data as { rootAttrs?: Disk["rootAttrs"] }).rootAttrs;
+    this.rootAttrs = data.rootAttrs;
     this._client = client;
     this._archilRegion = archilRegion;
     this._s3BaseUrl = s3BaseUrl ?? "";
