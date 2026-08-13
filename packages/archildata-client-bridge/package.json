@@ -1,6 +1,6 @@
 {
   "name": "@archildata/client",
-  "version": "0.8.23",
+  "version": "0.8.24",
   "description": "Deprecated — install `disk` (pure-JS API+CLI) and/or `@archildata/native` (low-level protocol client) instead.",
   "homepage": "https://archil.com",
   "license": "MIT",
