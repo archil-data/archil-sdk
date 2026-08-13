@@ -50,6 +50,7 @@ from ._models import (
     PartListing,
     PutObjectResult,
     R2Mount,
+    RootAttrs,
     S3CompatibleMount,
     S3Mount,
     S3Object,
@@ -84,6 +85,7 @@ __all__ = [
     "R2Mount",
     "S3CompatibleMount",
     "AzureBlobMount",
+    "RootAttrs",
     "DiskUser",
     "TokenUser",
     "AwsStsUser",
@@ -179,8 +181,11 @@ def create_disk(
     name: str,
     mounts: Optional[Sequence[MountConfig]] = None,
     allowed_ips: Optional[list[str]] = None,
+    root_attrs: Optional[RootAttrs] = None,
 ) -> CreateDiskResult:
-    return _client().disks.create(name=name, mounts=mounts, allowed_ips=allowed_ips)
+    return _client().disks.create(
+        name=name, mounts=mounts, allowed_ips=allowed_ips, root_attrs=root_attrs
+    )
 
 
 def list_disks(

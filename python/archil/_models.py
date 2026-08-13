@@ -154,6 +154,7 @@ class DiskData:
     authorized_users: Optional[list[AuthorizedUser]] = None
     allowed_ips: Optional[list[str]] = None
     capabilities: Optional[list[str]] = None
+    root_attrs: Optional["RootAttrs"] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "DiskData":
@@ -187,6 +188,11 @@ class DiskData:
             ),
             allowed_ips=d.get("allowedIps"),
             capabilities=d.get("capabilities"),
+            root_attrs=(
+                RootAttrs(uid=ra.get("uid"), gid=ra.get("gid"), mode=ra.get("mode"))
+                if (ra := d.get("rootAttrs")) is not None
+                else None
+            ),
         )
 
 
@@ -530,6 +536,33 @@ class AzureBlobMount:
                 "bucketPrefix": self.bucket_prefix,
             }
         )
+
+
+@dataclass
+class RootAttrs:
+    """POSIX attributes for the disk's root directory, applied at creation.
+
+    Lets an unprivileged process own the mount root without a post-mount
+    ``chown``. Omitted fields default server-side to uid 0, gid 0, mode
+    ``0o755``. ``mode`` takes permission bits only (setuid/setgid/sticky are
+    rejected). Can only be set at creation; a later ``chown``/``chmod``
+    through a mount changes the live attributes as usual."""
+
+    uid: Optional[int] = None
+    gid: Optional[int] = None
+    mode: Optional[int] = None
+
+    def to_json(self) -> dict:
+        if self.mode is not None and not 0 <= self.mode <= 0o777:
+            raise ValueError(
+                f"mode must be permission bits only (0..0o777), got {self.mode}"
+                " — note mode is octal: pass 0o750, not 750"
+            )
+        for field_name, value in (("uid", self.uid), ("gid", self.gid)):
+            # 2**32 - 1 is the POSIX chown(-1) "unchanged" sentinel.
+            if value is not None and not 0 <= value < 2**32 - 1:
+                raise ValueError(f"{field_name} must be in 0..4294967294, got {value}")
+        return _drop_none({"uid": self.uid, "gid": self.gid, "mode": self.mode})
 
 
 MountConfig = Union[S3Mount, GCSMount, R2Mount, S3CompatibleMount, AzureBlobMount]
