@@ -83,6 +83,7 @@ export type {
   Delegation,
   AuthorizedUser,
   CreateDiskRequest,
+  RootAttrs,
   MountConfig,
   S3Mount,
   GCSMount,
