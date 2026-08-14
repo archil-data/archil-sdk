@@ -1,11 +1,11 @@
 [project]
 name = "archil"
-version = "0.9.0"
-description = "Pure-Python client for Archil disks"
+version = "0.10.0"
+description = "Pure-Python client for Archil disks and sandboxes"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-keywords = ["archil", "disk", "filesystem", "s3"]
+keywords = ["archil", "disk", "filesystem", "sandbox", "s3"]
 authors = [{ name = "Archil, Inc.", email = "support@archil.com" }]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -16,6 +16,7 @@ classifiers = [
 dependencies = [
     "httpx>=0.27",
     "synchronicity>=0.12.3",
+    "websockets>=13",
 ]
 
 [project.urls]

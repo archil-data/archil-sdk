@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""SDK integration test: disk lifecycle + S3-compatible object API through the
-real controlplane + fshandler stack.
+"""SDK integration test: disk and sandbox lifecycles plus the S3-compatible
+object API through the real controlplane + fshandler stack.
 
 This is the Python counterpart to integration-tests/node-e2e/sdk-integration-test.mjs.
 The Node test additionally mounts the disk via the native FUSE binding
-(@archildata/native); Python has no such binding, so this test covers the
-control-plane REST surface and the S3-compatible object API end-to-end — which is
-the entire Python SDK surface.
+(@archildata/native); Python has no such binding.
 
 Environment variables:
   ARCHIL_API_KEY        API key for the test/staging account
@@ -20,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 import uuid
 
 from archil import Archil, ArchilError, ArchilS3Error, TokenUser
@@ -49,6 +48,110 @@ def step(label: str):
 def assert_that(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def delete_sandbox(sandbox, timeout_seconds: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            sandbox.delete()
+            return
+        except ArchilError as err:
+            if "dependent forks" not in str(err) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
+
+
+def run_sandbox_suite(archil) -> None:
+    print("\n--- Persistent sandbox API ---")
+    sandbox_ids: list[str] = []
+    try:
+        with step("Create sandbox"):
+            sandbox = archil.sandboxes.create(
+                name=f"sdk-py-sandbox-{uuid.uuid4().hex[:12]}",
+                max_ttl_seconds=600,
+            )
+            sandbox_ids.append(sandbox.id)
+            assert_that(
+                sandbox.status == "running",
+                f"unexpected sandbox status: {sandbox.status}",
+            )
+
+        with step("Verify sandbox in list"):
+            sandboxes = archil.sandboxes.list()
+            assert_that(
+                any(item.id == sandbox.id for item in sandboxes),
+                f"sandbox {sandbox.id} not found in list",
+            )
+
+        with step("Execute command in sandbox"):
+            result = sandbox.exec("printf sandbox-ready")
+            assert_that(result.exit_code == 0, f"sandbox exec failed: {result.stderr}")
+            assert_that(
+                result.stdout == "sandbox-ready",
+                f"unexpected sandbox stdout: {result.stdout!r}",
+            )
+
+        with step("Execute interactive PTY command"):
+            output: list[str] = []
+            process = sandbox.exec(
+                "read line; printf 'pty:%s' \"$line\"",
+                pty=True,
+                on_data=output.append,
+            )
+            process.resize(cols=120, rows=40)
+            process.send_input("sandbox-input\n")
+            pty_result = process.wait()
+            assert_that(
+                "pty:sandbox-input" in "".join(output),
+                f"unexpected PTY output: {output!r}",
+            )
+            assert_that(
+                pty_result.exit_code in {0, None},
+                f"PTY exec failed: {pty_result.exit_code}",
+            )
+
+        with step("Pause sandbox"):
+            sandbox = sandbox.pause()
+            assert_that(sandbox.status == "paused", f"unexpected paused status: {sandbox.status}")
+
+        with step("Resume sandbox"):
+            sandbox = sandbox.resume()
+            assert_that(sandbox.status == "running", f"unexpected resumed status: {sandbox.status}")
+
+        with step("Prepare sandbox state for fork"):
+            result = sandbox.exec("printf fork-state > /tmp/sdk-fork-state")
+            assert_that(result.exit_code == 0, f"failed to prepare fork state: {result.stderr}")
+
+        with step("Stop and fork sandbox"):
+            sandbox = sandbox.stop()
+            fork = sandbox.fork(name=f"sdk-py-fork-{uuid.uuid4().hex[:12]}")
+            sandbox_ids.append(fork.id)
+            assert_that(fork.id != sandbox.id, "fork reused the source sandbox ID")
+            assert_that(fork.status == "running", f"unexpected fork status: {fork.status}")
+
+        with step("Verify forked sandbox state"):
+            result = fork.exec("cat /tmp/sdk-fork-state")
+            assert_that(result.exit_code == 0, f"fork exec failed: {result.stderr}")
+            assert_that(result.stdout == "fork-state", f"unexpected fork stdout: {result.stdout!r}")
+
+        with step("Stop and delete fork"):
+            fork.stop()
+            delete_sandbox(fork)
+            sandbox_ids.remove(fork.id)
+
+        with step("Delete source sandbox"):
+            delete_sandbox(sandbox)
+            sandbox_ids.remove(sandbox.id)
+    finally:
+        for sandbox_id in reversed(sandbox_ids):
+            try:
+                sandbox = archil.sandboxes.get(sandbox_id)
+                if sandbox.status not in {"stopped", "exited", "failed"}:
+                    sandbox = sandbox.stop()
+                delete_sandbox(sandbox)
+            except ArchilError:
+                pass
 
 
 def run_s3_object_suite(disk) -> None:
@@ -288,6 +391,8 @@ def main() -> None:
     archil = Archil(api_key=api_key, region=region, base_url=base_url, s3_base_url=s3_base_url)
 
     try:
+        run_sandbox_suite(archil)
+
         with step("Create disk"):
             result = archil.disks.create(name=disk_name)
             disk = result.disk

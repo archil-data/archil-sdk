@@ -1,6 +1,6 @@
 # archil
 
-Python client for [Archil](https://archil.com) disks. Create disks, list and inspect them, manage who can mount them, run commands against them, and read/write their contents through the S3-compatible object API — all from scripts, CI, or notebooks. It also ships **drop-in [agent tools](#agent-tools)** that turn a disk into a ready-made filesystem toolset for OpenAI Agents, LangChain, and other frameworks.
+Python client for [Archil](https://archil.com) disks and sandboxes. Create persistent disks and microVM sandboxes, run commands against them, and read/write disk contents through the S3-compatible object API — all from scripts, CI, or notebooks. It also ships **drop-in [agent tools](#agent-tools)** that turn a disk into a ready-made filesystem toolset for OpenAI Agents, LangChain, and other frameworks.
 
 `archil` talks to the Archil control plane over HTTPS and has no native dependencies.
 
@@ -49,6 +49,58 @@ d.remove_user("token", user.identifier)
 # Delete
 d.delete()
 ```
+
+### Sandboxes
+
+Use `Archil.sandboxes` or the module-level helpers to manage persistent microVMs:
+
+```python
+sandbox = archil.create_sandbox(
+    name="prepared-environment",
+    vcpu_count=4,
+    mem_size_mib=8192,
+)
+
+result = sandbox.exec("uname -a")
+print(result.stdout)
+
+# Return immediately while a long-running command continues remotely.
+running_exec = sandbox.exec("sleep 60", wait=False)
+
+sandbox.stop()
+fork = sandbox.fork(name="agent-task")
+connection = fork.create_connection()
+fork.stop()
+fork.delete()
+
+all_sandboxes = archil.list_sandboxes()
+using_disk = archil.list_sandboxes(disk="dsk-abc123")
+```
+
+Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
+`vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB.
+
+For an interactive terminal, pass `pty=True`. The returned process accepts
+input and terminal resizes while `on_data` receives output:
+
+```python
+process = sandbox.exec(
+    "bash",
+    pty=True,
+    cols=120,
+    rows=40,
+    on_data=lambda data: print(data, end=""),
+)
+process.send_input("pwd\n")
+process.resize(cols=160, rows=50)
+result = process.wait()
+print(result.exit_code)
+```
+
+`create`, `start`, `stop`, `pause`, `resume`, `fork`, and non-interactive
+`exec` wait for completion by default. The server handles the initial wait; if
+its wait budget expires first, the SDK continues polling. Pass `wait=False` to
+return as soon as the operation is accepted.
 
 ### Delegations
 
@@ -264,7 +316,7 @@ week_link = d.share("reports/2026-01/summary.pdf", expires_in=604800)
 
 ### Async
 
-Every method on `Archil`, `Disks`, `Disk`, and `Tokens` has an `.aio` variant that returns a coroutine. (The module-level helpers — `configure`, `create_disk`, `get_disk`, etc. — are synchronous convenience wrappers; from async code, construct `Archil(...)` directly and use `.aio`.) Construct the client directly and `await`:
+Every method on `Archil`, `Disks`, `Disk`, `Sandboxes`, `Sandbox`, `SandboxPty`, and `Tokens` has an `.aio` variant that returns a coroutine. (The module-level helpers — `configure`, `create_disk`, `create_sandbox`, etc. — are synchronous convenience wrappers; from async code, construct `Archil(...)` directly and use `.aio`.) Construct the client directly and `await`:
 
 ```python
 import asyncio

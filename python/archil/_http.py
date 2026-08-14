@@ -130,9 +130,9 @@ class _Transport:
         params: Optional[dict] = None,
         json: Optional[Any] = None,
     ) -> None:
-        await self._request_envelope(method, path, params=params, json=json)
+        await self._request_envelope(method, path, params=params, json=json, allow_empty=True)
 
-    async def _request_envelope(self, method, path, *, params, json) -> dict:
+    async def _request_envelope(self, method, path, *, params, json, allow_empty: bool = False) -> dict:
         # Drop None-valued query params so optional args don't serialize as "None".
         clean_params = {k: v for k, v in (params or {}).items() if v is not None} or None
         resp = await self._cp_client().request(method, path, params=clean_params, json=json)
@@ -141,6 +141,8 @@ class _Transport:
             body = resp.json()
         except ValueError:
             body = None
+        if allow_empty and resp.is_success and body is None:
+            return {}
         if not body or not body.get("success"):
             message = (body or {}).get("error") or f"API request failed with status {resp.status_code}"
             # Surface a machine-readable `code` when the control plane provides one

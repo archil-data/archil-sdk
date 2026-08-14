@@ -1,8 +1,8 @@
-"""Pure-Python client for Archil disks.
+"""Pure-Python client for Archil disks and sandboxes.
 
-Create disks, list and inspect them, manage who can mount them, run commands
-against them, and read/write their contents through the S3-compatible object
-API — all over HTTPS with no native dependencies.
+Create persistent disks and microVM sandboxes, run commands against them, and
+read/write disk contents through the S3-compatible object API — all over HTTPS
+with no native dependencies.
 
 Every method is usable both synchronously and asynchronously from a single
 implementation: ``disk.put_object(...)`` blocks, while ``disk.put_object.aio(...)``
@@ -11,7 +11,7 @@ Modal uses), so there is one source of truth and no duplicated sync/async logic.
 """
 
 import threading
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 
 from ._archil import ExecMount, ExecMountSpec
 from ._filesystem import FileSystem
@@ -54,13 +54,21 @@ from ._models import (
     S3CompatibleMount,
     S3Mount,
     S3Object,
+    SandboxConnection,
+    SandboxData,
+    SandboxEndpoint,
+    SandboxExecData,
+    SandboxExecStatus,
+    SandboxPlatform,
+    SandboxPtyResult,
+    SandboxStatus,
     ShareUrl,
     TokenUser,
     UploadPart,
 )
-from ._wrapped import Archil, Disk, Disks, Multipart, Tokens, Workspace
+from ._wrapped import Archil, Disk, Disks, Multipart, Sandbox, SandboxExec, SandboxPty, Sandboxes, Tokens, Workspace
 from .agent_tools import AgentToolset
-from .errors import ArchilApiError, ArchilError, ArchilS3Error
+from .errors import ArchilApiError, ArchilError, ArchilS3Error, SandboxStartError
 
 __all__ = [
     "__version__",
@@ -70,6 +78,10 @@ __all__ = [
     "Multipart",
     "Tokens",
     "Workspace",
+    "Sandboxes",
+    "Sandbox",
+    "SandboxExec",
+    "SandboxPty",
     "FileSystem",
     "AgentToolset",
     "ExecMount",
@@ -78,6 +90,7 @@ __all__ = [
     "ArchilError",
     "ArchilApiError",
     "ArchilS3Error",
+    "SandboxStartError",
     # input models
     "MountConfig",
     "S3Mount",
@@ -120,11 +133,22 @@ __all__ = [
     "DeleteObjectsResult",
     "CreateDiskResult",
     "DiskPage",
+    "SandboxData",
+    "SandboxExecData",
+    "SandboxStatus",
+    "SandboxExecStatus",
+    "SandboxPlatform",
+    "SandboxEndpoint",
+    "SandboxConnection",
+    "SandboxPtyResult",
     # module-level helpers
     "configure",
     "create_disk",
     "list_disks",
     "get_disk",
+    "create_sandbox",
+    "list_sandboxes",
+    "get_sandbox",
     "list_api_keys",
     "create_api_key",
     "delete_api_key",
@@ -183,14 +207,10 @@ def create_disk(
     allowed_ips: Optional[list[str]] = None,
     root_attrs: Optional[RootAttrs] = None,
 ) -> CreateDiskResult:
-    return _client().disks.create(
-        name=name, mounts=mounts, allowed_ips=allowed_ips, root_attrs=root_attrs
-    )
+    return _client().disks.create(name=name, mounts=mounts, allowed_ips=allowed_ips, root_attrs=root_attrs)
 
 
-def list_disks(
-    *, limit: Optional[int] = None, cursor: Optional[str] = None, name: Optional[str] = None
-) -> list[Disk]:
+def list_disks(*, limit: Optional[int] = None, cursor: Optional[str] = None, name: Optional[str] = None) -> list[Disk]:
     return _client().disks.list(limit=limit, cursor=cursor, name=name)
 
 
@@ -198,9 +218,38 @@ def get_disk(id: str) -> Disk:
     return _client().disks.get(id)
 
 
-def list_api_keys(
-    *, limit: Optional[int] = None, cursor: Optional[str] = None
-) -> list[ApiTokenResponse]:
+def create_sandbox(
+    *,
+    name: Optional[str] = None,
+    vcpu_count: Optional[int] = None,
+    mem_size_mib: Optional[int] = None,
+    base_image: Optional[str] = None,
+    env: Optional[dict[str, str]] = None,
+    max_ttl_seconds: Optional[int] = None,
+    max_concurrent_execs: Optional[int] = None,
+    wait: bool = True,
+) -> Sandbox:
+    return _client().sandboxes.create(
+        name=name,
+        vcpu_count=vcpu_count,
+        mem_size_mib=mem_size_mib,
+        base_image=base_image,
+        env=env,
+        max_ttl_seconds=max_ttl_seconds,
+        max_concurrent_execs=max_concurrent_execs,
+        wait=wait,
+    )
+
+
+def list_sandboxes(*, disk: Optional[Union[Disk, str]] = None) -> list[Sandbox]:
+    return _client().sandboxes.list(disk=disk)
+
+
+def get_sandbox(id: str) -> Sandbox:
+    return _client().sandboxes.get(id)
+
+
+def list_api_keys(*, limit: Optional[int] = None, cursor: Optional[str] = None) -> list[ApiTokenResponse]:
     return _client().tokens.list(limit=limit, cursor=cursor)
 
 
