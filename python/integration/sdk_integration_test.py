@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 import uuid
 
 from archil import Archil, ArchilError, ArchilS3Error, TokenUser
@@ -49,9 +50,21 @@ def assert_that(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def delete_sandbox(sandbox, timeout_seconds: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            sandbox.delete()
+            return
+        except ArchilError as err:
+            if "dependent forks" not in str(err) or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
+
+
 def run_sandbox_suite(archil) -> None:
     print("\n--- Persistent sandbox API ---")
-    sandbox_id = None
+    sandbox_ids: set[str] = set()
     try:
         with step("Create sandbox"):
             sandbox = archil.sandboxes.create(
@@ -59,7 +72,7 @@ def run_sandbox_suite(archil) -> None:
                 base_image="alpine:3.23",
                 max_ttl_seconds=600,
             )
-            sandbox_id = sandbox.id
+            sandbox_ids.add(sandbox.id)
             assert_that(
                 sandbox.status == "running",
                 f"unexpected sandbox status: {sandbox.status}",
@@ -68,8 +81,8 @@ def run_sandbox_suite(archil) -> None:
         with step("Verify sandbox in list"):
             sandboxes = archil.sandboxes.list()
             assert_that(
-                any(item.id == sandbox_id for item in sandboxes),
-                f"sandbox {sandbox_id} not found in list",
+                any(item.id == sandbox.id for item in sandboxes),
+                f"sandbox {sandbox.id} not found in list",
             )
 
         with step("Execute command in sandbox"):
@@ -80,16 +93,64 @@ def run_sandbox_suite(archil) -> None:
                 f"unexpected sandbox stdout: {result.stdout!r}",
             )
 
-        with step("Stop and delete sandbox"):
-            sandbox.stop().delete()
-            sandbox_id = None
+        with step("Execute interactive PTY command"):
+            output: list[str] = []
+            process = sandbox.exec(
+                "read line; printf 'pty:%s' \"$line\"",
+                pty=True,
+                on_data=output.append,
+            )
+            process.resize(cols=120, rows=40)
+            process.send_input("sandbox-input\n")
+            pty_result = process.wait()
+            assert_that(
+                "pty:sandbox-input" in "".join(output),
+                f"unexpected PTY output: {output!r}",
+            )
+            assert_that(
+                pty_result.exit_code in {0, None},
+                f"PTY exec failed: {pty_result.exit_code}",
+            )
+
+        with step("Pause sandbox"):
+            sandbox = sandbox.pause()
+            assert_that(sandbox.status == "paused", f"unexpected paused status: {sandbox.status}")
+
+        with step("Resume sandbox"):
+            sandbox = sandbox.resume()
+            assert_that(sandbox.status == "running", f"unexpected resumed status: {sandbox.status}")
+
+        with step("Prepare sandbox state for fork"):
+            result = sandbox.exec("printf fork-state > /tmp/sdk-fork-state")
+            assert_that(result.exit_code == 0, f"failed to prepare fork state: {result.stderr}")
+
+        with step("Stop and fork sandbox"):
+            sandbox = sandbox.stop()
+            fork = sandbox.fork(name=f"sdk-py-fork-{uuid.uuid4().hex[:12]}")
+            sandbox_ids.add(fork.id)
+            assert_that(fork.id != sandbox.id, "fork reused the source sandbox ID")
+            assert_that(fork.status == "running", f"unexpected fork status: {fork.status}")
+
+        with step("Verify forked sandbox state"):
+            result = fork.exec("cat /tmp/sdk-fork-state")
+            assert_that(result.exit_code == 0, f"fork exec failed: {result.stderr}")
+            assert_that(result.stdout == "fork-state", f"unexpected fork stdout: {result.stdout!r}")
+
+        with step("Stop and delete fork"):
+            fork.stop()
+            delete_sandbox(fork)
+            sandbox_ids.remove(fork.id)
+
+        with step("Delete source sandbox"):
+            delete_sandbox(sandbox)
+            sandbox_ids.remove(sandbox.id)
     finally:
-        if sandbox_id is not None:
+        for sandbox_id in tuple(sandbox_ids):
             try:
                 sandbox = archil.sandboxes.get(sandbox_id)
                 if sandbox.status not in {"stopped", "exited", "failed"}:
                     sandbox = sandbox.stop()
-                sandbox.delete()
+                delete_sandbox(sandbox)
             except ArchilError:
                 pass
 
