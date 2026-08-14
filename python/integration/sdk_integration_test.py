@@ -69,7 +69,6 @@ def run_sandbox_suite(archil) -> None:
         with step("Create sandbox"):
             sandbox = archil.sandboxes.create(
                 name=f"sdk-py-sandbox-{uuid.uuid4().hex[:12]}",
-                base_image="alpine:3.23",
                 max_ttl_seconds=600,
             )
             sandbox_ids.append(sandbox.id)
