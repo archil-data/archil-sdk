@@ -64,7 +64,7 @@ def delete_sandbox(sandbox, timeout_seconds: float = 30.0) -> None:
 
 def run_sandbox_suite(archil) -> None:
     print("\n--- Persistent sandbox API ---")
-    sandbox_ids: set[str] = set()
+    sandbox_ids: list[str] = []
     try:
         with step("Create sandbox"):
             sandbox = archil.sandboxes.create(
@@ -72,7 +72,7 @@ def run_sandbox_suite(archil) -> None:
                 base_image="alpine:3.23",
                 max_ttl_seconds=600,
             )
-            sandbox_ids.add(sandbox.id)
+            sandbox_ids.append(sandbox.id)
             assert_that(
                 sandbox.status == "running",
                 f"unexpected sandbox status: {sandbox.status}",
@@ -127,7 +127,7 @@ def run_sandbox_suite(archil) -> None:
         with step("Stop and fork sandbox"):
             sandbox = sandbox.stop()
             fork = sandbox.fork(name=f"sdk-py-fork-{uuid.uuid4().hex[:12]}")
-            sandbox_ids.add(fork.id)
+            sandbox_ids.append(fork.id)
             assert_that(fork.id != sandbox.id, "fork reused the source sandbox ID")
             assert_that(fork.status == "running", f"unexpected fork status: {fork.status}")
 
@@ -145,7 +145,7 @@ def run_sandbox_suite(archil) -> None:
             delete_sandbox(sandbox)
             sandbox_ids.remove(sandbox.id)
     finally:
-        for sandbox_id in tuple(sandbox_ids):
+        for sandbox_id in reversed(sandbox_ids):
             try:
                 sandbox = archil.sandboxes.get(sandbox_id)
                 if sandbox.status not in {"stopped", "exited", "failed"}:
