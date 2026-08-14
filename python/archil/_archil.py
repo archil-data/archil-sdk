@@ -8,6 +8,7 @@ from ._disks import _Disks
 from ._http import _Transport
 from ._models import ExecResult
 from ._regions import derive_s3_base_url, resolve_base_url
+from ._sandboxes import _Sandboxes
 from ._tokens import _Tokens
 
 # Imported at runtime (not under TYPE_CHECKING) so the synchronicity stub
@@ -45,9 +46,10 @@ def _disk_id(mount: object) -> str:
 
 
 class _Archil:
-    """Top-level Archil client. Holds the account-level ``disks`` and ``tokens``
-    collections and the cross-disk ``exec``. Construct directly for multi-account
-    or multi-region scripts; otherwise use the module-level helpers.
+    """Top-level Archil client. Holds the account-level ``disks``, ``sandboxes``,
+    and ``tokens`` collections and the cross-disk ``exec``. Construct directly
+    for multi-account or multi-region scripts; otherwise use the module-level
+    helpers.
 
     Every method is available both synchronously and asynchronously: call it
     directly to block, or use the ``.aio`` attribute for a coroutine
@@ -67,13 +69,9 @@ class _Archil:
         api_key = api_key or os.environ.get("ARCHIL_API_KEY")
         region = region or os.environ.get("ARCHIL_REGION")
         if not api_key:
-            raise ValueError(
-                "Missing API key: pass api_key or set the ARCHIL_API_KEY environment variable"
-            )
+            raise ValueError("Missing API key: pass api_key or set the ARCHIL_API_KEY environment variable")
         if not region:
-            raise ValueError(
-                "Missing region: pass region or set the ARCHIL_REGION environment variable"
-            )
+            raise ValueError("Missing region: pass region or set the ARCHIL_REGION environment variable")
 
         # Resolve the control-plane URL the same way the transport would (explicit
         # override, else region lookup) so the S3 endpoint can be derived from it
@@ -81,10 +79,9 @@ class _Archil:
         control_base_url = base_url or resolve_base_url(region)
         s3 = s3_base_url or os.environ.get("ARCHIL_S3_BASE_URL") or derive_s3_base_url(control_base_url)
 
-        self._transport = _Transport(
-            control_base_url, api_key, s3, transport=_http_transport, timeout=timeout
-        )
+        self._transport = _Transport(control_base_url, api_key, s3, transport=_http_transport, timeout=timeout)
         self._disks = _Disks(self._transport, region)
+        self._sandboxes = _Sandboxes(self._transport)
         self._tokens = _Tokens(self._transport)
 
     @property
@@ -94,6 +91,10 @@ class _Archil:
     @property
     def tokens(self) -> "_Tokens":
         return self._tokens
+
+    @property
+    def sandboxes(self) -> "_Sandboxes":
+        return self._sandboxes
 
     async def exec(self, *, disks: dict[str, ExecMount], command: str) -> ExecResult:
         """Run a command in a container with multiple disks mounted
@@ -113,9 +114,7 @@ class _Archil:
                 payload[rel_path] = entry
             else:
                 payload[rel_path] = _disk_id(mount)
-        data = await self._transport.request_json(
-            "POST", "/api/exec", json={"disks": payload, "command": command}
-        )
+        data = await self._transport.request_json("POST", "/api/exec", json={"disks": payload, "command": command})
         return ExecResult.from_json(data)
 
     def workspace(self, mounts: dict[str, ExecMount]) -> "_Workspace":

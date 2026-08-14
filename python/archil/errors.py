@@ -19,6 +19,21 @@ class ArchilApiError(ArchilError):
     """Error from the control-plane REST API."""
 
 
+class SandboxStartError(ArchilError):
+    """The sandbox entered an inactive state before startup completed."""
+
+    def __init__(self, sandbox: object) -> None:
+        status = getattr(sandbox, "status", "unknown")
+        exit_reason = getattr(sandbox, "exit_reason", None)
+        detail = f": {exit_reason}" if exit_reason else ""
+        super().__init__(
+            f"Sandbox entered {status} before it started{detail}",
+            409,
+            "SANDBOX_START_FAILED",
+        )
+        self.latest = sandbox
+
+
 class ArchilS3Error(ArchilError):
     """Error from the S3-compatible object API (``get_object`` / ``put_object`` /
     ``delete_object`` / ``head_object`` / ``list_objects``). The gateway returns

@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""SDK integration test: disk lifecycle + S3-compatible object API through the
-real controlplane + fshandler stack.
+"""SDK integration test: disk and sandbox lifecycles plus the S3-compatible
+object API through the real controlplane + fshandler stack.
 
 This is the Python counterpart to integration-tests/node-e2e/sdk-integration-test.mjs.
 The Node test additionally mounts the disk via the native FUSE binding
-(@archildata/native); Python has no such binding, so this test covers the
-control-plane REST surface and the S3-compatible object API end-to-end — which is
-the entire Python SDK surface.
+(@archildata/native); Python has no such binding.
 
 Environment variables:
   ARCHIL_API_KEY        API key for the test/staging account
@@ -49,6 +47,51 @@ def step(label: str):
 def assert_that(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def run_sandbox_suite(archil) -> None:
+    print("\n--- Persistent sandbox API ---")
+    sandbox_id = None
+    try:
+        with step("Create sandbox"):
+            sandbox = archil.sandboxes.create(
+                name=f"sdk-py-sandbox-{uuid.uuid4().hex[:12]}",
+                base_image="alpine:3.23",
+                max_ttl_seconds=600,
+            )
+            sandbox_id = sandbox.id
+            assert_that(
+                sandbox.status == "running",
+                f"unexpected sandbox status: {sandbox.status}",
+            )
+
+        with step("Verify sandbox in list"):
+            sandboxes = archil.sandboxes.list()
+            assert_that(
+                any(item.id == sandbox_id for item in sandboxes),
+                f"sandbox {sandbox_id} not found in list",
+            )
+
+        with step("Execute command in sandbox"):
+            result = sandbox.exec("printf sandbox-ready")
+            assert_that(result.exit_code == 0, f"sandbox exec failed: {result.stderr}")
+            assert_that(
+                result.stdout == "sandbox-ready",
+                f"unexpected sandbox stdout: {result.stdout!r}",
+            )
+
+        with step("Stop and delete sandbox"):
+            sandbox.stop().delete()
+            sandbox_id = None
+    finally:
+        if sandbox_id is not None:
+            try:
+                sandbox = archil.sandboxes.get(sandbox_id)
+                if sandbox.status not in {"stopped", "exited", "failed"}:
+                    sandbox = sandbox.stop()
+                sandbox.delete()
+            except ArchilError:
+                pass
 
 
 def run_s3_object_suite(disk) -> None:
@@ -288,6 +331,8 @@ def main() -> None:
     archil = Archil(api_key=api_key, region=region, base_url=base_url, s3_base_url=s3_base_url)
 
     try:
+        run_sandbox_suite(archil)
+
         with step("Create disk"):
             result = archil.disks.create(name=disk_name)
             disk = result.disk
