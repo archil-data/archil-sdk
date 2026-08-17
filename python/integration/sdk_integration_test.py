@@ -21,7 +21,7 @@ import sys
 import time
 import uuid
 
-from archil import Archil, ArchilError, ArchilS3Error, TokenUser
+from archil import Archil, ArchilError, ArchilS3Error, SandboxTerminal, TokenUser
 
 
 def require_env(name: str) -> str:
@@ -109,6 +109,42 @@ def run_sandbox_suite(archil) -> None:
             assert_that(
                 pty_result.exit_code in {0, None},
                 f"PTY exec failed: {pty_result.exit_code}",
+            )
+
+        with step("Execute runtime process with acknowledged stdin"):
+            process = sandbox.processes.start("cat")
+            process.send_input("process-input\n")
+            process.close_stdin()
+            process_result = process.wait()
+            assert_that(process_result.exit_code == 0, f"process failed: {process_result.stderr}")
+            assert_that(
+                process_result.stdout == "process-input\n",
+                f"unexpected process stdout: {process_result.stdout!r}",
+            )
+
+        with step("Execute runtime-owned terminal"):
+            terminal = sandbox.processes.start(
+                "read line; printf 'terminal:%s' \"$line\"",
+                terminal=SandboxTerminal(cols=120, rows=40),
+            )
+            terminal.resize(cols=160, rows=50)
+            terminal.send_input("terminal-input\n")
+            terminal_result = terminal.wait()
+            assert_that(
+                "terminal:terminal-input" in terminal_result.stdout,
+                f"unexpected terminal output: {terminal_result.stdout!r}",
+            )
+
+        with step("Disconnect and resume runtime process"):
+            process = sandbox.processes.start("sleep 1; printf resumed")
+            process_id = process.id
+            cursor = process.cursor
+            process.disconnect()
+            resumed = sandbox.processes.connect(process_id, offset=cursor)
+            resumed_result = resumed.wait()
+            assert_that(
+                resumed_result.stdout == "resumed",
+                f"unexpected resumed stdout: {resumed_result.stdout!r}",
             )
 
         with step("Pause sandbox"):

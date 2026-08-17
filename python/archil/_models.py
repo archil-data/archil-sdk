@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 # ---------------------------------------------------------------------------
 # Output models — parsed from the control-plane JSON (camelCase) into snake_case
@@ -237,6 +237,8 @@ SandboxStatus = Literal[
     "deleted",
 ]
 SandboxExecStatus = Literal["running", "completed", "failed", "cancelled", "timed_out"]
+SandboxProcessStatus = Literal["running", "completed", "failed", "cancelled", "timed_out"]
+SandboxProcessStream = Literal["stdout", "stderr"]
 SandboxPlatform = Literal["arm64", "amd64"]
 
 
@@ -339,6 +341,31 @@ class SandboxConnection:
 @dataclass(frozen=True)
 class SandboxPtyResult:
     exit_code: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class SandboxTerminal:
+    cols: int = 80
+    rows: int = 24
+
+
+@dataclass(frozen=True)
+class SandboxProcessOutput:
+    stream: SandboxProcessStream
+    offset: int
+    data: bytes
+
+
+SandboxProcessOutputHandler = Callable[[SandboxProcessOutput], None]
+
+
+@dataclass(frozen=True)
+class SandboxProcessResult:
+    status: Literal["completed", "failed", "cancelled", "timed_out"]
+    stdout: str
+    stderr: str
+    exit_code: Optional[int] = None
+    exit_reason: Optional[str] = None
 
 
 GrepStoppedReason = Literal["completed", "incomplete", "max_results", "deadline", "list_failed"]

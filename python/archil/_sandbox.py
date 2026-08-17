@@ -19,6 +19,7 @@ from ._models import (
     SandboxPtyResult,
     SandboxStatus,
 )
+from ._sandbox_process import _SandboxProcesses
 from .errors import SandboxStartError
 
 
@@ -145,6 +146,7 @@ class _Sandbox:
     def __init__(self, transport: _Transport, data: SandboxData) -> None:
         self._transport = transport
         self._data = data
+        self._processes = _SandboxProcesses(transport, data.id)
 
     def __repr__(self) -> str:
         return f"Sandbox(id={self.id!r}, name={self.name!r}, status={self.status!r})"
@@ -212,6 +214,10 @@ class _Sandbox:
     @property
     def exit_reason(self) -> Optional[str]:
         return self._data.exit_reason
+
+    @property
+    def processes(self) -> "_SandboxProcesses":
+        return self._processes
 
     async def refresh(self) -> "_Sandbox":
         data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}")

@@ -3,6 +3,7 @@ import archil._http
 import archil._models
 import archil._workspace
 import archil.agent_tools._toolset
+import asyncio
 import collections.abc
 import typing
 import typing_extensions
@@ -1079,6 +1080,179 @@ class SandboxPty:
     close: __close_spec
 
 
+class SandboxProcess:
+
+    def __init__(self, process_id: str, cursor: int, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None, new_connection: collections.abc.Callable[[], websockets.asyncio.client.ClientConnection]) -> None:
+        ...
+
+    @property
+    def id(self) -> str:
+        ...
+
+    @property
+    def cursor(self) -> int:
+        ...
+
+    @property
+    def connected(self) -> bool:
+        ...
+
+    class __send_input_spec(typing_extensions.Protocol):
+        def __call__(self, /, data: str | bytes | bytearray | memoryview) -> None:
+            ...
+
+        async def aio(self, /, data: str | bytes | bytearray | memoryview) -> None:
+            ...
+
+    send_input: __send_input_spec
+
+    class __resize_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, cols: int, rows: int) -> None:
+            ...
+
+        async def aio(self, /, *, cols: int, rows: int) -> None:
+            ...
+
+    resize: __resize_spec
+
+    class __close_stdin_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> None:
+            ...
+
+        async def aio(self, /) -> None:
+            ...
+
+    close_stdin: __close_stdin_spec
+
+    class __disconnect_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> None:
+            ...
+
+        async def aio(self, /) -> None:
+            ...
+
+    disconnect: __disconnect_spec
+
+    class __wait_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> archil._models.SandboxProcessResult:
+            ...
+
+        async def aio(self, /) -> archil._models.SandboxProcessResult:
+            ...
+
+    wait: __wait_spec
+
+    class __kill_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> archil._models.SandboxProcessResult:
+            ...
+
+        async def aio(self, /) -> archil._models.SandboxProcessResult:
+            ...
+
+    kill: __kill_spec
+
+    class ___connect_spec(typing_extensions.Protocol):
+        def __call__(self, /, request: dict[str, object], expected_ready: str) -> None:
+            ...
+
+        async def aio(self, /, request: dict[str, object], expected_ready: str) -> None:
+            ...
+
+    _connect: ___connect_spec
+
+    class ___receive_spec(typing_extensions.Protocol):
+        def __call__(self, /, socket: websockets.asyncio.client.ClientConnection, expected_ready: str) -> None:
+            ...
+
+        async def aio(self, /, socket: websockets.asyncio.client.ClientConnection, expected_ready: str) -> None:
+            ...
+
+    _receive: ___receive_spec
+
+    class ___send_input_chunk_spec(typing_extensions.Protocol):
+        def __call__(self, /, data: bytes) -> bool:
+            ...
+
+        async def aio(self, /, data: bytes) -> bool:
+            ...
+
+    _send_input_chunk: ___send_input_chunk_spec
+
+    class ___send_json_spec(typing_extensions.Protocol):
+        def __call__(self, /, message: dict[str, object]) -> None:
+            ...
+
+        async def aio(self, /, message: dict[str, object]) -> None:
+            ...
+
+    _send_json: ___send_json_spec
+
+    class ___send_spec(typing_extensions.Protocol):
+        def __call__(self, /, message: str | bytes) -> None:
+            ...
+
+        async def aio(self, /, message: str | bytes) -> None:
+            ...
+
+    _send: ___send_spec
+
+    def _handle_control(self, event: dict, expected_ready: str) -> None:
+        ...
+
+    def _handle_output(self, frame: bytes) -> None:
+        ...
+
+    def _finish(self, event: dict) -> None:
+        ...
+
+    @staticmethod
+    def _decoder():
+        ...
+
+    def _append_text(self, stream: typing.Literal['stdout', 'stderr'], data: str) -> None:
+        ...
+
+    def _flush_decoders(self) -> None:
+        ...
+
+    @staticmethod
+    def _fail(future: asyncio.Future | None, error: BaseException) -> None:
+        ...
+
+
+class SandboxProcesses:
+
+    def __init__(self, transport: archil._http._Transport, sandbox_id: str) -> None:
+        ...
+
+    class __start_spec(typing_extensions.Protocol):
+        def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None) -> SandboxProcess:
+            ...
+
+        async def aio(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None) -> SandboxProcess:
+            ...
+
+    start: __start_spec
+
+    class __connect_spec(typing_extensions.Protocol):
+        def __call__(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None) -> SandboxProcess:
+            ...
+
+        async def aio(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None) -> SandboxProcess:
+            ...
+
+    connect: __connect_spec
+
+    class ___new_connection_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> websockets.asyncio.client.ClientConnection:
+            ...
+
+        async def aio(self, /) -> websockets.asyncio.client.ClientConnection:
+            ...
+
+    _new_connection: ___new_connection_spec
+
+
 class Sandbox:
 
     def __init__(self, transport: archil._http._Transport, data: archil._models.SandboxData) -> None:
@@ -1149,6 +1323,10 @@ class Sandbox:
 
     @property
     def exit_reason(self) -> str | None:
+        ...
+
+    @property
+    def processes(self) -> SandboxProcesses:
         ...
 
     class __refresh_spec(typing_extensions.Protocol):

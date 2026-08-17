@@ -20,8 +20,11 @@ from archil import (
     S3Mount,
     Sandbox,
     SandboxExec,
+    SandboxProcess,
+    SandboxProcessOutput,
     SandboxPty,
     SandboxPtyResult,
+    SandboxTerminal,
     TokenUser,
     Workspace,
 )
@@ -52,6 +55,16 @@ def sync_usage() -> None:
     sandbox_pty.close()
     dynamic_pty: bool = True
     _dynamic_result: Union[SandboxExec, SandboxPty] = sandbox.exec("bash", pty=dynamic_pty)
+    process: SandboxProcess = sandbox.processes.start(
+        "codex",
+        terminal=SandboxTerminal(cols=120, rows=40),
+        on_output=consume_process_output,
+    )
+    process.send_input(b"Review this repository\n")
+    cursor: int = process.cursor
+    process.disconnect()
+    resumed = sandbox.processes.connect(process.id, offset=cursor)
+    _process_result = resumed.kill()
     sandbox.stop().delete()
     created = client.disks.create(
         name="d2",
@@ -97,6 +110,9 @@ async def async_usage() -> None:
         await pty.send_input.aio("echo ready\n")
         await pty.close.aio()
         await (await sandbox.stop.aio()).delete.aio()
+        process = await sandbox.processes.start.aio("cat")
+        await process.close_stdin.aio()
+        _process_result = await process.wait.aio()
         d = await client.disks.get.aio("dsk-1")
         await d.put_object.aio("k", b"y")
         data: bytes = await d.get_object.aio("k")
@@ -109,6 +125,11 @@ async def async_usage() -> None:
         async for page in d.list_objects_pages.aio("p/"):
             for obj in page.objects:
                 _k: str = obj.key
+
+
+def consume_process_output(output: SandboxProcessOutput) -> None:
+    _stream: str = output.stream
+    _data: bytes = output.data
 
 
 def agent_tools_usage() -> None:

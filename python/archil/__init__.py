@@ -60,13 +60,32 @@ from ._models import (
     SandboxExecData,
     SandboxExecStatus,
     SandboxPlatform,
+    SandboxProcessOutput,
+    SandboxProcessOutputHandler,
+    SandboxProcessResult,
+    SandboxProcessStatus,
+    SandboxProcessStream,
     SandboxPtyResult,
     SandboxStatus,
+    SandboxTerminal,
     ShareUrl,
     TokenUser,
     UploadPart,
 )
-from ._wrapped import Archil, Disk, Disks, Multipart, Sandbox, SandboxExec, SandboxPty, Sandboxes, Tokens, Workspace
+from ._wrapped import (
+    Archil,
+    Disk,
+    Disks,
+    Multipart,
+    Sandbox,
+    SandboxExec,
+    SandboxProcess,
+    SandboxProcesses,
+    SandboxPty,
+    Sandboxes,
+    Tokens,
+    Workspace,
+)
 from .agent_tools import AgentToolset
 from .errors import ArchilApiError, ArchilError, ArchilS3Error, SandboxStartError
 
@@ -82,6 +101,8 @@ __all__ = [
     "Sandbox",
     "SandboxExec",
     "SandboxPty",
+    "SandboxProcess",
+    "SandboxProcesses",
     "FileSystem",
     "AgentToolset",
     "ExecMount",
@@ -102,6 +123,7 @@ __all__ = [
     "DiskUser",
     "TokenUser",
     "AwsStsUser",
+    "SandboxTerminal",
     # output models
     "DiskData",
     "DiskStatus",
@@ -141,6 +163,11 @@ __all__ = [
     "SandboxEndpoint",
     "SandboxConnection",
     "SandboxPtyResult",
+    "SandboxProcessStatus",
+    "SandboxProcessStream",
+    "SandboxProcessOutput",
+    "SandboxProcessOutputHandler",
+    "SandboxProcessResult",
     # module-level helpers
     "configure",
     "create_disk",
