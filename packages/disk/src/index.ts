@@ -33,6 +33,17 @@ export type {
   SandboxForkOptions,
   SandboxWaitOptions,
 } from "./sandbox.js";
+export { SandboxProcess, SandboxProcesses } from "./sandbox-process.js";
+export type {
+  SandboxProcessConnectOptions,
+  SandboxProcessOutput,
+  SandboxProcessOutputHandler,
+  SandboxProcessResult,
+  SandboxProcessStartOptions,
+  SandboxProcessStatus,
+  SandboxProcessStream,
+  SandboxTerminalOptions,
+} from "./sandbox-process.js";
 
 export { Disk, DiskMultipart, effectiveUploadPartSize } from "./disk.js";
 export type {
