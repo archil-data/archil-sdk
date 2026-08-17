@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Literal, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 # ---------------------------------------------------------------------------
 # Output models — parsed from the control-plane JSON (camelCase) into snake_case
@@ -154,6 +154,7 @@ class DiskData:
     authorized_users: Optional[list[AuthorizedUser]] = None
     allowed_ips: Optional[list[str]] = None
     capabilities: Optional[list[str]] = None
+    root_attrs: Optional["RootAttrs"] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "DiskData":
@@ -179,14 +180,15 @@ class DiskData:
             # matching the TS SDK and the allowed_ips field.
             mounts=[MountResponse.from_json(m) for m in mounts] if mounts is not None else None,
             metrics=DiskMetrics.from_json(metrics) if metrics is not None else None,
-            connected_clients=(
-                [ConnectedClient.from_json(c) for c in clients] if clients is not None else None
-            ),
-            authorized_users=(
-                [AuthorizedUser.from_json(u) for u in users] if users is not None else None
-            ),
+            connected_clients=([ConnectedClient.from_json(c) for c in clients] if clients is not None else None),
+            authorized_users=([AuthorizedUser.from_json(u) for u in users] if users is not None else None),
             allowed_ips=d.get("allowedIps"),
             capabilities=d.get("capabilities"),
+            root_attrs=(
+                RootAttrs(uid=ra.get("uid"), gid=ra.get("gid"), mode=ra.get("mode"))
+                if (ra := d.get("rootAttrs")) is not None
+                else None
+            ),
         )
 
 
@@ -220,6 +222,150 @@ class ExecResult:
             stderr=d["stderr"],
             timing=ExecTiming.from_json(d["timing"]),
         )
+
+
+SandboxStatus = Literal[
+    "pending",
+    "running",
+    "pausing",
+    "paused",
+    "stopping",
+    "stopped",
+    "exited",
+    "failed",
+    "deleting",
+    "deleted",
+]
+SandboxExecStatus = Literal["running", "completed", "failed", "cancelled", "timed_out"]
+SandboxProcessStatus = Literal["running", "completed", "failed", "cancelled", "timed_out"]
+SandboxProcessStream = Literal["stdout", "stderr"]
+SandboxPlatform = Literal["arm64", "amd64"]
+
+
+def _parse_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+@dataclass(frozen=True)
+class SandboxEndpoint:
+    port: int
+    hostname: str
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxEndpoint":
+        return cls(port=d["port"], hostname=d["hostname"])
+
+
+@dataclass(frozen=True)
+class SandboxData:
+    id: str
+    name: str
+    status: SandboxStatus
+    vcpu_count: int
+    mem_size_mib: int
+    max_ttl_seconds: int
+    max_concurrent_execs: int
+    base_image: str
+    created_at: datetime
+    last_active_at: datetime
+    platform: Optional[SandboxPlatform] = None
+    endpoints: list[SandboxEndpoint] = field(default_factory=list)
+    running_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    exit_reason: Optional[str] = None
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxData":
+        return cls(
+            id=d["sandbox_id"],
+            name=d["name"],
+            status=d["status"],
+            vcpu_count=d["vcpu_count"],
+            mem_size_mib=d["mem_size_mib"],
+            max_ttl_seconds=d["max_ttl_seconds"],
+            max_concurrent_execs=d["max_concurrent_execs"],
+            base_image=d["base_image"],
+            platform=d.get("platform"),
+            endpoints=[SandboxEndpoint.from_json(endpoint) for endpoint in d.get("endpoints") or []],
+            created_at=_parse_datetime(d["created_at"]),
+            running_at=_parse_datetime(d["running_at"]) if d.get("running_at") else None,
+            finished_at=_parse_datetime(d["finished_at"]) if d.get("finished_at") else None,
+            last_active_at=_parse_datetime(d["last_active_at"]),
+            expires_at=_parse_datetime(d["expires_at"]) if d.get("expires_at") else None,
+            exit_reason=d.get("exit_reason"),
+        )
+
+
+@dataclass(frozen=True)
+class SandboxExecData:
+    sandbox_id: str
+    id: str
+    command: str
+    status: SandboxExecStatus
+    started_at: datetime
+    exit_code: Optional[int] = None
+    stdout: Optional[str] = None
+    stderr: Optional[str] = None
+    exit_reason: Optional[str] = None
+    execute_time_ms: Optional[int] = None
+    finished_at: Optional[datetime] = None
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxExecData":
+        return cls(
+            sandbox_id=d["sandbox_id"],
+            id=d["exec_id"],
+            command=d["command"],
+            status=d["status"],
+            exit_code=d.get("exit_code"),
+            stdout=d.get("stdout"),
+            stderr=d.get("stderr"),
+            exit_reason=d.get("exit_reason"),
+            execute_time_ms=d.get("execute_time_ms"),
+            started_at=_parse_datetime(d["started_at"]),
+            finished_at=_parse_datetime(d["finished_at"]) if d.get("finished_at") else None,
+        )
+
+
+@dataclass(frozen=True)
+class SandboxConnection:
+    url: str
+    expires_at: datetime
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxConnection":
+        return cls(url=d["url"], expires_at=_parse_datetime(d["expires_at"]))
+
+
+@dataclass(frozen=True)
+class SandboxPtyResult:
+    exit_code: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class SandboxTerminal:
+    cols: int = 80
+    rows: int = 24
+
+
+@dataclass(frozen=True)
+class SandboxProcessOutput:
+    stream: SandboxProcessStream
+    offset: int
+    data: bytes
+
+
+SandboxProcessOutputHandler = Callable[[SandboxProcessOutput], None]
+
+
+@dataclass(frozen=True)
+class SandboxProcessResult:
+    status: Literal["completed", "failed", "cancelled", "timed_out"]
+    stdout: str
+    stderr: str
+    exit_code: Optional[int] = None
+    exit_reason: Optional[str] = None
 
 
 GrepStoppedReason = Literal["completed", "incomplete", "max_results", "deadline", "list_failed"]
@@ -530,6 +676,33 @@ class AzureBlobMount:
                 "bucketPrefix": self.bucket_prefix,
             }
         )
+
+
+@dataclass
+class RootAttrs:
+    """POSIX attributes for the disk's root directory, applied at creation.
+
+    Lets an unprivileged process own the mount root without a post-mount
+    ``chown``. Omitted fields default server-side to uid 0, gid 0, mode
+    ``0o755``. ``mode`` takes permission bits only (setuid/setgid/sticky are
+    rejected). Can only be set at creation; a later ``chown``/``chmod``
+    through a mount changes the live attributes as usual."""
+
+    uid: Optional[int] = None
+    gid: Optional[int] = None
+    mode: Optional[int] = None
+
+    def to_json(self) -> dict:
+        if self.mode is not None and not 0 <= self.mode <= 0o777:
+            raise ValueError(
+                f"mode must be permission bits only (0..0o777), got {self.mode}"
+                " — note mode is octal: pass 0o750, not 750"
+            )
+        for field_name, value in (("uid", self.uid), ("gid", self.gid)):
+            # 2**32 - 1 is the POSIX chown(-1) "unchanged" sentinel.
+            if value is not None and not 0 <= value < 2**32 - 1:
+                raise ValueError(f"{field_name} must be in 0..4294967294, got {value}")
+        return _drop_none({"uid": self.uid, "gid": self.gid, "mode": self.mode})
 
 
 MountConfig = Union[S3Mount, GCSMount, R2Mount, S3CompatibleMount, AzureBlobMount]

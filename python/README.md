@@ -1,6 +1,6 @@
 # archil
 
-Python client for [Archil](https://archil.com) disks. Create disks, list and inspect them, manage who can mount them, run commands against them, and read/write their contents through the S3-compatible object API — all from scripts, CI, or notebooks. It also ships **drop-in [agent tools](#agent-tools)** that turn a disk into a ready-made filesystem toolset for OpenAI Agents, LangChain, and other frameworks.
+Python client for [Archil](https://archil.com) disks and sandboxes. Create persistent disks and microVM sandboxes, run commands against them, and read/write disk contents through the S3-compatible object API — all from scripts, CI, or notebooks. It also ships **drop-in [agent tools](#agent-tools)** that turn a disk into a ready-made filesystem toolset for OpenAI Agents, LangChain, and other frameworks.
 
 `archil` talks to the Archil control plane over HTTPS and has no native dependencies.
 
@@ -49,6 +49,73 @@ d.remove_user("token", user.identifier)
 # Delete
 d.delete()
 ```
+
+### Sandboxes
+
+Use `Archil.sandboxes` or the module-level helpers to manage persistent microVMs:
+
+```python
+sandbox = archil.create_sandbox(
+    name="prepared-environment",
+    vcpu_count=4,
+    mem_size_mib=8192,
+)
+
+execution = sandbox.processes.start("uname -a")
+result = execution.wait()
+print(result.stdout)
+
+# Existing API for durable control-plane exec records.
+running_exec = sandbox.exec("sleep 60", wait=False)
+
+sandbox.stop()
+fork = sandbox.fork(name="agent-task")
+connection = fork.create_connection()
+fork.stop()
+fork.delete()
+
+all_sandboxes = archil.list_sandboxes()
+using_disk = archil.list_sandboxes(disk="dsk-abc123")
+```
+
+Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
+`vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB.
+
+Runtime-owned processes return immediately and can be disconnected without
+stopping the command. Reconnect by process ID and output cursor to continue
+where the previous connection stopped:
+
+```python
+from archil import SandboxTerminal
+
+process = sandbox.processes.start(
+    "codex",
+    terminal=SandboxTerminal(cols=120, rows=40),
+    on_output=lambda output: print(output.data.decode(errors="replace"), end=""),
+)
+process.send_input("Review this repository\n")
+process.resize(cols=160, rows=50)
+process_id = process.id
+cursor = process.cursor
+process.disconnect()
+
+resumed = sandbox.processes.connect(process_id, offset=cursor)
+result = resumed.wait()
+```
+
+Terminal processes merge output into stdout; non-terminal processes keep
+stdout and stderr separate. `on_output` receives raw bytes with their stream
+and absolute offset. `close_stdin()` delivers EOF to a non-terminal process.
+`send_input()` splits large writes into 1 MiB chunks, waits for each chunk to be
+accepted, and retries when the sandbox applies backpressure. `disconnect()`
+only closes the client connection; `kill()` terminates the process. Processes
+end when their sandbox is stopped, paused, or expires. The existing `exec` API
+remains available for durable control-plane exec records and its legacy PTY.
+
+`create`, `start`, `stop`, `pause`, `resume`, `fork`, and non-interactive
+`exec` wait for completion by default. The server handles the initial wait; if
+its wait budget expires first, the SDK continues polling. Pass `wait=False` to
+return as soon as the operation is accepted.
 
 ### Delegations
 
@@ -147,6 +214,38 @@ attributes are unchanged. When attributes are omitted, files default to
 `root:root 0644` and directories to `root:root 0755`. Automatic multipart
 uploads and append-created files use the same directory rules.
 
+The disk **root** itself defaults to `root:root 0755`, which means an
+unprivileged process cannot create entries directly under the mount root. To
+avoid a post-mount `chown`, set the root's owner and mode when creating the
+disk (creation-time only; a later `chown`/`chmod` through a mount changes the
+live attributes as usual):
+
+```python
+from archil import RootAttrs
+
+result = archil.create_disk(
+    name="my-disk",
+    root_attrs=RootAttrs(uid=1000, gid=1000, mode=0o755),
+)
+```
+
+`mode` is octal (pass `0o750`, not `750`). On regions that don't support
+`rootAttrs` yet the field is ignored and the disk is created with the
+defaults — check the `rootAttrs` field on the created disk to confirm it
+was applied.
+
+`rootAttrs` only sets the root directory itself — it does not change how
+later writes get their attributes:
+
+- **Through a mount**, normal POSIX rules apply: entries are owned by the
+  creating process's uid/gid, with mode derived from its umask. A process
+  running as the `rootAttrs` uid therefore owns everything it creates, with
+  no attributes to pass anywhere.
+- **Through `putObject` and friends**, omitted attributes still mean the
+  server defaults (`root:root 0644` files, `root:root 0755` directories) —
+  the disk's `rootAttrs` is *not* used as a fallback. Keep passing
+  `uid`/`gid` on object writes when a non-root process will read them.
+
 `list_objects` auto-paginates by default, returning every matching key. The first argument is a key prefix; a non-recursive listing (the default) returns the immediate level as `objects` plus subdirectory `common_prefixes`:
 
 ```python
@@ -232,7 +331,7 @@ week_link = d.share("reports/2026-01/summary.pdf", expires_in=604800)
 
 ### Async
 
-Every method on `Archil`, `Disks`, `Disk`, and `Tokens` has an `.aio` variant that returns a coroutine. (The module-level helpers — `configure`, `create_disk`, `get_disk`, etc. — are synchronous convenience wrappers; from async code, construct `Archil(...)` directly and use `.aio`.) Construct the client directly and `await`:
+Every method on `Archil`, `Disks`, `Disk`, `Sandboxes`, `Sandbox`, `SandboxPty`, and `Tokens` has an `.aio` variant that returns a coroutine. (The module-level helpers — `configure`, `create_disk`, `create_sandbox`, etc. — are synchronous convenience wrappers; from async code, construct `Archil(...)` directly and use `.aio`.) Construct the client directly and `await`:
 
 ```python
 import asyncio

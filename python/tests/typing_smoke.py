@@ -7,6 +7,7 @@ types to users. Runtime is never executed; only static analysis matters here.
 """
 
 import asyncio
+from typing import Optional, Union
 
 import archil
 from archil import (
@@ -17,6 +18,13 @@ from archil import (
     FileSystem,
     S3CompatibleMount,
     S3Mount,
+    Sandbox,
+    SandboxExec,
+    SandboxProcess,
+    SandboxProcessOutput,
+    SandboxPty,
+    SandboxPtyResult,
+    SandboxTerminal,
     TokenUser,
     Workspace,
 )
@@ -29,12 +37,39 @@ def sync_usage() -> None:
     _id: str = disk.id
 
     client = Archil(api_key="key-x", region="aws-us-east-1")
+    sandbox: Sandbox = client.sandboxes.create(
+        name="trial",
+        vcpu_count=2,
+        mem_size_mib=4096,
+        base_image="docker:29.7.1-dind",
+    )
+    module_sandbox: Sandbox = archil.create_sandbox(name="trial")
+    _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
+    module_sandbox = archil.get_sandbox(module_sandbox.id)
+    sandbox_exec: SandboxExec = sandbox.exec("echo ready")
+    _sandbox_stdout: Optional[str] = sandbox_exec.stdout
+    sandbox_pty: SandboxPty = sandbox.exec("bash", pty=True)
+    sandbox_pty.send_input("echo ready\n")
+    sandbox_pty.resize(cols=120, rows=40)
+    _pty_result: SandboxPtyResult = sandbox_pty.wait()
+    sandbox_pty.close()
+    dynamic_pty: bool = True
+    _dynamic_result: Union[SandboxExec, SandboxPty] = sandbox.exec("bash", pty=dynamic_pty)
+    process: SandboxProcess = sandbox.processes.start(
+        "codex",
+        terminal=SandboxTerminal(cols=120, rows=40),
+        on_output=consume_process_output,
+    )
+    process.send_input(b"Review this repository\n")
+    cursor: int = process.cursor
+    process.disconnect()
+    resumed = sandbox.processes.connect(process.id, offset=cursor)
+    _process_result = resumed.kill()
+    sandbox.stop().delete()
     created = client.disks.create(
         name="d2",
         mounts=[
-            S3CompatibleMount(
-                bucket_name="b", bucket_endpoint="http://e", access_key_id="ak", secret_access_key="sk"
-            )
+            S3CompatibleMount(bucket_name="b", bucket_endpoint="http://e", access_key_id="ak", secret_access_key="sk")
         ],
     )
     d = client.disks.get(created.disk.id)
@@ -68,6 +103,16 @@ def sync_usage() -> None:
 
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
+        sandbox = await client.sandboxes.create.aio(name="trial")
+        result = await sandbox.exec.aio("echo ready")
+        _sandbox_exit: Optional[int] = result.exit_code
+        pty = await sandbox.exec.aio("bash", pty=True)
+        await pty.send_input.aio("echo ready\n")
+        await pty.close.aio()
+        await (await sandbox.stop.aio()).delete.aio()
+        process = await sandbox.processes.start.aio("cat")
+        await process.close_stdin.aio()
+        _process_result = await process.wait.aio()
         d = await client.disks.get.aio("dsk-1")
         await d.put_object.aio("k", b"y")
         data: bytes = await d.get_object.aio("k")
@@ -80,6 +125,11 @@ async def async_usage() -> None:
         async for page in d.list_objects_pages.aio("p/"):
             for obj in page.objects:
                 _k: str = obj.key
+
+
+def consume_process_output(output: SandboxProcessOutput) -> None:
+    _stream: str = output.stream
+    _data: bytes = output.data
 
 
 def agent_tools_usage() -> None:

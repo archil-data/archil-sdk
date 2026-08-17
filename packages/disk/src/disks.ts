@@ -108,6 +108,11 @@ export class Disks {
    *
    * Returns the Disk, the one-time token (save it — it cannot be retrieved
    * again), and the token identifier for later management.
+   *
+   * `rootAttrs` sets the POSIX owner and mode of the disk's root directory
+   * (e.g. `{ uid: 1000, gid: 1000, mode: 0o755 }` so an unprivileged process
+   * can create entries under the mount root without a post-mount `chown`).
+   * Creation-time only.
    */
   async create(req: CreateDiskRequest): Promise<CreateDiskResult> {
     const created = await unwrap(

@@ -1,5 +1,20 @@
 # disk
 
+## 0.10.0
+
+### Minor Changes
+
+- 1548884: Support `rootAttrs` (uid/gid/mode) at disk creation: pass `rootAttrs` in `disks.create` to set the POSIX owner and permission bits of the disk's root directory up front, and read the recorded attributes back via `Disk.rootAttrs`. Requires `@archildata/api-types` 0.0.18, which types the field on `CreateDiskRequest` and `DiskResponse`.
+
+## 0.9.0
+
+### Minor Changes
+
+- 9aa3141: Allow sandbox creation requests to specify vCPU count and memory size.
+- bb2e683: Default `wait` to true, delegate the initial wait to the server, and poll only if the server's wait budget expires.
+- b9610a3: Add interactive PTY support to `sandbox.exec()`.
+- b9610a3: Add sandbox names, image metadata, forks, interactive connection URLs, and deletion.
+
 ## 0.8.23
 
 ### Patch Changes

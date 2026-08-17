@@ -4,7 +4,14 @@ from typing import AsyncIterator, Optional, Sequence
 
 from ._disk import _Disk
 from ._http import _Transport
-from ._models import AuthorizedUser, CreateDiskResult, DiskData, DiskPage, MountConfig
+from ._models import (
+    AuthorizedUser,
+    CreateDiskResult,
+    DiskData,
+    DiskPage,
+    MountConfig,
+    RootAttrs,
+)
 from ._synchronizer import translate_out
 
 # Server-side maximum page size for GET /api/disks (requests above it are clamped).
@@ -94,16 +101,24 @@ class _Disks:
         name: str,
         mounts: Optional[Sequence[MountConfig]] = None,
         allowed_ips: Optional[list[str]] = None,
+        root_attrs: Optional[RootAttrs] = None,
     ) -> CreateDiskResult:
         """Create a new disk with an auto-generated mount token.
 
         Returns the Disk, the one-time token (save it — it cannot be retrieved
-        again), and the token identifier for later management."""
+        again), and the token identifier for later management.
+
+        ``root_attrs`` sets the POSIX owner and mode of the disk's root
+        directory (e.g. ``RootAttrs(uid=1000, gid=1000, mode=0o755)`` so an
+        unprivileged process can create entries under the mount root without
+        a post-mount ``chown``). Creation-time only."""
         body: dict = {"name": name}
         if mounts is not None:
             body["mounts"] = [m.to_json() for m in mounts]
         if allowed_ips is not None:
             body["allowedIps"] = allowed_ips
+        if root_attrs is not None:
+            body["rootAttrs"] = root_attrs.to_json()
 
         created = await self._transport.request_json("POST", "/api/disks", json=body)
         disk_id = created.get("diskId")

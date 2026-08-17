@@ -9,6 +9,9 @@ stub re-declares the model dataclasses as distinct types and breaks pyright)."""
 from ._archil import _Archil
 from ._disk import _Disk, _DiskMultipart
 from ._disks import _Disks
+from ._sandbox import _Sandbox, _SandboxExec, _SandboxPty
+from ._sandbox_process import _SandboxProcess, _SandboxProcesses
+from ._sandboxes import _Sandboxes
 from ._synchronizer import synchronizer
 from ._tokens import _Tokens
 from ._workspace import _Workspace
@@ -19,5 +22,11 @@ Disks = synchronizer.wrap(_Disks, name="Disks", target_module=__name__)
 # Disk.multipart property's return value is translated.
 Multipart = synchronizer.wrap(_DiskMultipart, name="Multipart", target_module=__name__)
 Disk = synchronizer.wrap(_Disk, name="Disk", target_module=__name__)
+SandboxExec = synchronizer.wrap(_SandboxExec, name="SandboxExec", target_module=__name__)
+SandboxPty = synchronizer.wrap(_SandboxPty, name="SandboxPty", target_module=__name__)
+SandboxProcess = synchronizer.wrap(_SandboxProcess, name="SandboxProcess", target_module=__name__)
+SandboxProcesses = synchronizer.wrap(_SandboxProcesses, name="SandboxProcesses", target_module=__name__)
+Sandbox = synchronizer.wrap(_Sandbox, name="Sandbox", target_module=__name__)
+Sandboxes = synchronizer.wrap(_Sandboxes, name="Sandboxes", target_module=__name__)
 Tokens = synchronizer.wrap(_Tokens, name="Tokens", target_module=__name__)
 Workspace = synchronizer.wrap(_Workspace, name="Workspace", target_module=__name__)

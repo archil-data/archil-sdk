@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from archil import ArchilApiError, Disk, S3CompatibleMount
+from archil import ArchilApiError, Disk, RootAttrs, S3CompatibleMount
 from conftest import ok_envelope, error_envelope
 
 DISK_JSON = {
@@ -166,6 +166,47 @@ def test_create_disk_returns_translated_disk_and_token(archil, router):
         "accessKeyId": "ak",
         "secretAccessKey": "sk",
     }
+
+
+def test_create_disk_root_attrs(archil, router):
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path == "/api/disks":
+            return ok_envelope({"diskId": "dsk-1", "authorizedUsers": []})
+        return ok_envelope(DISK_JSON)
+
+    router.set(handler)
+    archil.disks.create(name="my-disk", root_attrs=RootAttrs(uid=1000, gid=1000, mode=0o750))
+    # Partial attrs serialize only the provided fields; omitted ones are
+    # server-defaulted. No rootAttrs key is sent when the arg is absent.
+    archil.disks.create(name="my-disk", root_attrs=RootAttrs(uid=1000))
+    archil.disks.create(name="my-disk")
+
+    posts = [r.json for r in router.requests if r.method == "POST"]
+    assert posts[0]["rootAttrs"] == {"uid": 1000, "gid": 1000, "mode": 0o750}
+    assert posts[1]["rootAttrs"] == {"uid": 1000}
+    assert "rootAttrs" not in posts[2]
+
+
+def test_create_disk_root_attrs_client_validation(archil, router):
+    router.set(lambda req: ok_envelope({"diskId": "dsk-1", "authorizedUsers": []}))
+    # mode is octal: 750 decimal exceeds 0o777 and is the classic decimal-intent trap.
+    with pytest.raises(ValueError, match="0o750, not 750"):
+        archil.disks.create(name="d", root_attrs=RootAttrs(mode=750))
+    # 2**32 - 1 is the chown(-1) sentinel; out-of-range values fail fast too.
+    with pytest.raises(ValueError, match="uid"):
+        archil.disks.create(name="d", root_attrs=RootAttrs(uid=2**32 - 1))
+    with pytest.raises(ValueError, match="gid"):
+        archil.disks.create(name="d", root_attrs=RootAttrs(gid=-1))
+    assert not router.requests, "invalid attrs must fail before any request is sent"
+
+
+def test_disk_exposes_root_attrs_echo(archil, router):
+    router.set(lambda req: ok_envelope({**DISK_JSON, "rootAttrs": {"uid": 1000, "gid": 1000, "mode": 0o750}}))
+    d = archil.disks.get("dsk-1")
+    assert d.root_attrs == RootAttrs(uid=1000, gid=1000, mode=0o750)
+
+    router.set(lambda req: ok_envelope(DISK_JSON))
+    assert archil.disks.get("dsk-1").root_attrs is None
 
 
 def test_disk_preserves_empty_arrays_vs_missing(archil, router):

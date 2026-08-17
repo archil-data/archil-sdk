@@ -3,20 +3,24 @@ import archil._http
 import archil._models
 import archil._workspace
 import archil.agent_tools._toolset
+import asyncio
+import collections.abc
 import typing
 import typing_extensions
+import websockets.asyncio.client
 
 class Archil:
-    """Top-level Archil client. Holds the account-level ``disks`` and ``tokens``
-    collections and the cross-disk ``exec``. Construct directly for multi-account
-    or multi-region scripts; otherwise use the module-level helpers.
+    """Top-level Archil client. Holds the account-level ``disks``, ``sandboxes``,
+    and ``tokens`` collections and the cross-disk ``exec``. Construct directly
+    for multi-account or multi-region scripts; otherwise use the module-level
+    helpers.
 
     Every method is available both synchronously and asynchronously: call it
     directly to block, or use the ``.aio`` attribute for a coroutine
     (e.g. ``await archil.exec.aio(...)``). Also usable as an (async) context
     manager: ``with Archil(...) as a:`` / ``async with Archil(...) as a:``.
     """
-    def __init__(self, *, api_key: typing.Optional[str] = None, region: typing.Optional[str] = None, base_url: typing.Optional[str] = None, s3_base_url: typing.Optional[str] = None, timeout: typing.Optional[float] = 30.0, _http_transport=None) -> None:
+    def __init__(self, *, api_key: str | None = None, region: str | None = None, base_url: str | None = None, s3_base_url: str | None = None, timeout: float | None = 30.0, _http_transport=None) -> None:
         ...
 
     @property
@@ -27,8 +31,12 @@ class Archil:
     def tokens(self) -> Tokens:
         ...
 
+    @property
+    def sandboxes(self) -> Sandboxes:
+        ...
+
     class __exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, disks: dict[str, typing.Union[object, str, archil._archil.ExecMountSpec]], command: str) -> archil._models.ExecResult:
+        def __call__(self, /, *, disks: dict[str, object | str | archil._archil.ExecMountSpec], command: str) -> archil._models.ExecResult:
             """Run a command in a container with multiple disks mounted
             simultaneously, each at its own relative path under ``/mnt/archil``.
             Blocks until the command completes and returns its stdout, stderr, exit
@@ -36,7 +44,7 @@ class Archil:
             """
             ...
 
-        async def aio(self, /, *, disks: dict[str, typing.Union[object, str, archil._archil.ExecMountSpec]], command: str) -> archil._models.ExecResult:
+        async def aio(self, /, *, disks: dict[str, object | str | archil._archil.ExecMountSpec], command: str) -> archil._models.ExecResult:
             """Run a command in a container with multiple disks mounted
             simultaneously, each at its own relative path under ``/mnt/archil``.
             Blocks until the command completes and returns its stdout, stderr, exit
@@ -46,7 +54,7 @@ class Archil:
 
     exec: __exec_spec
 
-    def workspace(self, mounts: dict[str, typing.Union[object, str, archil._archil.ExecMountSpec]]) -> Workspace:
+    def workspace(self, mounts: dict[str, object | str | archil._archil.ExecMountSpec]) -> Workspace:
         """Build a :class:`Workspace`: a filesystem spanning several disks at once.
 
         ``mounts`` maps a relative path to a disk (or ``ExecMountSpec``), exactly
@@ -100,16 +108,16 @@ class Disks:
         ...
 
     class ___page_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, limit: typing.Optional[int], cursor: typing.Optional[str], name: typing.Optional[str] = None) -> tuple[list[Disk], typing.Optional[str]]:
+        def __call__(self, /, *, limit: int | None, cursor: str | None, name: str | None = None) -> tuple[list[Disk], str | None]:
             ...
 
-        async def aio(self, /, *, limit: typing.Optional[int], cursor: typing.Optional[str], name: typing.Optional[str] = None) -> tuple[list[Disk], typing.Optional[str]]:
+        async def aio(self, /, *, limit: int | None, cursor: str | None, name: str | None = None) -> tuple[list[Disk], str | None]:
             ...
 
     _page: ___page_spec
 
     class __list_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None, name: typing.Optional[str] = None) -> list[Disk]:
+        def __call__(self, /, *, limit: int | None = None, cursor: str | None = None, name: str | None = None) -> list[Disk]:
             """List the account's disks. Fetches in cursor-driven pages (bounded
             server work per request) and follows ``nextCursor`` until exhausted, so
             the returned list is complete even for very large accounts. Use ``limit``
@@ -119,7 +127,7 @@ class Disks:
             """
             ...
 
-        async def aio(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None, name: typing.Optional[str] = None) -> list[Disk]:
+        async def aio(self, /, *, limit: int | None = None, cursor: str | None = None, name: str | None = None) -> list[Disk]:
             """List the account's disks. Fetches in cursor-driven pages (bounded
             server work per request) and follows ``nextCursor`` until exhausted, so
             the returned list is complete even for very large accounts. Use ``limit``
@@ -132,7 +140,7 @@ class Disks:
     list: __list_spec
 
     class __list_pages_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, cursor: typing.Optional[str] = None, page_size: typing.Optional[int] = None) -> typing.Iterator[archil._models.DiskPage]:
+        def __call__(self, /, *, cursor: str | None = None, page_size: int | None = None) -> typing.Iterator[archil._models.DiskPage]:
             """Yield pages of disks lazily, following ``nextCursor`` — each page's
             ``next_cursor`` can also be persisted to resume listing later.
 
@@ -141,7 +149,7 @@ class Disks:
             """
             ...
 
-        def aio(self, /, *, cursor: typing.Optional[str] = None, page_size: typing.Optional[int] = None) -> typing.AsyncIterator[archil._models.DiskPage]:
+        def aio(self, /, *, cursor: str | None = None, page_size: int | None = None) -> typing.AsyncIterator[archil._models.DiskPage]:
             """Yield pages of disks lazily, following ``nextCursor`` — each page's
             ``next_cursor`` can also be persisted to resume listing later.
 
@@ -162,19 +170,29 @@ class Disks:
     get: __get_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str, mounts: typing.Optional[typing.Sequence[typing.Union[archil._models.S3Mount, archil._models.GCSMount, archil._models.R2Mount, archil._models.S3CompatibleMount, archil._models.AzureBlobMount]]] = None, allowed_ips: typing.Optional[list[str]] = None) -> archil._models.CreateDiskResult:
+        def __call__(self, /, *, name: str, mounts: typing.Sequence[archil._models.S3Mount | archil._models.GCSMount | archil._models.R2Mount | archil._models.S3CompatibleMount | archil._models.AzureBlobMount] | None = None, allowed_ips: list[str] | None = None, root_attrs: archil._models.RootAttrs | None = None) -> archil._models.CreateDiskResult:
             """Create a new disk with an auto-generated mount token.
 
             Returns the Disk, the one-time token (save it — it cannot be retrieved
             again), and the token identifier for later management.
+
+            ``root_attrs`` sets the POSIX owner and mode of the disk's root
+            directory (e.g. ``RootAttrs(uid=1000, gid=1000, mode=0o755)`` so an
+            unprivileged process can create entries under the mount root without
+            a post-mount ``chown``). Creation-time only.
             """
             ...
 
-        async def aio(self, /, *, name: str, mounts: typing.Optional[typing.Sequence[typing.Union[archil._models.S3Mount, archil._models.GCSMount, archil._models.R2Mount, archil._models.S3CompatibleMount, archil._models.AzureBlobMount]]] = None, allowed_ips: typing.Optional[list[str]] = None) -> archil._models.CreateDiskResult:
+        async def aio(self, /, *, name: str, mounts: typing.Sequence[archil._models.S3Mount | archil._models.GCSMount | archil._models.R2Mount | archil._models.S3CompatibleMount | archil._models.AzureBlobMount] | None = None, allowed_ips: list[str] | None = None, root_attrs: archil._models.RootAttrs | None = None) -> archil._models.CreateDiskResult:
             """Create a new disk with an auto-generated mount token.
 
             Returns the Disk, the one-time token (save it — it cannot be retrieved
             again), and the token identifier for later management.
+
+            ``root_attrs`` sets the POSIX owner and mode of the disk's root
+            directory (e.g. ``RootAttrs(uid=1000, gid=1000, mode=0o755)`` so an
+            unprivileged process can create entries under the mount root without
+            a post-mount ``chown``). Creation-time only.
             """
             ...
 
@@ -198,7 +216,7 @@ class Multipart:
         ...
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str, content_type: typing.Optional[str] = None, *, mode: typing.Optional[int] = None, uid: typing.Optional[int] = None, gid: typing.Optional[int] = None, extra_headers: typing.Optional[dict[str, str]] = None) -> archil._models.MultipartUpload:
+        def __call__(self, /, key: str, content_type: str | None = None, *, mode: int | None = None, uid: int | None = None, gid: int | None = None, extra_headers: dict[str, str] | None = None) -> archil._models.MultipartUpload:
             """Start a multipart upload (CreateMultipartUpload) and return its
             ``upload_id``. Upload parts with ``upload_part``, then assemble with
             ``complete`` (or discard with ``abort``).
@@ -208,7 +226,7 @@ class Multipart:
             """
             ...
 
-        async def aio(self, /, key: str, content_type: typing.Optional[str] = None, *, mode: typing.Optional[int] = None, uid: typing.Optional[int] = None, gid: typing.Optional[int] = None, extra_headers: typing.Optional[dict[str, str]] = None) -> archil._models.MultipartUpload:
+        async def aio(self, /, key: str, content_type: str | None = None, *, mode: int | None = None, uid: int | None = None, gid: int | None = None, extra_headers: dict[str, str] | None = None) -> archil._models.MultipartUpload:
             """Start a multipart upload (CreateMultipartUpload) and return its
             ``upload_id``. Upload parts with ``upload_part``, then assemble with
             ``complete`` (or discard with ``abort``).
@@ -221,14 +239,14 @@ class Multipart:
     create: __create_spec
 
     class __upload_part_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str, upload_id: str, part_number: int, body: typing.Union[str, bytes, bytearray, memoryview]) -> archil._models.UploadPart:
+        def __call__(self, /, key: str, upload_id: str, part_number: int, body: str | bytes | bytearray | memoryview) -> archil._models.UploadPart:
             """Upload one part (UploadPart) and return its entity tag, which you must
             collect (with its part number) and pass to ``complete``. Every part except
             the last must be at least 5 MiB.
             """
             ...
 
-        async def aio(self, /, key: str, upload_id: str, part_number: int, body: typing.Union[str, bytes, bytearray, memoryview]) -> archil._models.UploadPart:
+        async def aio(self, /, key: str, upload_id: str, part_number: int, body: str | bytes | bytearray | memoryview) -> archil._models.UploadPart:
             """Upload one part (UploadPart) and return its entity tag, which you must
             collect (with its part number) and pass to ``complete``. Every part except
             the last must be at least 5 MiB.
@@ -284,14 +302,14 @@ class Multipart:
     abort: __abort_spec
 
     class __list_parts_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str, upload_id: str, *, max_parts: typing.Optional[int] = None, part_number_marker: typing.Optional[int] = None) -> archil._models.PartListing:
+        def __call__(self, /, key: str, upload_id: str, *, max_parts: int | None = None, part_number_marker: int | None = None) -> archil._models.PartListing:
             """List the parts already uploaded for an in-progress upload (ListParts).
             Returns a single page; follow ``next_part_number_marker`` (when
             ``is_truncated``) to page through the rest.
             """
             ...
 
-        async def aio(self, /, key: str, upload_id: str, *, max_parts: typing.Optional[int] = None, part_number_marker: typing.Optional[int] = None) -> archil._models.PartListing:
+        async def aio(self, /, key: str, upload_id: str, *, max_parts: int | None = None, part_number_marker: int | None = None) -> archil._models.PartListing:
             """List the parts already uploaded for an in-progress upload (ListParts).
             Returns a single page; follow ``next_part_number_marker`` (when
             ``is_truncated``) to page through the rest.
@@ -301,14 +319,14 @@ class Multipart:
     list_parts: __list_parts_spec
 
     class __list_uploads_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, prefix: typing.Optional[str] = None, delimiter: typing.Optional[str] = None, key_marker: typing.Optional[str] = None, upload_id_marker: typing.Optional[str] = None, max_uploads: typing.Optional[int] = None) -> archil._models.MultipartUploadListing:
+        def __call__(self, /, *, prefix: str | None = None, delimiter: str | None = None, key_marker: str | None = None, upload_id_marker: str | None = None, max_uploads: int | None = None) -> archil._models.MultipartUploadListing:
             """List in-progress multipart uploads on the disk (ListMultipartUploads).
             Returns a single page; follow ``next_key_marker`` / ``next_upload_id_marker``
             (when ``is_truncated``) for the rest.
             """
             ...
 
-        async def aio(self, /, *, prefix: typing.Optional[str] = None, delimiter: typing.Optional[str] = None, key_marker: typing.Optional[str] = None, upload_id_marker: typing.Optional[str] = None, max_uploads: typing.Optional[int] = None) -> archil._models.MultipartUploadListing:
+        async def aio(self, /, *, prefix: str | None = None, delimiter: str | None = None, key_marker: str | None = None, upload_id_marker: str | None = None, max_uploads: int | None = None) -> archil._models.MultipartUploadListing:
             """List in-progress multipart uploads on the disk (ListMultipartUploads).
             Returns a single page; follow ``next_key_marker`` / ``next_upload_id_marker``
             (when ``is_truncated``) for the rest.
@@ -362,54 +380,59 @@ class Disk:
         ...
 
     @property
-    def fs_handler_status(self) -> typing.Optional[str]:
+    def fs_handler_status(self) -> str | None:
         ...
 
     @property
-    def last_accessed(self) -> typing.Optional[str]:
+    def last_accessed(self) -> str | None:
         ...
 
     @property
-    def active_data_bytes(self) -> typing.Optional[int]:
+    def active_data_bytes(self) -> int | None:
         ...
 
     @property
-    def total_data_bytes(self) -> typing.Optional[int]:
+    def total_data_bytes(self) -> int | None:
         ...
 
     @property
-    def monthly_usage(self) -> typing.Optional[str]:
+    def monthly_usage(self) -> str | None:
         ...
 
     @property
-    def mounts(self) -> typing.Optional[list[archil._models.MountResponse]]:
+    def mounts(self) -> list[archil._models.MountResponse] | None:
         ...
 
     @property
-    def metrics(self) -> typing.Optional[archil._models.DiskMetrics]:
+    def metrics(self) -> archil._models.DiskMetrics | None:
         ...
 
     @property
-    def connected_clients(self) -> typing.Optional[list[archil._models.ConnectedClient]]:
+    def connected_clients(self) -> list[archil._models.ConnectedClient] | None:
         ...
 
     @property
-    def authorized_users(self) -> typing.Optional[list[archil._models.AuthorizedUser]]:
+    def authorized_users(self) -> list[archil._models.AuthorizedUser] | None:
         ...
 
     @property
-    def allowed_ips(self) -> typing.Optional[list[str]]:
+    def allowed_ips(self) -> list[str] | None:
         ...
 
     @property
-    def capabilities(self) -> typing.Optional[list[str]]:
+    def root_attrs(self) -> archil._models.RootAttrs | None:
+        """Root-directory POSIX attributes recorded at creation, if any."""
+        ...
+
+    @property
+    def capabilities(self) -> list[str] | None:
         ...
 
     class __add_user_spec(typing_extensions.Protocol):
-        def __call__(self, /, user: typing.Union[archil._models.TokenUser, archil._models.AwsStsUser, dict]) -> archil._models.AuthorizedUser:
+        def __call__(self, /, user: archil._models.TokenUser | archil._models.AwsStsUser | dict) -> archil._models.AuthorizedUser:
             ...
 
-        async def aio(self, /, user: typing.Union[archil._models.TokenUser, archil._models.AwsStsUser, dict]) -> archil._models.AuthorizedUser:
+        async def aio(self, /, user: archil._models.TokenUser | archil._models.AwsStsUser | dict) -> archil._models.AuthorizedUser:
             ...
 
     add_user: __add_user_spec
@@ -587,7 +610,7 @@ class Disk:
     grep: __grep_spec
 
     class __share_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str, *, expires_in: typing.Optional[int] = None) -> archil._models.ShareUrl:
+        def __call__(self, /, key: str, *, expires_in: int | None = None) -> archil._models.ShareUrl:
             """Create a signed, time-limited URL that lets anyone download a single
             file from this disk without authentication. The returned URL embeds a
             cryptographically signed token carrying the disk, the file's key, and an
@@ -600,7 +623,7 @@ class Disk:
             """
             ...
 
-        async def aio(self, /, key: str, *, expires_in: typing.Optional[int] = None) -> archil._models.ShareUrl:
+        async def aio(self, /, key: str, *, expires_in: int | None = None) -> archil._models.ShareUrl:
             """Create a signed, time-limited URL that lets anyone download a single
             file from this disk without authentication. The returned URL embeds a
             cryptographically signed token carrying the disk, the file's key, and an
@@ -615,7 +638,7 @@ class Disk:
 
     share: __share_spec
 
-    def agent_tools(self, *, tools: typing.Optional[typing.List[str]] = None) -> archil.agent_tools._toolset.AgentToolset:
+    def agent_tools(self, *, tools: typing.List[str] | None = None) -> archil.agent_tools._toolset.AgentToolset:
         """Build a filesystem toolset for this disk that drops into popular agent
         frameworks. The returned toolset exposes ``read_file``, ``write_file``,
         ``delete_file``, ``list_files``, ``grep``, and ``run_bash`` over the disk,
@@ -652,14 +675,14 @@ class Disk:
     get_object: __get_object_spec
 
     class __head_object_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str) -> typing.Optional[archil._models.ObjectMetadata]:
+        def __call__(self, /, key: str) -> archil._models.ObjectMetadata | None:
             """Fetch an object's metadata (size, etag, content type, last-modified)
             without downloading its contents. Returns ``None`` if the object does not
             exist.
             """
             ...
 
-        async def aio(self, /, key: str) -> typing.Optional[archil._models.ObjectMetadata]:
+        async def aio(self, /, key: str) -> archil._models.ObjectMetadata | None:
             """Fetch an object's metadata (size, etag, content type, last-modified)
             without downloading its contents. Returns ``None`` if the object does not
             exist.
@@ -678,7 +701,7 @@ class Disk:
     object_exists: __object_exists_spec
 
     class __put_object_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str, body: typing.Union[str, bytes, bytearray, memoryview], content_type: typing.Optional[str] = None, *, mode: typing.Optional[int] = None, uid: typing.Optional[int] = None, gid: typing.Optional[int] = None, multipart_threshold: typing.Optional[int] = None, part_size: typing.Optional[int] = None, concurrency: int = 4) -> archil._models.PutObjectResult:
+        def __call__(self, /, key: str, body: str | bytes | bytearray | memoryview, content_type: str | None = None, *, mode: int | None = None, uid: int | None = None, gid: int | None = None, multipart_threshold: int | None = None, part_size: int | None = None, concurrency: int = 4) -> archil._models.PutObjectResult:
             """Write an object via the S3-compatible API. Handles any size: small
             bodies go through a single PutObject request; bodies larger than
             ``multipart_threshold`` (defaults to ``part_size``, i.e. 16 MiB) are
@@ -706,7 +729,7 @@ class Disk:
             """
             ...
 
-        async def aio(self, /, key: str, body: typing.Union[str, bytes, bytearray, memoryview], content_type: typing.Optional[str] = None, *, mode: typing.Optional[int] = None, uid: typing.Optional[int] = None, gid: typing.Optional[int] = None, multipart_threshold: typing.Optional[int] = None, part_size: typing.Optional[int] = None, concurrency: int = 4) -> archil._models.PutObjectResult:
+        async def aio(self, /, key: str, body: str | bytes | bytearray | memoryview, content_type: str | None = None, *, mode: int | None = None, uid: int | None = None, gid: int | None = None, multipart_threshold: int | None = None, part_size: int | None = None, concurrency: int = 4) -> archil._models.PutObjectResult:
             """Write an object via the S3-compatible API. Handles any size: small
             bodies go through a single PutObject request; bodies larger than
             ``multipart_threshold`` (defaults to ``part_size``, i.e. 16 MiB) are
@@ -737,14 +760,14 @@ class Disk:
     put_object: __put_object_spec
 
     class ___put_multipart_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str, data: bytes, content_type: typing.Optional[str], chunk_size: int, concurrency: int, posix_headers: typing.Optional[dict[str, str]] = None) -> archil._models.PutObjectResult:
+        def __call__(self, /, key: str, data: bytes, content_type: str | None, chunk_size: int, concurrency: int, posix_headers: dict[str, str] | None = None) -> archil._models.PutObjectResult:
             """Upload ``data`` through the multipart lifecycle: split into ``chunk_size``
             parts, upload them with bounded concurrency, then complete — aborting the
             upload if any part fails so nothing is left half-staged.
             """
             ...
 
-        async def aio(self, /, key: str, data: bytes, content_type: typing.Optional[str], chunk_size: int, concurrency: int, posix_headers: typing.Optional[dict[str, str]] = None) -> archil._models.PutObjectResult:
+        async def aio(self, /, key: str, data: bytes, content_type: str | None, chunk_size: int, concurrency: int, posix_headers: dict[str, str] | None = None) -> archil._models.PutObjectResult:
             """Upload ``data`` through the multipart lifecycle: split into ``chunk_size``
             parts, upload them with bounded concurrency, then complete — aborting the
             upload if any part fails so nothing is left half-staged.
@@ -754,7 +777,7 @@ class Disk:
     _put_multipart: ___put_multipart_spec
 
     class __append_object_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str, body: typing.Union[str, bytes, bytearray, memoryview], content_type: typing.Optional[str] = None, *, mode: typing.Optional[int] = None, uid: typing.Optional[int] = None, gid: typing.Optional[int] = None) -> archil._models.PutObjectResult:
+        def __call__(self, /, key: str, body: str | bytes | bytearray | memoryview, content_type: str | None = None, *, mode: int | None = None, uid: int | None = None, gid: int | None = None) -> archil._models.PutObjectResult:
             """Append bytes to an object via the S3-compatible PutObject append
             extension (``?append=true``). If the object exists the bytes are appended
             to it; if it doesn't, it is created. Returns the entity tag of the full
@@ -778,7 +801,7 @@ class Disk:
             """
             ...
 
-        async def aio(self, /, key: str, body: typing.Union[str, bytes, bytearray, memoryview], content_type: typing.Optional[str] = None, *, mode: typing.Optional[int] = None, uid: typing.Optional[int] = None, gid: typing.Optional[int] = None) -> archil._models.PutObjectResult:
+        async def aio(self, /, key: str, body: str | bytes | bytearray | memoryview, content_type: str | None = None, *, mode: int | None = None, uid: int | None = None, gid: int | None = None) -> archil._models.PutObjectResult:
             """Append bytes to an object via the S3-compatible PutObject append
             extension (``?append=true``). If the object exists the bytes are appended
             to it; if it doesn't, it is created. Returns the entity tag of the full
@@ -822,7 +845,7 @@ class Disk:
     delete_object: __delete_object_spec
 
     class __list_objects_spec(typing_extensions.Protocol):
-        def __call__(self, /, prefix: typing.Optional[str] = None, *, recursive: bool = False, single_page: bool = False, limit: typing.Optional[int] = None, continuation_token: typing.Optional[str] = None, start_after: typing.Optional[str] = None) -> archil._models.ListObjectsResult:
+        def __call__(self, /, prefix: str | None = None, *, recursive: bool = False, single_page: bool = False, limit: int | None = None, continuation_token: str | None = None, start_after: str | None = None) -> archil._models.ListObjectsResult:
             """List objects via the S3-compatible ListObjectsV2 API. By default this
             follows continuation tokens until the listing is exhausted and returns
             every matching key. Use ``limit`` to cap the total, ``single_page`` for a
@@ -832,7 +855,7 @@ class Disk:
             """
             ...
 
-        async def aio(self, /, prefix: typing.Optional[str] = None, *, recursive: bool = False, single_page: bool = False, limit: typing.Optional[int] = None, continuation_token: typing.Optional[str] = None, start_after: typing.Optional[str] = None) -> archil._models.ListObjectsResult:
+        async def aio(self, /, prefix: str | None = None, *, recursive: bool = False, single_page: bool = False, limit: int | None = None, continuation_token: str | None = None, start_after: str | None = None) -> archil._models.ListObjectsResult:
             """List objects via the S3-compatible ListObjectsV2 API. By default this
             follows continuation tokens until the listing is exhausted and returns
             every matching key. Use ``limit`` to cap the total, ``single_page`` for a
@@ -845,7 +868,7 @@ class Disk:
     list_objects: __list_objects_spec
 
     class __list_objects_pages_spec(typing_extensions.Protocol):
-        def __call__(self, /, prefix: typing.Optional[str] = None, *, recursive: bool = False, continuation_token: typing.Optional[str] = None, start_after: typing.Optional[str] = None) -> typing.Iterator[archil._models.ListObjectsResult]:
+        def __call__(self, /, prefix: str | None = None, *, recursive: bool = False, continuation_token: str | None = None, start_after: str | None = None) -> typing.Iterator[archil._models.ListObjectsResult]:
             """Yield ListObjectsV2 pages lazily, following continuation tokens — a
             memory-friendly way to process a large listing without materializing it.
             ``limit`` / ``single_page`` don't apply here; control your own loop.
@@ -855,7 +878,7 @@ class Disk:
             """
             ...
 
-        def aio(self, /, prefix: typing.Optional[str] = None, *, recursive: bool = False, continuation_token: typing.Optional[str] = None, start_after: typing.Optional[str] = None) -> typing.AsyncIterator[archil._models.ListObjectsResult]:
+        def aio(self, /, prefix: str | None = None, *, recursive: bool = False, continuation_token: str | None = None, start_after: str | None = None) -> typing.AsyncIterator[archil._models.ListObjectsResult]:
             """Yield ListObjectsV2 pages lazily, following continuation tokens — a
             memory-friendly way to process a large listing without materializing it.
             ``limit`` / ``single_page`` don't apply here; control your own loop.
@@ -868,10 +891,10 @@ class Disk:
     list_objects_pages: __list_objects_pages_spec
 
     class ___list_objects_page_spec(typing_extensions.Protocol):
-        def __call__(self, /, prefix: typing.Optional[str], *, recursive: bool, continuation_token: typing.Optional[str], start_after: typing.Optional[str]) -> archil._models.ListObjectsResult:
+        def __call__(self, /, prefix: str | None, *, recursive: bool, continuation_token: str | None, start_after: str | None) -> archil._models.ListObjectsResult:
             ...
 
-        async def aio(self, /, prefix: typing.Optional[str], *, recursive: bool, continuation_token: typing.Optional[str], start_after: typing.Optional[str]) -> archil._models.ListObjectsResult:
+        async def aio(self, /, prefix: str | None, *, recursive: bool, continuation_token: str | None, start_after: str | None) -> archil._models.ListObjectsResult:
             ...
 
     _list_objects_page: ___list_objects_page_spec
@@ -920,6 +943,570 @@ class Disk:
         ...
 
 
+class SandboxExec:
+
+    def __init__(self, transport: archil._http._Transport, data: archil._models.SandboxExecData) -> None:
+        ...
+
+    @property
+    def sandbox_id(self) -> str:
+        ...
+
+    @property
+    def id(self) -> str:
+        ...
+
+    @property
+    def command(self) -> str:
+        ...
+
+    @property
+    def status(self) -> typing.Literal['running', 'completed', 'failed', 'cancelled', 'timed_out']:
+        ...
+
+    @property
+    def exit_code(self) -> int | None:
+        ...
+
+    @property
+    def stdout(self) -> str | None:
+        ...
+
+    @property
+    def stderr(self) -> str | None:
+        ...
+
+    @property
+    def exit_reason(self) -> str | None:
+        ...
+
+    @property
+    def execute_time_ms(self) -> int | None:
+        ...
+
+    @property
+    def started_at(self):
+        ...
+
+    @property
+    def finished_at(self):
+        ...
+
+    class __refresh_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> SandboxExec:
+            ...
+
+        async def aio(self, /) -> SandboxExec:
+            ...
+
+    refresh: __refresh_spec
+
+    class __cancel_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> SandboxExec:
+            ...
+
+        async def aio(self, /) -> SandboxExec:
+            ...
+
+    cancel: __cancel_spec
+
+
+class SandboxPty:
+
+    def __init__(self, socket: websockets.asyncio.client.ClientConnection, on_data: collections.abc.Callable[[str], None] | None) -> None:
+        ...
+
+    class __connect_spec(typing_extensions.Protocol):
+        def __call__(self, /, url: str, command: str, *, cols: int = 80, rows: int = 24, on_data: collections.abc.Callable[[str], None] | None = None) -> SandboxPty:
+            ...
+
+        async def aio(self, /, url: str, command: str, *, cols: int = 80, rows: int = 24, on_data: collections.abc.Callable[[str], None] | None = None) -> SandboxPty:
+            ...
+
+    connect: typing.ClassVar[__connect_spec]
+
+    class ___receive_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> archil._models.SandboxPtyResult:
+            ...
+
+        async def aio(self, /) -> archil._models.SandboxPtyResult:
+            ...
+
+    _receive: ___receive_spec
+
+    class ___send_spec(typing_extensions.Protocol):
+        def __call__(self, /, message: dict[str, object]) -> None:
+            ...
+
+        async def aio(self, /, message: dict[str, object]) -> None:
+            ...
+
+    _send: ___send_spec
+
+    class __send_input_spec(typing_extensions.Protocol):
+        def __call__(self, /, data: str) -> None:
+            ...
+
+        async def aio(self, /, data: str) -> None:
+            ...
+
+    send_input: __send_input_spec
+
+    class __resize_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, cols: int, rows: int) -> None:
+            ...
+
+        async def aio(self, /, *, cols: int, rows: int) -> None:
+            ...
+
+    resize: __resize_spec
+
+    class __wait_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> archil._models.SandboxPtyResult:
+            ...
+
+        async def aio(self, /) -> archil._models.SandboxPtyResult:
+            ...
+
+    wait: __wait_spec
+
+    class __close_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> None:
+            ...
+
+        async def aio(self, /) -> None:
+            ...
+
+    close: __close_spec
+
+
+class SandboxProcess:
+
+    def __init__(self, process_id: str, cursor: int, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None, new_connection: collections.abc.Callable[[], websockets.asyncio.client.ClientConnection]) -> None:
+        ...
+
+    @property
+    def id(self) -> str:
+        ...
+
+    @property
+    def cursor(self) -> int:
+        ...
+
+    @property
+    def connected(self) -> bool:
+        ...
+
+    class __send_input_spec(typing_extensions.Protocol):
+        def __call__(self, /, data: str | bytes | bytearray | memoryview) -> None:
+            ...
+
+        async def aio(self, /, data: str | bytes | bytearray | memoryview) -> None:
+            ...
+
+    send_input: __send_input_spec
+
+    class __resize_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, cols: int, rows: int) -> None:
+            ...
+
+        async def aio(self, /, *, cols: int, rows: int) -> None:
+            ...
+
+    resize: __resize_spec
+
+    class __close_stdin_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> None:
+            ...
+
+        async def aio(self, /) -> None:
+            ...
+
+    close_stdin: __close_stdin_spec
+
+    class __disconnect_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> None:
+            ...
+
+        async def aio(self, /) -> None:
+            ...
+
+    disconnect: __disconnect_spec
+
+    class __wait_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> archil._models.SandboxProcessResult:
+            ...
+
+        async def aio(self, /) -> archil._models.SandboxProcessResult:
+            ...
+
+    wait: __wait_spec
+
+    class __kill_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> archil._models.SandboxProcessResult:
+            ...
+
+        async def aio(self, /) -> archil._models.SandboxProcessResult:
+            ...
+
+    kill: __kill_spec
+
+    class ___connect_spec(typing_extensions.Protocol):
+        def __call__(self, /, request: dict[str, object], expected_ready: str) -> None:
+            ...
+
+        async def aio(self, /, request: dict[str, object], expected_ready: str) -> None:
+            ...
+
+    _connect: ___connect_spec
+
+    class ___receive_spec(typing_extensions.Protocol):
+        def __call__(self, /, socket: websockets.asyncio.client.ClientConnection, expected_ready: str) -> None:
+            ...
+
+        async def aio(self, /, socket: websockets.asyncio.client.ClientConnection, expected_ready: str) -> None:
+            ...
+
+    _receive: ___receive_spec
+
+    class ___send_input_chunk_spec(typing_extensions.Protocol):
+        def __call__(self, /, data: bytes) -> bool:
+            ...
+
+        async def aio(self, /, data: bytes) -> bool:
+            ...
+
+    _send_input_chunk: ___send_input_chunk_spec
+
+    class ___send_json_spec(typing_extensions.Protocol):
+        def __call__(self, /, message: dict[str, object]) -> None:
+            ...
+
+        async def aio(self, /, message: dict[str, object]) -> None:
+            ...
+
+    _send_json: ___send_json_spec
+
+    class ___send_spec(typing_extensions.Protocol):
+        def __call__(self, /, message: str | bytes) -> None:
+            ...
+
+        async def aio(self, /, message: str | bytes) -> None:
+            ...
+
+    _send: ___send_spec
+
+    def _handle_control(self, event: dict, expected_ready: str) -> None:
+        ...
+
+    def _handle_output(self, frame: bytes) -> None:
+        ...
+
+    def _finish(self, event: dict) -> None:
+        ...
+
+    @staticmethod
+    def _decoder():
+        ...
+
+    def _append_text(self, stream: typing.Literal['stdout', 'stderr'], data: str) -> None:
+        ...
+
+    def _flush_decoders(self) -> None:
+        ...
+
+    @staticmethod
+    def _fail(future: asyncio.Future | None, error: BaseException) -> None:
+        ...
+
+
+class SandboxProcesses:
+
+    def __init__(self, transport: archil._http._Transport, sandbox_id: str) -> None:
+        ...
+
+    class __start_spec(typing_extensions.Protocol):
+        def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None) -> SandboxProcess:
+            ...
+
+        async def aio(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None) -> SandboxProcess:
+            ...
+
+    start: __start_spec
+
+    class __connect_spec(typing_extensions.Protocol):
+        def __call__(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None) -> SandboxProcess:
+            ...
+
+        async def aio(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None) -> SandboxProcess:
+            ...
+
+    connect: __connect_spec
+
+    class ___new_connection_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> websockets.asyncio.client.ClientConnection:
+            ...
+
+        async def aio(self, /) -> websockets.asyncio.client.ClientConnection:
+            ...
+
+    _new_connection: ___new_connection_spec
+
+
+class Sandbox:
+
+    def __init__(self, transport: archil._http._Transport, data: archil._models.SandboxData) -> None:
+        ...
+
+    def __repr__(self) -> str:
+        ...
+
+    @property
+    def id(self) -> str:
+        ...
+
+    @property
+    def name(self) -> str:
+        ...
+
+    @property
+    def status(self) -> typing.Literal['pending', 'running', 'pausing', 'paused', 'stopping', 'stopped', 'exited', 'failed', 'deleting', 'deleted']:
+        ...
+
+    @property
+    def vcpu_count(self) -> int:
+        ...
+
+    @property
+    def mem_size_mib(self) -> int:
+        ...
+
+    @property
+    def max_ttl_seconds(self) -> int:
+        ...
+
+    @property
+    def max_concurrent_execs(self) -> int:
+        ...
+
+    @property
+    def base_image(self) -> str:
+        ...
+
+    @property
+    def platform(self) -> typing.Literal['arm64', 'amd64'] | None:
+        ...
+
+    @property
+    def endpoints(self) -> list[archil._models.SandboxEndpoint]:
+        ...
+
+    @property
+    def created_at(self):
+        ...
+
+    @property
+    def running_at(self):
+        ...
+
+    @property
+    def finished_at(self):
+        ...
+
+    @property
+    def last_active_at(self):
+        ...
+
+    @property
+    def expires_at(self):
+        ...
+
+    @property
+    def exit_reason(self) -> str | None:
+        ...
+
+    @property
+    def processes(self) -> SandboxProcesses:
+        ...
+
+    class __refresh_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> Sandbox:
+            ...
+
+        async def aio(self, /) -> Sandbox:
+            ...
+
+    refresh: __refresh_spec
+
+    class ___wait_for_start_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> Sandbox:
+            ...
+
+        async def aio(self, /) -> Sandbox:
+            ...
+
+    _wait_for_start: ___wait_for_start_spec
+
+    class ___wait_while_spec(typing_extensions.Protocol):
+        def __call__(self, /, status: typing.Literal['pending', 'running', 'pausing', 'paused', 'stopping', 'stopped', 'exited', 'failed', 'deleting', 'deleted']) -> Sandbox:
+            ...
+
+        async def aio(self, /, status: typing.Literal['pending', 'running', 'pausing', 'paused', 'stopping', 'stopped', 'exited', 'failed', 'deleting', 'deleted']) -> Sandbox:
+            ...
+
+    _wait_while: ___wait_while_spec
+
+    class __start_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, wait: bool = True) -> Sandbox:
+            ...
+
+        async def aio(self, /, *, wait: bool = True) -> Sandbox:
+            ...
+
+    start: __start_spec
+
+    class __stop_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, wait: bool = True) -> Sandbox:
+            ...
+
+        async def aio(self, /, *, wait: bool = True) -> Sandbox:
+            ...
+
+    stop: __stop_spec
+
+    class __pause_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, wait: bool = True) -> Sandbox:
+            ...
+
+        async def aio(self, /, *, wait: bool = True) -> Sandbox:
+            ...
+
+    pause: __pause_spec
+
+    class __resume_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, wait: bool = True) -> Sandbox:
+            ...
+
+        async def aio(self, /, *, wait: bool = True) -> Sandbox:
+            ...
+
+    resume: __resume_spec
+
+    class __fork_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+            ...
+
+        async def aio(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+            ...
+
+    fork: __fork_spec
+
+    class __create_connection_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> archil._models.SandboxConnection:
+            ...
+
+        async def aio(self, /) -> archil._models.SandboxConnection:
+            ...
+
+    create_connection: __create_connection_spec
+
+    class __delete_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> None:
+            ...
+
+        async def aio(self, /) -> None:
+            ...
+
+    delete: __delete_spec
+
+    class __exec_spec(typing_extensions.Protocol):
+        @typing.overload
+        def __call__(self, /, command: str, *, pty: typing.Literal[True], cols: int = 80, rows: int = 24, on_data: collections.abc.Callable[[str], None] | None = None) -> SandboxPty:
+            ...
+
+        @typing.overload
+        def __call__(self, /, command: str, *, command_tty: bool = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, wait: bool = True, pty: typing.Literal[False] = False) -> SandboxExec:
+            ...
+
+        @typing.overload
+        def __call__(self, /, command: str, *, command_tty: bool = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, wait: bool = True, pty: bool, cols: int = 80, rows: int = 24, on_data: collections.abc.Callable[[str], None] | None = None) -> SandboxExec | SandboxPty:
+            ...
+
+        @typing.overload
+        async def aio(self, /, command: str, *, pty: typing.Literal[True], cols: int = 80, rows: int = 24, on_data: collections.abc.Callable[[str], None] | None = None) -> SandboxPty:
+            ...
+
+        @typing.overload
+        async def aio(self, /, command: str, *, command_tty: bool = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, wait: bool = True, pty: typing.Literal[False] = False) -> SandboxExec:
+            ...
+
+        @typing.overload
+        async def aio(self, /, command: str, *, command_tty: bool = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, wait: bool = True, pty: bool, cols: int = 80, rows: int = 24, on_data: collections.abc.Callable[[str], None] | None = None) -> SandboxExec | SandboxPty:
+            ...
+
+    exec: __exec_spec
+
+    class __list_execs_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> list[SandboxExec]:
+            ...
+
+        async def aio(self, /) -> list[SandboxExec]:
+            ...
+
+    list_execs: __list_execs_spec
+
+    class __get_exec_spec(typing_extensions.Protocol):
+        def __call__(self, /, exec_id: str) -> SandboxExec:
+            ...
+
+        async def aio(self, /, exec_id: str) -> SandboxExec:
+            ...
+
+    get_exec: __get_exec_spec
+
+    class __cancel_exec_spec(typing_extensions.Protocol):
+        def __call__(self, /, exec_id: str) -> SandboxExec:
+            ...
+
+        async def aio(self, /, exec_id: str) -> SandboxExec:
+            ...
+
+    cancel_exec: __cancel_exec_spec
+
+
+class Sandboxes:
+    """Account-level collection of persistent Archil sandboxes."""
+    def __init__(self, transport: archil._http._Transport) -> None:
+        ...
+
+    class __list_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, disk: object | str | None = None) -> list[Sandbox]:
+            ...
+
+        async def aio(self, /, *, disk: object | str | None = None) -> list[Sandbox]:
+            ...
+
+    list: __list_spec
+
+    class __get_spec(typing_extensions.Protocol):
+        def __call__(self, /, id: str) -> Sandbox:
+            ...
+
+        async def aio(self, /, id: str) -> Sandbox:
+            ...
+
+    get: __get_spec
+
+    class __create_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, wait: bool = True) -> Sandbox:
+            ...
+
+        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, wait: bool = True) -> Sandbox:
+            ...
+
+    create: __create_spec
+
+
 class Tokens:
     """Account-level API keys (the control-plane credentials), distinct from
     per-disk mount tokens.
@@ -932,19 +1519,19 @@ class Tokens:
         ...
 
     class __list_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil._models.ApiTokenResponse]:
+        def __call__(self, /, *, limit: int | None = None, cursor: str | None = None) -> list[archil._models.ApiTokenResponse]:
             ...
 
-        async def aio(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil._models.ApiTokenResponse]:
+        async def aio(self, /, *, limit: int | None = None, cursor: str | None = None) -> list[archil._models.ApiTokenResponse]:
             ...
 
     list: __list_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str, description: typing.Optional[str] = None) -> archil._models.ApiTokenResponse:
+        def __call__(self, /, *, name: str, description: str | None = None) -> archil._models.ApiTokenResponse:
             ...
 
-        async def aio(self, /, *, name: str, description: typing.Optional[str] = None) -> archil._models.ApiTokenResponse:
+        async def aio(self, /, *, name: str, description: str | None = None) -> archil._models.ApiTokenResponse:
             ...
 
     create: __create_spec
@@ -1010,10 +1597,10 @@ class Workspace:
     get_object: __get_object_spec
 
     class __put_object_spec(typing_extensions.Protocol):
-        def __call__(self, /, key: str, body: typing.Union[str, bytes, bytearray, memoryview], content_type: typing.Optional[str] = None, *, mode: typing.Optional[int] = None, uid: typing.Optional[int] = None, gid: typing.Optional[int] = None) -> archil._models.PutObjectResult:
+        def __call__(self, /, key: str, body: str | bytes | bytearray | memoryview, content_type: str | None = None, *, mode: int | None = None, uid: int | None = None, gid: int | None = None) -> archil._models.PutObjectResult:
             ...
 
-        async def aio(self, /, key: str, body: typing.Union[str, bytes, bytearray, memoryview], content_type: typing.Optional[str] = None, *, mode: typing.Optional[int] = None, uid: typing.Optional[int] = None, gid: typing.Optional[int] = None) -> archil._models.PutObjectResult:
+        async def aio(self, /, key: str, body: str | bytes | bytearray | memoryview, content_type: str | None = None, *, mode: int | None = None, uid: int | None = None, gid: int | None = None) -> archil._models.PutObjectResult:
             ...
 
     put_object: __put_object_spec
@@ -1028,10 +1615,10 @@ class Workspace:
     delete_object: __delete_object_spec
 
     class __list_objects_spec(typing_extensions.Protocol):
-        def __call__(self, /, prefix: typing.Optional[str] = None, *, recursive: bool = False) -> archil._models.ListObjectsResult:
+        def __call__(self, /, prefix: str | None = None, *, recursive: bool = False) -> archil._models.ListObjectsResult:
             ...
 
-        async def aio(self, /, prefix: typing.Optional[str] = None, *, recursive: bool = False) -> archil._models.ListObjectsResult:
+        async def aio(self, /, prefix: str | None = None, *, recursive: bool = False) -> archil._models.ListObjectsResult:
             ...
 
     list_objects: __list_objects_spec
@@ -1063,7 +1650,7 @@ class Workspace:
 
     exec: __exec_spec
 
-    def agent_tools(self, *, tools: typing.Optional[typing.List[str]] = None) -> archil.agent_tools._toolset.AgentToolset:
+    def agent_tools(self, *, tools: typing.List[str] | None = None) -> archil.agent_tools._toolset.AgentToolset:
         """Build a filesystem toolset for this workspace that drops into popular
         agent frameworks, exactly like :meth:`Disk.agent_tools` — but operations
         route to the right disk by key and ``grep`` / ``list_objects`` fan out
