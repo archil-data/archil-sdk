@@ -19,20 +19,29 @@ export type { ListTokensOptions } from "./tokens.js";
 export { Sandboxes } from "./sandboxes.js";
 export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
 
-export { Sandbox, SandboxExec, SandboxPty } from "./sandbox.js";
+export { Sandbox, SandboxExec } from "./sandbox.js";
 export type {
   SandboxEndpoint,
   SandboxConnectionInfo,
   SandboxExecOptions,
   SandboxExecResponse,
   SandboxExecStatus,
-  SandboxPtyOptions,
-  SandboxPtyResult,
   SandboxResponse,
   SandboxStatus,
   SandboxForkOptions,
   SandboxWaitOptions,
 } from "./sandbox.js";
+export { SandboxProcess, SandboxProcesses } from "./sandbox-process.js";
+export type {
+  SandboxProcessConnectOptions,
+  SandboxProcessOutput,
+  SandboxProcessOutputHandler,
+  SandboxProcessResult,
+  SandboxProcessStartOptions,
+  SandboxProcessStatus,
+  SandboxProcessStream,
+  SandboxTerminalOptions,
+} from "./sandbox-process.js";
 
 export { Disk, DiskMultipart, effectiveUploadPartSize } from "./disk.js";
 export type {
