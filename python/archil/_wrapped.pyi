@@ -5,6 +5,7 @@ import archil._workspace
 import archil.agent_tools._toolset
 import asyncio
 import collections.abc
+import os
 import typing
 import typing_extensions
 import websockets.asyncio.client
@@ -1182,6 +1183,28 @@ class SandboxProcesses:
             ...
 
     _new_connection: ___new_connection_spec
+class SandboxFiles:
+
+    def __init__(self, sandbox: typing.Any) -> None:
+        ...
+
+    class __upload_file_spec(typing_extensions.Protocol):
+        def __call__(self, /, local_path: str | os.PathLike, remote_path: str, *, mode: int | None = None) -> None:
+            ...
+
+        async def aio(self, /, local_path: str | os.PathLike, remote_path: str, *, mode: int | None = None) -> None:
+            ...
+
+    upload_file: __upload_file_spec
+
+    class __download_file_spec(typing_extensions.Protocol):
+        def __call__(self, /, remote_path: str, local_path: str | os.PathLike) -> None:
+            ...
+
+        async def aio(self, /, remote_path: str, local_path: str | os.PathLike) -> None:
+            ...
+
+    download_file: __download_file_spec
 
 
 class Sandbox:
@@ -1258,6 +1281,10 @@ class Sandbox:
 
     @property
     def processes(self) -> SandboxProcesses:
+        ...
+
+    @property
+    def files(self) -> SandboxFiles:
         ...
 
     class __refresh_spec(typing_extensions.Protocol):

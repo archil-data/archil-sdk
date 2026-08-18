@@ -120,6 +120,18 @@ an offset, `wait().stdout` and `wait().stderr` contain the output received by
 that handle from that offset, not output from before it. The existing `exec`
 API remains available for durable control-plane exec records.
 
+Transfer files directly between the local machine and a running sandbox:
+
+```python
+sandbox.files.upload_file("./input.tar.gz", "/workspace/input.tar.gz")
+sandbox.files.download_file("/workspace/result.json", "./result.json")
+```
+
+Transfers stream through `sandbox.processes` rather than buffering the whole
+file in memory. Downloads request one bounded chunk at a time; a short or empty
+chunk marks end-of-file. Uploads and downloads replace their destination only
+after the transfer succeeds.
+
 `create`, `start`, `stop`, `pause`, `resume`, `fork`, and non-interactive
 `exec` wait for completion by default. The server handles the initial wait; if
 its wait budget expires first, the SDK continues polling. Pass `wait=False` to

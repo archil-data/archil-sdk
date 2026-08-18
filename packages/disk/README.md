@@ -147,6 +147,27 @@ preserves its processes for reattachment after resume. Processes end when
 their sandbox is stopped or expires.
 The existing `exec` API remains available for durable control-plane exec records.
 
+Transfer files through the sandbox process connection without buffering the
+whole file in memory:
+
+```ts
+await sandbox.files.uploadFile(file.stream(), "/workspace/input.tar.gz");
+
+const writable = await fileHandle.createWritable();
+await sandbox.files.downloadFile("/workspace/result.json", (chunk) =>
+  writable.write(chunk),
+);
+await writable.close();
+```
+
+Downloads request one bounded chunk at a time. A short or empty chunk marks
+end-of-file, so the source does not need to be sized before transfer.
+
+`uploadFile()` accepts a `Uint8Array`, `ArrayBuffer`, `Blob`, async iterable, or
+`ReadableStream`. `downloadFile()` passes each chunk to the provided writer and
+waits for it before requesting more data. Uploads replace the remote target only
+after the transfer succeeds.
+
 API keys live at the account level, so those helpers are top-level:
 
 ```ts
