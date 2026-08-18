@@ -21,7 +21,7 @@ import sys
 import time
 import uuid
 
-from archil import Archil, ArchilError, ArchilS3Error, TokenUser
+from archil import Archil, ArchilError, ArchilS3Error, SandboxTerminal, TokenUser
 
 
 def require_env(name: str) -> str:
@@ -92,23 +92,40 @@ def run_sandbox_suite(archil) -> None:
                 f"unexpected sandbox stdout: {result.stdout!r}",
             )
 
-        with step("Execute interactive PTY command"):
-            output: list[str] = []
-            process = sandbox.exec(
-                "read line; printf 'pty:%s' \"$line\"",
-                pty=True,
-                on_data=output.append,
-            )
-            process.resize(cols=120, rows=40)
-            process.send_input("sandbox-input\n")
-            pty_result = process.wait()
+        with step("Execute runtime process with streamed stdin"):
+            process = sandbox.processes.start("cat")
+            process.send_input("process-input\n")
+            process.close_stdin()
+            process_result = process.wait()
+            assert_that(process_result.exit_code == 0, f"process failed: {process_result.stderr}")
             assert_that(
-                "pty:sandbox-input" in "".join(output),
-                f"unexpected PTY output: {output!r}",
+                process_result.stdout == "process-input\n",
+                f"unexpected process stdout: {process_result.stdout!r}",
             )
+
+        with step("Execute runtime-owned terminal"):
+            terminal = sandbox.processes.start(
+                "read line; printf 'terminal:%s' \"$line\"",
+                terminal=SandboxTerminal(cols=120, rows=40),
+            )
+            terminal.resize(cols=160, rows=50)
+            terminal.send_input("terminal-input\n")
+            terminal_result = terminal.wait()
             assert_that(
-                pty_result.exit_code in {0, None},
-                f"PTY exec failed: {pty_result.exit_code}",
+                "terminal:terminal-input" in terminal_result.stdout,
+                f"unexpected terminal output: {terminal_result.stdout!r}",
+            )
+
+        with step("Disconnect and resume runtime process"):
+            process = sandbox.processes.start("sleep 1; printf resumed")
+            process_id = process.id
+            cursor = process.cursor
+            process.disconnect()
+            resumed = sandbox.processes.connect(process_id, offset=cursor)
+            resumed_result = resumed.wait()
+            assert_that(
+                resumed_result.stdout == "resumed",
+                f"unexpected resumed stdout: {resumed_result.stdout!r}",
             )
 
         with step("Pause sandbox"):

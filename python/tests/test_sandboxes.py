@@ -1,13 +1,20 @@
 import asyncio
 import json
-import shlex
 from datetime import datetime
+from typing import Union
 
 import httpx
 import pytest
 
 import archil as archil_module
-from archil import Sandbox, SandboxExec, SandboxPty, SandboxStartError
+from archil import (
+    Sandbox,
+    SandboxExec,
+    SandboxProcess,
+    SandboxProcessOutput,
+    SandboxStartError,
+    SandboxTerminal,
+)
 from conftest import ok_envelope
 
 
@@ -17,7 +24,7 @@ _CLOSED = object()
 
 class FakeWebSocket:
     def __init__(self) -> None:
-        self.sent: list[str] = []
+        self.sent: list[Union[str, bytes]] = []
         self.close_reason = None
         self._messages = asyncio.Queue()
 
@@ -30,18 +37,60 @@ class FakeWebSocket:
             raise StopAsyncIteration
         return message
 
-    async def send(self, data: str) -> None:
+    async def send(self, data: Union[str, bytes]) -> None:
         self.sent.append(data)
+
+    async def recv(self):
+        return await self.__anext__()
 
     async def close(self) -> None:
         await self.finish("")
 
-    async def push(self, data: str) -> None:
+    async def push(self, data: Union[str, bytes]) -> None:
         await self._messages.put(data)
 
     async def finish(self, reason: str) -> None:
         self.close_reason = reason
         await self._messages.put(_CLOSED)
+
+
+class FakeProcessWebSocket(FakeWebSocket):
+    async def send(self, data: Union[str, bytes]) -> None:
+        await super().send(data)
+        if isinstance(data, bytes):
+            return
+        request = json.loads(data)
+        if request["type"] == "start":
+            await self.push(json.dumps({"type": "started", "process_id": "process-1"}))
+        elif request["type"] == "attach":
+            await self.push(json.dumps({"type": "attached", "process_id": request["process_id"]}))
+        elif request["type"] == "kill":
+            await self.push(
+                json.dumps(
+                    {
+                        "type": "killed",
+                    }
+                )
+            )
+        elif request["type"] == "resize":
+            await self.push(json.dumps({"type": "resized"}))
+
+
+class BlockingInputWebSocket(FakeProcessWebSocket):
+    def __init__(self) -> None:
+        super().__init__()
+        self.input_started = asyncio.Event()
+        self.release_input = asyncio.Event()
+
+    async def send(self, data: Union[str, bytes]) -> None:
+        await super().send(data)
+        if isinstance(data, bytes) and not self.input_started.is_set():
+            self.input_started.set()
+            await self.release_input.wait()
+
+
+def process_output_frame(stream: int, offset: int, data: bytes) -> bytes:
+    return bytes([stream]) + offset.to_bytes(8, "big") + data
 
 
 def sandbox_json(status: str = "running", **overrides) -> dict:
@@ -333,58 +382,196 @@ def test_module_level_sandbox_helpers(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_interactive_exec_pty(archil, router, monkeypatch):
-    import archil._sandbox as sandbox_module
+async def test_process_disconnect_and_resume_with_streamed_input(archil, router, monkeypatch):
+    import archil._sandbox_process as process_module
 
-    socket = FakeWebSocket()
-    connected_urls = []
+    sockets = []
 
     async def connect(url: str):
-        connected_urls.append(url)
+        socket = FakeProcessWebSocket()
+        socket.url = url
+        sockets.append(socket)
         return socket
 
     def handler(request):
         if request.url.path.endswith("/connections"):
-            return ok_envelope({"url": "wss://sandbox.example/ws", "expires_at": NOW})
+            return ok_envelope(
+                {
+                    "url": "wss://sandbox.example/ws?token=signed",
+                    "expires_at": NOW,
+                }
+            )
         return ok_envelope(sandbox_json())
 
-    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
+    monkeypatch.setattr(process_module, "_websocket_connect", connect)
     router.set(handler)
-    sandbox = await archil.sandboxes.get.aio("sbx-1")
     output = []
-    command = "echo 'hello' && codex"
-
-    pty = await sandbox.exec.aio(
-        command,
-        pty=True,
-        cols=120,
-        rows=40,
-        on_data=output.append,
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+    process = await sandbox.processes.start.aio(
+        "cat",
+        env={"HELLO": "world"},
+        timeout_seconds=10,
+        on_output=output.append,
     )
-    assert isinstance(pty, SandboxPty)
-    await socket.push("hello\n")
-    await asyncio.sleep(0)
-    await pty.send_input.aio("Review this repository\n")
-    await pty.resize.aio(cols=160, rows=50)
-    await socket.finish("process exited with code 17")
+    socket = sockets[0]
 
-    result = await pty.wait.aio()
-    assert result.exit_code == 17
-    assert connected_urls == ["wss://sandbox.example/ws"]
-    assert output == ["hello\n"]
-    assert [json.loads(message) for message in socket.sent] == [
-        {"type": "resize", "cols": 120, "rows": 40},
-        {"type": "input", "data": f"eval {shlex.quote(command)}; exit $?\n"},
-        {"type": "input", "data": "Review this repository\n"},
-        {"type": "resize", "cols": 160, "rows": 50},
+    assert isinstance(process, SandboxProcess)
+    assert process.id == "process-1"
+    assert process.connected
+    assert socket.url == "wss://sandbox.example/ws?token=signed"
+    assert json.loads(socket.sent[0]) == {
+        "type": "start",
+        "command": "cat",
+        "terminal": False,
+        "env": {"HELLO": "world"},
+        "timeout_seconds": 10,
+    }
+
+    await socket.push(process_output_frame(1, 0, b"hello\n"))
+    await asyncio.sleep(0)
+    await process.send_input.aio(bytes(2 * 1024 * 1024 + 3))
+    await socket.push(process_output_frame(1, 6, b"during\n"))
+    await asyncio.sleep(0)
+    await process.close_stdin.aio()
+
+    chunks = [message for message in socket.sent if isinstance(message, bytes)]
+    assert [len(chunk) for chunk in chunks] == [
+        1024 * 1024,
+        1024 * 1024,
+        3,
     ]
+    assert chunks[0] == chunks[1]
+    assert json.loads(socket.sent[-1]) == {"type": "close_stdin"}
+    assert output == [
+        SandboxProcessOutput("stdout", 0, b"hello\n"),
+        SandboxProcessOutput("stdout", 6, b"during\n"),
+    ]
+
+    cursor = process.cursor
+    await process.disconnect.aio()
+    assert not process.connected
+
+    resumed = await sandbox.processes.connect.aio(process.id, offset=cursor)
+    resumed_socket = sockets[1]
+    assert json.loads(resumed_socket.sent[0]) == {
+        "type": "attach",
+        "process_id": "process-1",
+        "offset": 13,
+    }
+    await resumed_socket.push(process_output_frame(2, 13, b"warning\n"))
+    await resumed_socket.push(
+        json.dumps(
+            {
+                "type": "exit",
+                "status": "completed",
+                "exit_code": 0,
+                "cursor": 21,
+            }
+        )
+    )
+    result = await resumed.wait.aio()
+
+    assert result.status == "completed"
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert result.stderr == "warning\n"
+    assert resumed.cursor == 21
+    await resumed.disconnect.aio()
 
 
 @pytest.mark.asyncio
-async def test_interactive_exec_without_exit_status(archil, router, monkeypatch):
-    import archil._sandbox as sandbox_module
+async def test_process_stdin_close_waits_for_writes():
+    from archil._sandbox_process import _SandboxProcess
 
-    socket = FakeWebSocket()
+    socket = BlockingInputWebSocket()
+
+    async def connect():
+        return socket
+
+    async def control(_request: dict[str, object]):
+        pass
+
+    process = _SandboxProcess("", 0, None, True, connect, control)
+    await process._connect(
+        {
+            "type": "start",
+            "command": "cat",
+            "terminal": False,
+            "env": {},
+        },
+        "started",
+    )
+
+    writing = asyncio.create_task(process.send_input(bytes(2 * 1024 * 1024)))
+    await socket.input_started.wait()
+    closing = asyncio.create_task(process.close_stdin())
+    await asyncio.sleep(0)
+    assert not closing.done()
+
+    socket.release_input.set()
+    await asyncio.gather(writing, closing)
+    assert [type(message) for message in socket.sent[1:]] == [bytes, bytes, str]
+    assert json.loads(socket.sent[-1]) == {"type": "close_stdin"}
+    await process.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_terminal_process_input_resize_and_kill(archil, router, monkeypatch):
+    import archil._sandbox_process as process_module
+
+    sockets = []
+
+    async def connect(_url: str):
+        socket = FakeProcessWebSocket()
+        sockets.append(socket)
+        return socket
+
+    router.set(
+        lambda request: ok_envelope(
+            {"url": "wss://sandbox.example/ws", "expires_at": NOW}
+            if request.url.path.endswith("/connections")
+            else sandbox_json()
+        )
+    )
+    monkeypatch.setattr(process_module, "_websocket_connect", connect)
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+    output = []
+    process = await sandbox.processes.start.aio(
+        "codex",
+        terminal=SandboxTerminal(cols=132, rows=43),
+        on_output=output.append,
+        collect_output=False,
+    )
+    socket = sockets[0]
+    await socket.push(process_output_frame(1, 0, b"ready\n"))
+    await asyncio.sleep(0)
+    await process.send_input.aio("Review this repository\n")
+    await process.resize.aio(cols=160, rows=50)
+    result = await process.kill.aio()
+
+    assert json.loads(socket.sent[0])["terminal"] == {"cols": 132, "rows": 43}
+    controls = [json.loads(message)["type"] for message in socket.sent if isinstance(message, str)]
+    assert controls == ["start"]
+    assert json.loads(sockets[1].sent[0]) == {
+        "type": "resize",
+        "process_id": "process-1",
+        "cols": 160,
+        "rows": 50,
+    }
+    assert json.loads(sockets[2].sent[0]) == {
+        "type": "kill",
+        "process_id": "process-1",
+    }
+    assert output == [SandboxProcessOutput("stdout", 0, b"ready\n")]
+    assert result is None
+    await process.disconnect.aio()
+
+
+@pytest.mark.asyncio
+async def test_process_exit_closes_stdin_locally(archil, router, monkeypatch):
+    import archil._sandbox_process as process_module
+
+    socket = FakeProcessWebSocket()
 
     async def connect(_url: str):
         return socket
@@ -396,30 +583,83 @@ async def test_interactive_exec_without_exit_status(archil, router, monkeypatch)
             else sandbox_json()
         )
     )
-    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
+    monkeypatch.setattr(process_module, "_websocket_connect", connect)
     sandbox = await archil.sandboxes.get.aio("sbx-1")
-    pty = await sandbox.exec.aio("codex", pty=True)
-    await socket.finish("")
+    process = await sandbox.processes.start.aio("cat")
 
-    assert (await pty.wait.aio()).exit_code is None
+    await process.send_input.aio(b"input")
+    await socket.push(
+        json.dumps(
+            {
+                "type": "exit",
+                "status": "completed",
+                "exit_code": 0,
+                "cursor": 0,
+            }
+        )
+    )
+
+    assert (await process.wait.aio()).status == "completed"
+    with pytest.raises(RuntimeError, match="stdin is closed"):
+        await process.send_input.aio(b"later")
+    await process.disconnect.aio()
 
 
 @pytest.mark.asyncio
-async def test_interactive_exec_reports_connection_failure(archil, router, monkeypatch):
-    import archil._sandbox as sandbox_module
+async def test_process_callback_errors_do_not_hide_connection_errors():
+    from archil._sandbox_process import _SandboxProcess
 
-    async def connect(_url: str):
-        raise OSError("connection refused")
+    socket = FakeProcessWebSocket()
 
-    router.set(
-        lambda request: ok_envelope(
-            {"url": "wss://sandbox.example/ws", "expires_at": NOW}
-            if request.url.path.endswith("/connections")
-            else sandbox_json()
+    async def connect():
+        return socket
+
+    async def control(_request: dict[str, object]):
+        pass
+
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    callback_error = loop.create_future()
+
+    def capture_callback_error(_loop, context):
+        callback_error.set_result(context.get("exception"))
+
+    loop.set_exception_handler(capture_callback_error)
+
+    def on_output(_output):
+        raise RuntimeError("callback failed")
+
+    try:
+        process = _SandboxProcess("", 0, on_output, True, connect, control)
+        await process._connect(
+            {
+                "type": "start",
+                "command": "echo hello",
+                "terminal": False,
+                "env": {},
+            },
+            "started",
         )
-    )
-    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
-    sandbox = await archil.sandboxes.get.aio("sbx-1")
+        await socket.push(process_output_frame(1, 0, b"hello\n"))
+        error = await asyncio.wait_for(callback_error, 1)
 
-    with pytest.raises(ConnectionError, match="Interactive exec connection failed"):
-        await sandbox.exec.aio("codex", pty=True)
+        assert process.connected
+        assert str(error) == "callback failed"
+
+        await socket.push(
+            json.dumps(
+                {
+                    "type": "error",
+                    "error": "process_failed",
+                    "message": "specific runtime failure",
+                }
+            )
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        with pytest.raises(ConnectionError) as exc_info:
+            await process.wait()
+        assert str(exc_info.value.__cause__) == ("process_failed: specific runtime failure")
+    finally:
+        loop.set_exception_handler(previous_handler)

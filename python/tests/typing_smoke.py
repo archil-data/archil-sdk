@@ -7,7 +7,7 @@ types to users. Runtime is never executed; only static analysis matters here.
 """
 
 import asyncio
-from typing import Optional, Union
+from typing import Optional
 
 import archil
 from archil import (
@@ -20,8 +20,9 @@ from archil import (
     S3Mount,
     Sandbox,
     SandboxExec,
-    SandboxPty,
-    SandboxPtyResult,
+    SandboxProcess,
+    SandboxProcessOutput,
+    SandboxTerminal,
     TokenUser,
     Workspace,
 )
@@ -45,13 +46,17 @@ def sync_usage() -> None:
     module_sandbox = archil.get_sandbox(module_sandbox.id)
     sandbox_exec: SandboxExec = sandbox.exec("echo ready")
     _sandbox_stdout: Optional[str] = sandbox_exec.stdout
-    sandbox_pty: SandboxPty = sandbox.exec("bash", pty=True)
-    sandbox_pty.send_input("echo ready\n")
-    sandbox_pty.resize(cols=120, rows=40)
-    _pty_result: SandboxPtyResult = sandbox_pty.wait()
-    sandbox_pty.close()
-    dynamic_pty: bool = True
-    _dynamic_result: Union[SandboxExec, SandboxPty] = sandbox.exec("bash", pty=dynamic_pty)
+    process: SandboxProcess = sandbox.processes.start(
+        "codex",
+        terminal=SandboxTerminal(cols=120, rows=40),
+        on_output=consume_process_output,
+        collect_output=False,
+    )
+    process.send_input(b"Review this repository\n")
+    cursor: int = process.cursor
+    process.disconnect()
+    resumed = sandbox.processes.connect(process.id, offset=cursor)
+    resumed.kill()
     sandbox.stop().delete()
     created = client.disks.create(
         name="d2",
@@ -93,10 +98,10 @@ async def async_usage() -> None:
         sandbox = await client.sandboxes.create.aio(name="trial")
         result = await sandbox.exec.aio("echo ready")
         _sandbox_exit: Optional[int] = result.exit_code
-        pty = await sandbox.exec.aio("bash", pty=True)
-        await pty.send_input.aio("echo ready\n")
-        await pty.close.aio()
         await (await sandbox.stop.aio()).delete.aio()
+        process = await sandbox.processes.start.aio("cat")
+        await process.close_stdin.aio()
+        _process_result = await process.wait.aio()
         d = await client.disks.get.aio("dsk-1")
         await d.put_object.aio("k", b"y")
         data: bytes = await d.get_object.aio("k")
@@ -109,6 +114,11 @@ async def async_usage() -> None:
         async for page in d.list_objects_pages.aio("p/"):
             for obj in page.objects:
                 _k: str = obj.key
+
+
+def consume_process_output(output: SandboxProcessOutput) -> None:
+    _stream: str = output.stream
+    _data: bytes = output.data
 
 
 def agent_tools_usage() -> None:
