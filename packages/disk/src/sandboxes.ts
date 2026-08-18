@@ -28,6 +28,7 @@ export interface CreateSandboxRequest {
   baseImage?: string;
   env?: Record<string, string>;
   maxTtlSeconds?: number;
+  /** Maximum concurrently attached exec sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs?: number;
 }
 

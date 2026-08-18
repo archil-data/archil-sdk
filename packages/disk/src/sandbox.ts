@@ -1,6 +1,7 @@
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty } from "./client.js";
+import { SandboxProcesses } from "./sandbox-process.js";
 
 /** @internal */
 export type SandboxWire = components["schemas"]["Sandbox"];
@@ -25,6 +26,7 @@ export interface SandboxResponse {
   baseImage: string;
   platform?: "arm64" | "amd64";
   maxTtlSeconds: number;
+  /** Maximum concurrently attached exec sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
   createdAt: Date;
@@ -72,18 +74,6 @@ export type SandboxExecOptions = {
   env?: Record<string, string>;
   timeoutSeconds?: number;
 } & SandboxWaitOptions;
-
-export interface SandboxPtyOptions {
-  pty: true;
-  cols?: number;
-  rows?: number;
-  onData?: (data: string) => void;
-}
-
-export interface SandboxPtyResult {
-  /** Unavailable when a runtime closes without reporting the process status. */
-  exitCode?: number;
-}
 
 const POLL_INTERVAL_MS = 500;
 
@@ -166,78 +156,6 @@ export class SandboxExec {
   }
 }
 
-export class SandboxPty {
-  private readonly _socket: WebSocket;
-  private readonly _completion: Promise<SandboxPtyResult>;
-
-  /** @internal */
-  constructor(socket: WebSocket, onData?: (data: string) => void) {
-    this._socket = socket;
-    this._completion = new Promise((resolve) => {
-      socket.addEventListener("message", (event) => {
-        if (typeof event.data === "string") onData?.(event.data);
-      });
-      socket.addEventListener(
-        "close",
-        (event) => {
-          const match = /^process exited with code (-?\d+)$/.exec(event.reason);
-          resolve({ exitCode: match ? Number(match[1]) : undefined });
-        },
-        { once: true },
-      );
-    });
-  }
-
-  /** @internal */
-  static connect(
-    url: string,
-    command: string,
-    options: SandboxPtyOptions,
-  ): Promise<SandboxPty> {
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(url);
-      const handleError = () => reject(new Error("Interactive exec connection failed"));
-      socket.addEventListener("error", handleError, { once: true });
-      socket.addEventListener(
-        "open",
-        () => {
-          socket.removeEventListener("error", handleError);
-          const pty = new SandboxPty(socket, options.onData);
-          pty._send({
-            type: "resize",
-            cols: options.cols ?? 80,
-            rows: options.rows ?? 24,
-          });
-          const quotedCommand = `'${command.replaceAll("'", `'"'"'`)}'`;
-          pty._send({ type: "input", data: `eval ${quotedCommand}; exit $?\n` });
-          resolve(pty);
-        },
-        { once: true },
-      );
-    });
-  }
-
-  async sendInput(data: string): Promise<void> {
-    this._send({ type: "input", data });
-  }
-
-  async resize(size: { cols: number; rows: number }): Promise<void> {
-    this._send({ type: "resize", ...size });
-  }
-
-  wait(): Promise<SandboxPtyResult> {
-    return this._completion;
-  }
-
-  close(): void {
-    this._socket.close();
-  }
-
-  private _send(message: Record<string, unknown>): void {
-    this._socket.send(JSON.stringify(message));
-  }
-}
-
 export class Sandbox {
   id!: string;
   name!: string;
@@ -255,6 +173,7 @@ export class Sandbox {
   lastActiveAt!: Date;
   expiresAt?: Date;
   exitReason?: string;
+  readonly processes: SandboxProcesses;
 
   /** @internal */
   private readonly _client: ApiClient;
@@ -263,6 +182,7 @@ export class Sandbox {
   constructor(data: SandboxWire, client: ApiClient) {
     this._client = client;
     this._apply(data);
+    this.processes = new SandboxProcesses(this.id, client);
   }
 
   /** @internal Overwrite this sandbox's fields in place from a fresh wire snapshot. */
@@ -373,7 +293,7 @@ export class Sandbox {
     return options.wait === false ? fork : waitForSandboxStart(fork);
   }
 
-  /** Create a short-lived signed WebSocket URL for an interactive shell. */
+  /** Create a short-lived signed WebSocket URL for a sandbox process connection. */
   async createConnection(): Promise<SandboxConnectionInfo> {
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/connections", {
@@ -392,17 +312,10 @@ export class Sandbox {
     );
   }
 
-  async exec(command: string, options: SandboxPtyOptions): Promise<SandboxPty>;
-  async exec(command: string, options?: SandboxExecOptions): Promise<SandboxExec>;
   async exec(
     command: string,
-    options: SandboxExecOptions | SandboxPtyOptions = {},
-  ): Promise<SandboxExec | SandboxPty> {
-    if ("pty" in options) {
-      const connection = await this.createConnection();
-      return SandboxPty.connect(connection.url, command, options);
-    }
-
+    options: SandboxExecOptions = {},
+  ): Promise<SandboxExec> {
     const data = await unwrap(
       this._client.POST("/api/sandboxes/{sid}/execs", {
         params: {

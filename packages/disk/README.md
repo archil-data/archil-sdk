@@ -89,13 +89,30 @@ const sandbox = await client.sandboxes.create({
   memSizeMiB: 8192,
 });
 
-const result = await sandbox.exec("uname -a");
+const execution = await sandbox.processes.start("uname -a");
+const result = await execution.wait();
 console.log(result.stdout);
+
+const terminal = await sandbox.processes.start("codex", {
+  terminal: { cols: 120, rows: 40 },
+  onOutput: ({ data }) => process.stdout.write(data),
+});
+const processId = terminal.id;
+await terminal.sendInput("Review this repository\n");
+await terminal.resize({ cols: 160, rows: 50 });
+const cursor = terminal.cursor;
+await terminal.disconnect();
+
+const resumed = await sandbox.processes.connect(processId, {
+  offset: cursor,
+  onOutput: ({ data }) => process.stdout.write(data),
+});
+await resumed.kill();
 
 await sandbox.start();
 await sandbox.resume();
 
-// Return the initial state immediately instead of waiting for completion.
+// Existing exec API for durable control-plane exec records.
 const runningExec = await sandbox.exec("sleep 60", { wait: false });
 
 await sandbox.stop();
@@ -111,10 +128,24 @@ const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB.
 
-`create`, `start`, `stop`, `pause`, `resume`, `fork`, and `exec` wait for
-completion by default. The server handles the initial wait; if its wait budget
-expires first, the SDK continues polling. Pass `{ wait: false }` to return as
-soon as the operation is accepted.
+`sandbox.processes.start()` always returns a runtime-owned process immediately.
+Pass `terminal: true` when the command needs terminal behavior, or provide
+`{ cols, rows }` for an initial size. Terminal processes merge stdout and stderr
+into `stdout`; non-terminal processes keep the streams separate. Disconnecting
+leaves the process running. Reconnect with `sandbox.processes.connect(id)` to
+replay buffered output from the beginning, or pass `{ offset: process.cursor }`
+to continue where the previous connection stopped. `onOutput` receives raw
+bytes with their stream and absolute offset. Call `closeStdin()` to deliver EOF
+to a non-terminal process. `sendInput()` streams large input as 1 MiB WebSocket
+frames. Set `collectOutput: false` to stream through `onOutput` without
+retaining decoded output in the process handle or result. Resize and kill use
+separate one-shot process controls, so they do not wait behind stdin.
+`kill()` returns after the control is acknowledged; `wait()` observes exit.
+`maxConcurrentExecs` limits attached exec sessions; detached processes and
+one-shot controls do not count. Pausing a sandbox disconnects attachments but
+preserves its processes for reattachment after resume. Processes end when
+their sandbox is stopped or expires.
+The existing `exec` API remains available for durable control-plane exec records.
 
 API keys live at the account level, so those helpers are top-level:
 
