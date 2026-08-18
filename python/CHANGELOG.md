@@ -1,8 +1,12 @@
 # Changelog
 
-## 0.10.0
+## 0.11.0
 
 - Add runtime-owned sandbox processes with terminal I/O, disconnect, and reconnect support.
+- Add streaming file uploads and downloads for running sandboxes.
+
+## 0.10.0
+
 - Add persistent sandbox support, including lifecycle operations, forks,
   non-interactive command execution, interactive PTYs, and sync/async APIs.
 
