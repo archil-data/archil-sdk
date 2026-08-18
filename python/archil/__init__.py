@@ -78,6 +78,7 @@ from ._wrapped import (
     Multipart,
     Sandbox,
     SandboxExec,
+    SandboxFiles,
     SandboxProcess,
     SandboxProcesses,
     Sandboxes,
@@ -85,7 +86,7 @@ from ._wrapped import (
     Workspace,
 )
 from .agent_tools import AgentToolset
-from .errors import ArchilApiError, ArchilError, ArchilS3Error, SandboxStartError
+from .errors import ArchilApiError, ArchilError, ArchilS3Error, SandboxFileTransferError, SandboxStartError
 
 __all__ = [
     "__version__",
@@ -98,6 +99,7 @@ __all__ = [
     "Sandboxes",
     "Sandbox",
     "SandboxExec",
+    "SandboxFiles",
     "SandboxProcess",
     "SandboxProcesses",
     "FileSystem",
@@ -109,6 +111,7 @@ __all__ = [
     "ArchilApiError",
     "ArchilS3Error",
     "SandboxStartError",
+    "SandboxFileTransferError",
     # input models
     "MountConfig",
     "S3Mount",

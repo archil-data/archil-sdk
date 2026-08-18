@@ -18,8 +18,10 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import tempfile
 import time
 import uuid
+from pathlib import Path
 
 from archil import Archil, ArchilError, ArchilS3Error, SandboxTerminal, TokenUser
 
@@ -91,6 +93,19 @@ def run_sandbox_suite(archil) -> None:
                 result.stdout == "sandbox-ready",
                 f"unexpected sandbox stdout: {result.stdout!r}",
             )
+
+        with step("Stream a large binary file through the sandbox"):
+            payload = bytes(range(256)) * 10_241
+            with tempfile.TemporaryDirectory(prefix="archil-sdk-files-") as temp_dir:
+                source = Path(temp_dir) / "source.bin"
+                downloaded = Path(temp_dir) / "downloaded.bin"
+                source.write_bytes(payload)
+                source.chmod(0o640)
+                sandbox.files.upload_file(source, "/tmp/sdk-source.bin")
+                sandbox.files.download_file("/tmp/sdk-source.bin", downloaded)
+                assert_that(downloaded.read_bytes() == payload, "sandbox file transfer mismatch")
+                mode = sandbox.exec("stat -c %a /tmp/sdk-source.bin")
+                assert_that(mode.stdout == "640\n", f"unexpected uploaded mode: {mode.stdout!r}")
 
         with step("Execute runtime process with streamed stdin"):
             process = sandbox.processes.start("cat")

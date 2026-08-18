@@ -10,6 +10,7 @@ from ._archil import _Archil
 from ._disk import _Disk, _DiskMultipart
 from ._disks import _Disks
 from ._sandbox import _Sandbox, _SandboxExec
+from ._sandbox_files import _SandboxFiles
 from ._sandbox_process import _SandboxProcess, _SandboxProcesses
 from ._sandboxes import _Sandboxes
 from ._synchronizer import synchronizer
@@ -23,6 +24,7 @@ Disks = synchronizer.wrap(_Disks, name="Disks", target_module=__name__)
 Multipart = synchronizer.wrap(_DiskMultipart, name="Multipart", target_module=__name__)
 Disk = synchronizer.wrap(_Disk, name="Disk", target_module=__name__)
 SandboxExec = synchronizer.wrap(_SandboxExec, name="SandboxExec", target_module=__name__)
+SandboxFiles = synchronizer.wrap(_SandboxFiles, name="SandboxFiles", target_module=__name__)
 SandboxProcess = synchronizer.wrap(_SandboxProcess, name="SandboxProcess", target_module=__name__)
 SandboxProcesses = synchronizer.wrap(_SandboxProcesses, name="SandboxProcesses", target_module=__name__)
 Sandbox = synchronizer.wrap(_Sandbox, name="Sandbox", target_module=__name__)

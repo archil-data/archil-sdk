@@ -15,6 +15,7 @@ from ._models import (
 )
 from ._sandbox_process import _SandboxProcesses
 from .errors import SandboxStartError
+from ._sandbox_files import _SandboxFiles
 
 
 _POLL_INTERVAL_SECONDS = 0.5
@@ -83,6 +84,7 @@ class _Sandbox:
         self._transport = transport
         self._data = data
         self._processes = _SandboxProcesses(transport, data.id)
+        self._files = _SandboxFiles(self)
 
     def __repr__(self) -> str:
         return f"Sandbox(id={self.id!r}, name={self.name!r}, status={self.status!r})"
@@ -154,6 +156,10 @@ class _Sandbox:
     @property
     def processes(self) -> "_SandboxProcesses":
         return self._processes
+
+    @property
+    def files(self) -> "_SandboxFiles":
+        return self._files
 
     async def refresh(self) -> "_Sandbox":
         data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}")

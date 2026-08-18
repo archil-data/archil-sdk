@@ -34,6 +34,17 @@ class SandboxStartError(ArchilError):
         self.latest = sandbox
 
 
+class SandboxFileTransferError(ArchilError):
+    def __init__(self, operation: str, path: str, detail: str) -> None:
+        super().__init__(
+            f"Sandbox file {operation} failed for {path}: {detail}",
+            500,
+            "SANDBOX_FILE_TRANSFER_FAILED",
+        )
+        self.operation = operation
+        self.path = path
+
+
 class ArchilS3Error(ArchilError):
     """Error from the S3-compatible object API (``get_object`` / ``put_object`` /
     ``delete_object`` / ``head_object`` / ``list_objects``). The gateway returns

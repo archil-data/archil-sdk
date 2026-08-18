@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import type { ApiClient } from "../src/client.js";
+import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess } from "../src/sandbox-process.js";
 import { Sandbox, SandboxExec } from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
@@ -140,6 +141,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
   const listed = await sandboxes.list({ disk: "dsk-0123456789abcdef" });
   assert.equal(listed.length, 1);
   assert.ok(listed[0] instanceof Sandbox);
+  assert.ok(listed[0].files instanceof SandboxFiles);
   assert.deepEqual(listed[0].toJSON(), {
     id: "0198-sandbox",
     name: "prepared-environment",

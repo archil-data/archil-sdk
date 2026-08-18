@@ -46,6 +46,8 @@ def sync_usage() -> None:
     module_sandbox = archil.get_sandbox(module_sandbox.id)
     sandbox_exec: SandboxExec = sandbox.exec("echo ready")
     _sandbox_stdout: Optional[str] = sandbox_exec.stdout
+    sandbox.files.upload_file("local.txt", "/workspace/remote.txt", mode=0o640)
+    sandbox.files.download_file("/workspace/remote.txt", "downloaded.txt")
     process: SandboxProcess = sandbox.processes.start(
         "codex",
         terminal=SandboxTerminal(cols=120, rows=40),
@@ -98,6 +100,8 @@ async def async_usage() -> None:
         sandbox = await client.sandboxes.create.aio(name="trial")
         result = await sandbox.exec.aio("echo ready")
         _sandbox_exit: Optional[int] = result.exit_code
+        await sandbox.files.upload_file.aio("local.txt", "/workspace/remote.txt")
+        await sandbox.files.download_file.aio("/workspace/remote.txt", "downloaded.txt")
         await (await sandbox.stop.aio()).delete.aio()
         process = await sandbox.processes.start.aio("cat")
         await process.close_stdin.aio()

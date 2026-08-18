@@ -219,7 +219,15 @@ class _SandboxProcess:
                 else:
                     output = self._handle_output(bytes(message))
                     if output is not None and self._on_output is not None:
-                        asyncio.get_running_loop().call_soon(self._on_output, output)
+                        try:
+                            self._on_output(output)
+                        except Exception as error:
+                            asyncio.get_running_loop().call_exception_handler(
+                                {
+                                    "message": "Sandbox process output callback failed",
+                                    "exception": error,
+                                }
+                            )
         except Exception as error:
             self._connection_error = error
             self._fail(self._ready, error)

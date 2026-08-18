@@ -2,6 +2,7 @@ import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty } from "./client.js";
 import { SandboxProcesses } from "./sandbox-process.js";
+import { SandboxFiles } from "./sandbox-files.js";
 
 /** @internal */
 export type SandboxWire = components["schemas"]["Sandbox"];
@@ -174,6 +175,7 @@ export class Sandbox {
   expiresAt?: Date;
   exitReason?: string;
   readonly processes: SandboxProcesses;
+  readonly files: SandboxFiles;
 
   /** @internal */
   private readonly _client: ApiClient;
@@ -183,6 +185,7 @@ export class Sandbox {
     this._client = client;
     this._apply(data);
     this.processes = new SandboxProcesses(this.id, client);
+    this.files = new SandboxFiles(this.processes);
   }
 
   /** @internal Overwrite this sandbox's fields in place from a fresh wire snapshot. */

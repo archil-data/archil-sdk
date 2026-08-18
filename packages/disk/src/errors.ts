@@ -27,6 +27,23 @@ export class ArchilApiError extends ArchilError {
   }
 }
 
+export class SandboxFileTransferError extends ArchilError {
+  readonly operation: "upload" | "download";
+  readonly path: string;
+
+  constructor(operation: "upload" | "download", path: string, cause: Error) {
+    super(
+      `Sandbox file ${operation} failed for ${path}: ${cause.message}`,
+      500,
+      "SANDBOX_FILE_TRANSFER_FAILED",
+    );
+    this.name = "SandboxFileTransferError";
+    this.operation = operation;
+    this.path = path;
+    this.cause = cause;
+  }
+}
+
 /**
  * Error from the S3-compatible object API (getObject/putObject/deleteObject/
  * headObject/listObjects). The gateway returns an S3-style XML `<Error>` body;

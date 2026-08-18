@@ -42,6 +42,12 @@ export type {
   SandboxProcessStream,
   SandboxTerminalOptions,
 } from "./sandbox-process.js";
+export { SandboxFiles } from "./sandbox-files.js";
+export type {
+  SandboxFileSource,
+  SandboxFileUploadOptions,
+  SandboxFileWriter,
+} from "./sandbox-files.js";
 
 export { Disk, DiskMultipart, effectiveUploadPartSize } from "./disk.js";
 export type {
@@ -75,7 +81,12 @@ export type {
   DeleteObjectsResult,
 } from "./disk.js";
 
-export { ArchilError, ArchilApiError, ArchilS3Error } from "./errors.js";
+export {
+  ArchilError,
+  ArchilApiError,
+  ArchilS3Error,
+  SandboxFileTransferError,
+} from "./errors.js";
 
 export { VERSION, USER_AGENT } from "./version.js";
 
