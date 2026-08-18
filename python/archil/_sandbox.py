@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import re
-from typing import Callable, Literal, Optional, Union, overload
-
-from websockets.asyncio.client import ClientConnection, connect as _websocket_connect
-from websockets.exceptions import ConnectionClosed, WebSocketException
+from typing import Optional
 
 from ._http import _Transport
 from ._models import (
@@ -16,71 +11,13 @@ from ._models import (
     SandboxExecData,
     SandboxExecStatus,
     SandboxPlatform,
-    SandboxPtyResult,
     SandboxStatus,
 )
+from ._sandbox_process import _SandboxProcesses
 from .errors import SandboxStartError
 
 
 _POLL_INTERVAL_SECONDS = 0.5
-_PTY_EXIT_REASON = re.compile(r"^process exited with code (-?\d+)$")
-
-
-class _SandboxPty:
-    def __init__(
-        self,
-        socket: ClientConnection,
-        on_data: Optional[Callable[[str], None]],
-    ) -> None:
-        self._socket = socket
-        self._on_data = on_data
-        self._completion = asyncio.create_task(self._receive())
-
-    @classmethod
-    async def connect(
-        cls,
-        url: str,
-        command: str,
-        *,
-        cols: int = 80,
-        rows: int = 24,
-        on_data: Optional[Callable[[str], None]] = None,
-    ) -> "_SandboxPty":
-        try:
-            socket = await _websocket_connect(url)
-        except (OSError, TimeoutError, WebSocketException) as exc:
-            raise ConnectionError("Interactive exec connection failed") from exc
-        pty = cls(socket, on_data)
-        await pty.resize(cols=cols, rows=rows)
-        quoted_command = "'" + command.replace("'", "'\"'\"'") + "'"
-        await pty.send_input(f"eval {quoted_command}; exit $?\n")
-        return pty
-
-    async def _receive(self) -> SandboxPtyResult:
-        try:
-            async for data in self._socket:
-                if self._on_data is not None:
-                    self._on_data(data if isinstance(data, str) else data.decode())
-        except ConnectionClosed:
-            pass
-        reason = self._socket.close_reason or ""
-        match = _PTY_EXIT_REASON.fullmatch(reason)
-        return SandboxPtyResult(exit_code=int(match.group(1)) if match else None)
-
-    async def _send(self, message: dict[str, object]) -> None:
-        await self._socket.send(json.dumps(message))
-
-    async def send_input(self, data: str) -> None:
-        await self._send({"type": "input", "data": data})
-
-    async def resize(self, *, cols: int, rows: int) -> None:
-        await self._send({"type": "resize", "cols": cols, "rows": rows})
-
-    async def wait(self) -> SandboxPtyResult:
-        return await self._completion
-
-    async def close(self) -> None:
-        await self._socket.close()
 
 
 class _SandboxExec:
@@ -145,6 +82,7 @@ class _Sandbox:
     def __init__(self, transport: _Transport, data: SandboxData) -> None:
         self._transport = transport
         self._data = data
+        self._processes = _SandboxProcesses(transport, data.id)
 
     def __repr__(self) -> str:
         return f"Sandbox(id={self.id!r}, name={self.name!r}, status={self.status!r})"
@@ -213,6 +151,10 @@ class _Sandbox:
     def exit_reason(self) -> Optional[str]:
         return self._data.exit_reason
 
+    @property
+    def processes(self) -> "_SandboxProcesses":
+        return self._processes
+
     async def refresh(self) -> "_Sandbox":
         data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}")
         return _Sandbox(self._transport, SandboxData.from_json(data))
@@ -271,18 +213,6 @@ class _Sandbox:
     async def delete(self) -> None:
         await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}")
 
-    @overload
-    async def exec(
-        self,
-        command: str,
-        *,
-        pty: Literal[True],
-        cols: int = 80,
-        rows: int = 24,
-        on_data: Optional[Callable[[str], None]] = None,
-    ) -> "_SandboxPty": ...
-
-    @overload
     async def exec(
         self,
         command: str,
@@ -291,46 +221,7 @@ class _Sandbox:
         env: Optional[dict[str, str]] = None,
         timeout_seconds: Optional[int] = None,
         wait: bool = True,
-        pty: Literal[False] = False,
-    ) -> "_SandboxExec": ...
-
-    @overload
-    async def exec(
-        self,
-        command: str,
-        *,
-        command_tty: bool = False,
-        env: Optional[dict[str, str]] = None,
-        timeout_seconds: Optional[int] = None,
-        wait: bool = True,
-        pty: bool,
-        cols: int = 80,
-        rows: int = 24,
-        on_data: Optional[Callable[[str], None]] = None,
-    ) -> Union["_SandboxExec", "_SandboxPty"]: ...
-
-    async def exec(
-        self,
-        command: str,
-        *,
-        command_tty: bool = False,
-        env: Optional[dict[str, str]] = None,
-        timeout_seconds: Optional[int] = None,
-        wait: bool = True,
-        pty: bool = False,
-        cols: int = 80,
-        rows: int = 24,
-        on_data: Optional[Callable[[str], None]] = None,
-    ) -> Union["_SandboxExec", "_SandboxPty"]:
-        if pty:
-            connection = await self.create_connection()
-            return await _SandboxPty.connect(
-                connection.url,
-                command,
-                cols=cols,
-                rows=rows,
-                on_data=on_data,
-            )
+    ) -> "_SandboxExec":
         body: dict[str, object] = {"command": command}
         if command_tty:
             body["command_tty"] = True

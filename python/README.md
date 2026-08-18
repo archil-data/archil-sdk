@@ -61,10 +61,11 @@ sandbox = archil.create_sandbox(
     mem_size_mib=8192,
 )
 
-result = sandbox.exec("uname -a")
+execution = sandbox.processes.start("uname -a")
+result = execution.wait()
 print(result.stdout)
 
-# Return immediately while a long-running command continues remotely.
+# Existing API for durable control-plane exec records.
 running_exec = sandbox.exec("sleep 60", wait=False)
 
 sandbox.stop()
@@ -80,22 +81,44 @@ using_disk = archil.list_sandboxes(disk="dsk-abc123")
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB.
 
-For an interactive terminal, pass `pty=True`. The returned process accepts
-input and terminal resizes while `on_data` receives output:
+Runtime-owned processes return immediately and can be disconnected without
+stopping the command. Reconnect by process ID and output cursor to continue
+where the previous connection stopped:
 
 ```python
-process = sandbox.exec(
-    "bash",
-    pty=True,
-    cols=120,
-    rows=40,
-    on_data=lambda data: print(data, end=""),
+from archil import SandboxTerminal
+
+process = sandbox.processes.start(
+    "codex",
+    terminal=SandboxTerminal(cols=120, rows=40),
+    on_output=lambda output: print(output.data.decode(errors="replace"), end=""),
 )
-process.send_input("pwd\n")
+process.send_input("Review this repository\n")
 process.resize(cols=160, rows=50)
-result = process.wait()
-print(result.exit_code)
+process_id = process.id
+cursor = process.cursor
+process.disconnect()
+
+resumed = sandbox.processes.connect(process_id, offset=cursor)
+result = resumed.wait()
 ```
+
+Terminal processes merge output into stdout; non-terminal processes keep
+stdout and stderr separate. `on_output` receives raw bytes with their stream
+and absolute offset. `close_stdin()` delivers EOF to a non-terminal process.
+`send_input()` streams large writes as 1 MiB WebSocket frames. `disconnect()`
+only closes the client connection; `kill()` terminates the process. Set
+`collect_output=False` to stream through `on_output` without retaining decoded
+output in the process handle or result. Resize and kill use separate one-shot
+process controls, so they do not wait behind stdin. `kill()` returns after the
+control is acknowledged; `wait()` observes exit. `max_concurrent_execs`
+limits attached exec sessions; detached processes and one-shot controls do not
+count. Pausing a sandbox disconnects attachments but preserves its processes
+for reattachment after resume.
+Processes end when their sandbox is stopped or expires. After reconnecting with
+an offset, `wait().stdout` and `wait().stderr` contain the output received by
+that handle from that offset, not output from before it. The existing `exec`
+API remains available for durable control-plane exec records.
 
 `create`, `start`, `stop`, `pause`, `resume`, `fork`, and non-interactive
 `exec` wait for completion by default. The server handles the initial wait; if
@@ -316,7 +339,7 @@ week_link = d.share("reports/2026-01/summary.pdf", expires_in=604800)
 
 ### Async
 
-Every method on `Archil`, `Disks`, `Disk`, `Sandboxes`, `Sandbox`, `SandboxPty`, and `Tokens` has an `.aio` variant that returns a coroutine. (The module-level helpers — `configure`, `create_disk`, `create_sandbox`, etc. — are synchronous convenience wrappers; from async code, construct `Archil(...)` directly and use `.aio`.) Construct the client directly and `await`:
+Every method on `Archil`, `Disks`, `Disk`, `Sandboxes`, `Sandbox`, and `Tokens` has an `.aio` variant that returns a coroutine. (The module-level helpers — `configure`, `create_disk`, `create_sandbox`, etc. — are synchronous convenience wrappers; from async code, construct `Archil(...)` directly and use `.aio`.) Construct the client directly and `await`:
 
 ```python
 import asyncio
