@@ -1,17 +1,17 @@
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty } from "./client.js";
-import { SandboxProcesses } from "./sandbox-process.js";
+import {
+  SandboxProcesses,
+  type SandboxProcessResult,
+  type SandboxProcessStartOptions,
+} from "./sandbox-process.js";
 import { SandboxFiles } from "./sandbox-files.js";
 
 /** @internal */
 export type SandboxWire = components["schemas"]["Sandbox"];
 
-/** @internal */
-export type SandboxExecWire = components["schemas"]["SandboxExec"];
-
 export type SandboxStatus = components["schemas"]["SandboxState"];
-export type SandboxExecStatus = components["schemas"]["SandboxExecState"];
 
 export interface SandboxEndpoint {
   port: number;
@@ -27,7 +27,7 @@ export interface SandboxResponse {
   baseImage: string;
   platform?: "arm64" | "amd64";
   maxTtlSeconds: number;
-  /** Maximum concurrently attached exec sessions. Detached processes and one-shot controls do not count. */
+  /** Maximum concurrently attached process sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
   createdAt: Date;
@@ -36,20 +36,6 @@ export interface SandboxResponse {
   lastActiveAt: Date;
   expiresAt?: Date;
   exitReason?: string;
-}
-
-export interface SandboxExecResponse {
-  sandboxId: string;
-  id: string;
-  command: string;
-  status: SandboxExecStatus;
-  exitCode?: number;
-  stdout?: string;
-  stderr?: string;
-  exitReason?: string;
-  executeTimeMs?: number;
-  startedAt: Date;
-  finishedAt?: Date;
 }
 
 export interface SandboxWaitOptions {
@@ -65,96 +51,10 @@ export interface SandboxForkOptions extends SandboxWaitOptions {
   name?: string;
 }
 
-export interface SandboxConnectionInfo {
-  url: string;
-  expiresAt: Date;
-}
-
-export type SandboxExecOptions = {
-  commandTty?: boolean;
-  env?: Record<string, string>;
-  timeoutSeconds?: number;
-} & SandboxWaitOptions;
-
 const POLL_INTERVAL_MS = 500;
 
 function sleep(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-}
-
-export class SandboxExec {
-  sandboxId!: string;
-  id!: string;
-  command!: string;
-  status!: SandboxExecStatus;
-  exitCode?: number;
-  stdout?: string;
-  stderr?: string;
-  exitReason?: string;
-  executeTimeMs?: number;
-  startedAt!: Date;
-  finishedAt?: Date;
-
-  /** @internal */
-  private readonly _client: ApiClient;
-
-  /** @internal */
-  constructor(data: SandboxExecWire, client: ApiClient) {
-    this._client = client;
-    this._apply(data);
-  }
-
-  /** @internal Overwrite this exec's fields in place from a fresh wire snapshot. */
-  private _apply(data: SandboxExecWire): this {
-    this.sandboxId = data.sandbox_id;
-    this.id = data.exec_id;
-    this.command = data.command;
-    this.status = data.status;
-    this.exitCode = data.exit_code;
-    this.stdout = data.stdout;
-    this.stderr = data.stderr;
-    this.exitReason = data.exit_reason;
-    this.executeTimeMs = data.execute_time_ms;
-    this.startedAt = new Date(data.started_at);
-    this.finishedAt = data.finished_at ? new Date(data.finished_at) : undefined;
-    return this;
-  }
-
-  toJSON(): SandboxExecResponse {
-    return {
-      sandboxId: this.sandboxId,
-      id: this.id,
-      command: this.command,
-      status: this.status,
-      exitCode: this.exitCode,
-      stdout: this.stdout,
-      stderr: this.stderr,
-      exitReason: this.exitReason,
-      executeTimeMs: this.executeTimeMs,
-      startedAt: this.startedAt,
-      finishedAt: this.finishedAt,
-    };
-  }
-
-  /** Re-fetch this exec and update it in place, returning the same object. */
-  async refresh(): Promise<SandboxExec> {
-    const data = await unwrap(
-      this._client.GET("/api/sandboxes/{sid}/execs/{eid}", {
-        params: { path: { sid: this.sandboxId, eid: this.id } },
-      }),
-    );
-    return this._apply(data);
-  }
-
-  /** Cancel this exec and update it in place, returning the same object. */
-  async cancel(): Promise<SandboxExec> {
-    const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/execs/{eid}/cancel", {
-        params: { path: { sid: this.sandboxId, eid: this.id } },
-      }),
-    );
-    return this._apply(data);
-  }
 }
 
 export class Sandbox {
@@ -230,6 +130,15 @@ export class Sandbox {
     };
   }
 
+  /** Run a process and wait for it to exit. */
+  async exec(
+    command: string,
+    options: SandboxProcessStartOptions = {},
+  ): Promise<SandboxProcessResult> {
+    const process = await this.processes.start(command, options);
+    return process.wait();
+  }
+
   /** Re-fetch this sandbox. */
   async refresh() {
     const data = await unwrap(
@@ -296,16 +205,6 @@ export class Sandbox {
     return options.wait === false ? fork : waitForSandboxStart(fork);
   }
 
-  /** Create a short-lived signed WebSocket URL for a sandbox process connection. */
-  async createConnection(): Promise<SandboxConnectionInfo> {
-    const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/connections", {
-        params: { path: { sid: this.id } },
-      }),
-    );
-    return { url: data.url, expiresAt: new Date(data.expires_at) };
-  }
-
   /** Delete this sandbox and its backing disk. */
   async delete(): Promise<void> {
     await unwrapEmpty(
@@ -315,62 +214,6 @@ export class Sandbox {
     );
   }
 
-  async exec(
-    command: string,
-    options: SandboxExecOptions = {},
-  ): Promise<SandboxExec> {
-    const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/execs", {
-        params: {
-          path: { sid: this.id },
-          query: { wait: options.wait ?? true },
-        },
-        body: {
-          command,
-          command_tty: options.commandTty,
-          env: options.env,
-          timeout_seconds: options.timeoutSeconds,
-        },
-      }),
-    );
-    const exec = new SandboxExec(data, this._client);
-    if (options.wait === false) return exec;
-
-    while (exec.status === "running") {
-      await sleep();
-      await exec.refresh();
-    }
-    return exec;
-  }
-
-  async listExecs(): Promise<SandboxExec[]> {
-    const data = await unwrap(
-      this._client.GET("/api/sandboxes/{sid}/execs", {
-        params: { path: { sid: this.id } },
-      }),
-    );
-    return ((data as { execs?: SandboxExecWire[] } | null)?.execs ?? []).map(
-      (exec) => new SandboxExec(exec, this._client),
-    );
-  }
-
-  async getExec(execId: string): Promise<SandboxExec> {
-    const data = await unwrap(
-      this._client.GET("/api/sandboxes/{sid}/execs/{eid}", {
-        params: { path: { sid: this.id, eid: execId } },
-      }),
-    );
-    return new SandboxExec(data, this._client);
-  }
-
-  async cancelExec(execId: string): Promise<SandboxExec> {
-    const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/execs/{eid}/cancel", {
-        params: { path: { sid: this.id, eid: execId } },
-      }),
-    );
-    return new SandboxExec(data, this._client);
-  }
 }
 
 /** @internal Continue waiting if the server returned before startup completed. */

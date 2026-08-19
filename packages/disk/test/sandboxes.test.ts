@@ -3,7 +3,7 @@ import { afterEach, test, vi } from "vitest";
 import type { ApiClient } from "../src/client.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess } from "../src/sandbox-process.js";
-import { Sandbox, SandboxExec } from "../src/sandbox.js";
+import { Sandbox } from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
 
 const now = "2026-07-22T12:00:00Z";
@@ -23,19 +23,6 @@ function sandboxWire(status: string = "pending", id: string = "0198-sandbox") {
     endpoints: [{ port: 8080, hostname: "8080-sandbox.example.com" }],
     created_at: now,
     last_active_at: now,
-  };
-}
-
-function execWire(status: string = "running") {
-  return {
-    sandbox_id: "0198-sandbox",
-    exec_id: "0198-exec",
-    command: "echo hello",
-    status,
-    started_at: now,
-    ...(status === "running"
-      ? {}
-      : { exit_code: 0, stdout: "hello\n", stderr: "", finished_at: now }),
   };
 }
 
@@ -348,16 +335,9 @@ test("fork creates a named branch and waits for it to start", async () => {
   });
 });
 
-test("sandbox connections return signed WebSocket URLs and delete accepts 204", async () => {
+test("sandbox delete accepts 204", async () => {
   const calls: Array<{ method: string; path: string; options: any }> = [];
   const client = {
-    POST: async (path: string, options: unknown) => {
-      calls.push({ method: "POST", path, options });
-      return ok({
-        url: "wss://sandbox.example/connect?token=signed",
-        expires_at: now,
-      });
-    },
     DELETE: async (path: string, options: unknown) => {
       calls.push({ method: "DELETE", path, options });
       return { response: new Response(null, { status: 204 }) };
@@ -365,18 +345,9 @@ test("sandbox connections return signed WebSocket URLs and delete accepts 204", 
   } as unknown as ApiClient;
   const sandbox = new Sandbox(sandboxWire("stopped") as any, client);
 
-  assert.deepEqual(await sandbox.createConnection(), {
-    url: "wss://sandbox.example/connect?token=signed",
-    expiresAt: nowDate,
-  });
   await sandbox.delete();
 
   assert.deepEqual(calls, [
-    {
-      method: "POST",
-      path: "/api/sandboxes/{sid}/connections",
-      options: { params: { path: { sid: "0198-sandbox" } } },
-    },
     {
       method: "DELETE",
       path: "/api/sandboxes/{sid}",
@@ -385,37 +356,58 @@ test("sandbox connections return signed WebSocket URLs and delete accepts 204", 
   ]);
 });
 
-test("exec translates options", async () => {
-  let captured: any;
+test("exec starts a process and waits for its result", async () => {
+  const calls: Array<{ path: string; options: any }> = [];
   const client = {
-    POST: async (path: string, options: unknown) => {
-      captured = { path, options };
-      return ok(execWire("completed"));
+    POST: async (path: string, options: any) => {
+      calls.push({ path, options });
+      return ok({
+        url: "wss://sandbox.example/connect?token=signed",
+        expires_at: now,
+      });
     },
   } as unknown as ApiClient;
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const result = await sandbox.exec("echo hello", {
-    commandTty: true,
+  const executing = sandbox.exec("printf hello", {
     env: { HELLO: "world" },
     timeoutSeconds: 10,
   });
-  assert.ok(result instanceof SandboxExec);
-  assert.equal(result.status, "completed");
-  assert.deepEqual(captured, {
-    path: "/api/sandboxes/{sid}/execs",
-    options: {
-      params: {
-        path: { sid: "0198-sandbox" },
-        query: { wait: true },
-      },
-      body: {
-        command: "echo hello",
-        command_tty: true,
-        env: { HELLO: "world" },
-        timeout_seconds: 10,
-      },
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
+  const socket = TestWebSocket.instances[0];
+  socket.emit("message", {
+    data: JSON.stringify({ type: "started", process_id: "0198-process" }),
+  });
+  socket.emit("message", { data: outputFrame(1, 0, "hello") });
+  socket.emit("message", {
+    data: JSON.stringify({
+      type: "exit",
+      status: "completed",
+      exit_code: 0,
+      cursor: 5,
+    }),
+  });
+
+  assert.deepEqual(await executing, {
+    status: "completed",
+    exitCode: 0,
+    exitReason: undefined,
+    stdout: "hello",
+    stderr: "",
+  });
+  assert.deepEqual(calls, [
+    {
+      path: "/api/sandboxes/{sid}/connections",
+      options: { params: { path: { sid: "0198-sandbox" } } },
     },
+  ]);
+  assert.deepEqual(JSON.parse(socket.sent[0] as string), {
+    type: "start",
+    command: "printf hello",
+    env: { HELLO: "world" },
+    timeout_seconds: 10,
   });
 });
 
@@ -892,118 +884,29 @@ test("process start surfaces runtime rejection", async () => {
   await assert.rejects(starting, /invalid_request: command is required/);
 });
 
-test("sandbox exec objects refresh and cancel themselves", async () => {
-  const calls: Array<{ method: string; path: string; options: any }> = [];
-  const client = {
-    GET: async (path: string, options: unknown) => {
-      calls.push({ method: "GET", path, options });
-      return ok(execWire("completed"));
-    },
-    POST: async (path: string, options: unknown) => {
-      calls.push({ method: "POST", path, options });
-      return ok(execWire("cancelled"));
-    },
-  } as unknown as ApiClient;
-  const execution = new SandboxExec(execWire() as any, client);
-
-  const refreshed = await execution.refresh();
-  assert.equal(refreshed, execution); // mutates and returns the same object
-  assert.equal(execution.status, "completed");
-
-  const cancelled = await execution.cancel();
-  assert.equal(cancelled, execution); // mutates and returns the same object
-  assert.equal(execution.status, "cancelled");
-  assert.deepEqual(calls, [
-    {
-      method: "GET",
-      path: "/api/sandboxes/{sid}/execs/{eid}",
-      options: { params: { path: { sid: "0198-sandbox", eid: "0198-exec" } } },
-    },
-    {
-      method: "POST",
-      path: "/api/sandboxes/{sid}/execs/{eid}/cancel",
-      options: { params: { path: { sid: "0198-sandbox", eid: "0198-exec" } } },
-    },
-  ]);
-  assert.deepEqual(cancelled.toJSON(), {
-    sandboxId: "0198-sandbox",
-    id: "0198-exec",
-    command: "echo hello",
-    status: "cancelled",
-    exitCode: 0,
-    stdout: "hello\n",
-    stderr: "",
-    exitReason: undefined,
-    executeTimeMs: undefined,
-    startedAt: nowDate,
-    finishedAt: nowDate,
-  });
-});
-
-test("exec can return immediately without polling", async () => {
-  let postOptions: any;
-  const client = {
-    POST: async (_path: string, options: unknown) => {
-      postOptions = options;
-      return ok(execWire());
-    },
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("running") as any, client);
-
-  const result = await sandbox.exec("echo hello", { wait: false });
-  assert.equal(result.status, "running");
-  assert.deepEqual(postOptions.params.query, { wait: false });
-});
-
-test("exec polls when the server wait returns a running exec", async () => {
-  vi.useFakeTimers();
-  let gets = 0;
-  const client = {
-    POST: async () => ok(execWire("running")),
-    GET: async () => {
-      gets++;
-      return ok(execWire("completed"));
-    },
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("running") as any, client);
-
-  const executing = sandbox.exec("echo hello");
-  await vi.advanceTimersByTimeAsync(500);
-  const result = await executing;
-
-  assert.equal(result.status, "completed");
-  assert.equal(gets, 1);
-});
-
 test("sandbox instance methods use the owning sandbox id", async () => {
   const calls: Array<{ method: string; path: string; options: any }> = [];
   const client = {
     GET: async (path: string, options: unknown) => {
       calls.push({ method: "GET", path, options });
-      if (path.endsWith("/execs")) return ok({ execs: null });
-      if (path.includes("{eid}")) return ok(execWire("completed"));
       return ok(sandboxWire("running"));
     },
     POST: async (path: string, options: unknown) => {
       calls.push({ method: "POST", path, options });
-      if (path.endsWith("/stop")) return ok(sandboxWire("stopped"));
-      return ok(execWire("cancelled"));
+      return ok(sandboxWire("stopped"));
     },
   } as unknown as ApiClient;
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   assert.equal((await sandbox.refresh()).status, "running");
   assert.equal((await sandbox.stop()).status, "stopped");
-  assert.deepEqual(await sandbox.listExecs(), []);
-  assert.equal((await sandbox.getExec("0198-exec")).status, "completed");
-  assert.equal((await sandbox.cancelExec("0198-exec")).status, "cancelled");
 
   for (const call of calls) {
     assert.equal(call.options.params.path.sid, "0198-sandbox");
   }
   assert.deepEqual(calls.at(-1), {
     method: "POST",
-    path: "/api/sandboxes/{sid}/execs/{eid}/cancel",
-    options: { params: { path: { sid: "0198-sandbox", eid: "0198-exec" } } },
+    path: "/api/sandboxes/{sid}/stop",
+    options: { params: { path: { sid: "0198-sandbox" } } },
   });
 });

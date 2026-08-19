@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Optional, Union
 
 from ._http import _Transport
 from ._models import (
-    SandboxConnection,
     SandboxData,
     SandboxEndpoint,
-    SandboxExecData,
-    SandboxExecStatus,
     SandboxPlatform,
+    SandboxProcessOutputHandler,
+    SandboxProcessResult,
     SandboxStatus,
+    SandboxTerminal,
 )
 from ._sandbox_process import _SandboxProcesses
 from .errors import SandboxStartError
@@ -19,64 +19,6 @@ from ._sandbox_files import _SandboxFiles
 
 
 _POLL_INTERVAL_SECONDS = 0.5
-
-
-class _SandboxExec:
-    def __init__(self, transport: _Transport, data: SandboxExecData) -> None:
-        self._transport = transport
-        self._data = data
-
-    @property
-    def sandbox_id(self) -> str:
-        return self._data.sandbox_id
-
-    @property
-    def id(self) -> str:
-        return self._data.id
-
-    @property
-    def command(self) -> str:
-        return self._data.command
-
-    @property
-    def status(self) -> SandboxExecStatus:
-        return self._data.status
-
-    @property
-    def exit_code(self) -> Optional[int]:
-        return self._data.exit_code
-
-    @property
-    def stdout(self) -> Optional[str]:
-        return self._data.stdout
-
-    @property
-    def stderr(self) -> Optional[str]:
-        return self._data.stderr
-
-    @property
-    def exit_reason(self) -> Optional[str]:
-        return self._data.exit_reason
-
-    @property
-    def execute_time_ms(self) -> Optional[int]:
-        return self._data.execute_time_ms
-
-    @property
-    def started_at(self):
-        return self._data.started_at
-
-    @property
-    def finished_at(self):
-        return self._data.finished_at
-
-    async def refresh(self) -> "_SandboxExec":
-        data = await self._transport.request_json("GET", f"/api/sandboxes/{self.sandbox_id}/execs/{self.id}")
-        return _SandboxExec(self._transport, SandboxExecData.from_json(data))
-
-    async def cancel(self) -> "_SandboxExec":
-        data = await self._transport.request_json("POST", f"/api/sandboxes/{self.sandbox_id}/execs/{self.id}/cancel")
-        return _SandboxExec(self._transport, SandboxExecData.from_json(data))
 
 
 class _Sandbox:
@@ -161,6 +103,26 @@ class _Sandbox:
     def files(self) -> "_SandboxFiles":
         return self._files
 
+    async def exec(
+        self,
+        command: str,
+        *,
+        terminal: Union[bool, SandboxTerminal] = False,
+        env: Optional[dict[str, str]] = None,
+        timeout_seconds: Optional[int] = None,
+        on_output: Optional[SandboxProcessOutputHandler] = None,
+        collect_output: bool = True,
+    ) -> SandboxProcessResult:
+        process = await self._processes.start(
+            command,
+            terminal=terminal,
+            env=env,
+            timeout_seconds=timeout_seconds,
+            on_output=on_output,
+            collect_output=collect_output,
+        )
+        return await process.wait()
+
     async def refresh(self) -> "_Sandbox":
         data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}")
         return _Sandbox(self._transport, SandboxData.from_json(data))
@@ -212,53 +174,5 @@ class _Sandbox:
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
 
-    async def create_connection(self) -> SandboxConnection:
-        data = await self._transport.request_json("POST", f"/api/sandboxes/{self.id}/connections")
-        return SandboxConnection.from_json(data)
-
     async def delete(self) -> None:
         await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}")
-
-    async def exec(
-        self,
-        command: str,
-        *,
-        command_tty: bool = False,
-        env: Optional[dict[str, str]] = None,
-        timeout_seconds: Optional[int] = None,
-        wait: bool = True,
-    ) -> "_SandboxExec":
-        body: dict[str, object] = {"command": command}
-        if command_tty:
-            body["command_tty"] = True
-        if env is not None:
-            body["env"] = env
-        if timeout_seconds is not None:
-            body["timeout_seconds"] = timeout_seconds
-        data = await self._transport.request_json(
-            "POST",
-            f"/api/sandboxes/{self.id}/execs",
-            params={"wait": wait},
-            json=body,
-        )
-        result = _SandboxExec(self._transport, SandboxExecData.from_json(data))
-        if not wait:
-            return result
-        while result.status == "running":
-            await asyncio.sleep(_POLL_INTERVAL_SECONDS)
-            result = await result.refresh()
-        return result
-
-    async def list_execs(self) -> list["_SandboxExec"]:
-        data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/execs")
-        return [
-            _SandboxExec(self._transport, SandboxExecData.from_json(item)) for item in (data or {}).get("execs") or []
-        ]
-
-    async def get_exec(self, exec_id: str) -> "_SandboxExec":
-        data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/execs/{exec_id}")
-        return _SandboxExec(self._transport, SandboxExecData.from_json(data))
-
-    async def cancel_exec(self, exec_id: str) -> "_SandboxExec":
-        data = await self._transport.request_json("POST", f"/api/sandboxes/{self.id}/execs/{exec_id}/cancel")
-        return _SandboxExec(self._transport, SandboxExecData.from_json(data))

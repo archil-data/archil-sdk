@@ -19,13 +19,9 @@ export type { ListTokensOptions } from "./tokens.js";
 export { Sandboxes } from "./sandboxes.js";
 export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
 
-export { Sandbox, SandboxExec } from "./sandbox.js";
+export { Sandbox } from "./sandbox.js";
 export type {
   SandboxEndpoint,
-  SandboxConnectionInfo,
-  SandboxExecOptions,
-  SandboxExecResponse,
-  SandboxExecStatus,
   SandboxResponse,
   SandboxStatus,
   SandboxForkOptions,
