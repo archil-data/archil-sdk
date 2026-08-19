@@ -28,6 +28,7 @@ import type { Disk } from "../src/disk.js";
 const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
 
 const program = new Command();
+let activeCliContext: { profile?: string; region: string } | undefined;
 
 program
   .name("disk")
@@ -42,6 +43,7 @@ program
     const opts = program.opts<{ apiKey?: string; region?: string; baseUrl?: string; profile?: string }>();
     try {
       const resolved = await resolveCliCredentials(opts, await loadProfiles());
+      activeCliContext = { profile: resolved.profile, region: resolved.region };
       configure({ apiKey: resolved.apiKey, region: resolved.region, baseUrl: resolved.baseUrl });
     } catch (err) {
       fail(err);
@@ -242,6 +244,26 @@ profilesCommand.command("delete <name>").description("Delete a profile and its s
     fail(err);
   }
 });
+
+program
+  .command("sandboxes")
+  .description("Open the interactive sandbox manager")
+  .action(async () => {
+    try {
+      if (!activeCliContext) throw new Error("Sandbox CLI context was not initialized");
+      const [{ runSandboxTui }, { listSandboxes }] = await Promise.all([
+        import("../src/tui/run.js"),
+        import("../src/index.js"),
+      ]);
+      await runSandboxTui({
+        service: { list: () => listSandboxes() },
+        profile: activeCliContext.profile,
+        region: activeCliContext.region,
+      });
+    } catch (err) {
+      fail(err);
+    }
+  });
 
 program
   .command("list")
