@@ -48,7 +48,12 @@ function fixtureSandbox(data: Partial<Sandbox> & Pick<Sandbox, "id" | "name" | "
         stdout: "", stderr: "", cursor: 0, connected: true,
         sendInput: async (input: string | Uint8Array) => {
           const text = typeof input === "string" ? input : new TextDecoder().decode(input);
-          options.onOutput?.({ stream: "stdout", offset: 0, data: new TextEncoder().encode(text) });
+          if (text.includes("overflow")) {
+            const lines = Array.from({ length: 80 }, (_, index) => `OVERFLOW-${String(index + 1).padStart(3, "0")}\r\n`).join("");
+            options.onOutput?.({ stream: "stdout", offset: 0, data: new TextEncoder().encode(lines) });
+          } else {
+            options.onOutput?.({ stream: "stdout", offset: 0, data: new TextEncoder().encode(text) });
+          }
           if (text.includes("exit")) finish({ status: "completed", exitCode: 0, stdout: "", stderr: "" });
         },
         resize: async () => {},

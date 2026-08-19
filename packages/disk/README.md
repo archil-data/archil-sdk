@@ -37,7 +37,53 @@ npx disk api-keys create ci-bot
 npx disk api-keys delete key-abc123
 ```
 
-`list` and `get` pretty-print tables by default; pass `-o json` to pipe into `jq`. Credentials come from `ARCHIL_API_KEY` / `ARCHIL_REGION`, or `--api-key` / `--region` / `--base-url` flags.
+`list` and `get` pretty-print tables by default; pass `-o json` to pipe into `jq`.
+
+### Profiles and credential storage
+
+Log in once to store a named CLI profile, then use it in later processes:
+
+```bash
+# The key is read without echo from a TTY, or from stdin in headless setup.
+disk auth login --profile test-yellow --region aws-us-east-1
+
+disk profile list
+disk profile use test-yellow
+disk sandboxes
+
+# Select a profile for one command without changing the default.
+disk sandboxes --profile test-yellow
+```
+
+Profile metadata is stored in the platform's per-user configuration directory. Each profile's API key is stored separately under `credentials/<profile>.key`, never in `config.json`. Credential files are written atomically with mode `0600` on Unix, and the CLI refuses to load a group/world-readable credential file.
+
+Credential precedence is: explicit flags, `ARCHIL_*` environment variables, then the selected profile. Supported variables are `ARCHIL_API_KEY`, `ARCHIL_REGION`, `ARCHIL_BASE_URL`, and `ARCHIL_PROFILE`. CI can remain entirely profile-free:
+
+```bash
+ARCHIL_API_KEY="$SECRET" ARCHIL_REGION=aws-us-east-1 disk list
+```
+
+Prefer `disk auth login`, environment variables, or stdin over `--api-key`; command arguments can leak through shell history and process listings. Profiles affect only the CLI. `new Archil()` and `configure()` never read CLI files.
+
+### Interactive sandbox manager
+
+`disk sandboxes` opens a full-screen manager. It requires interactive stdin and stdout; use the SDK for headless sandbox automation.
+
+| Key | Action |
+| --- | --- |
+| `↑`/`↓`, `j`/`k`, `g`/`G` | Move selection; jump to first/last |
+| `/`, `r`, `o`, `?` | Live filter, refresh, sort, help |
+| `c` | Create a sandbox, including ports and environment |
+| `S`, `P`, `R`, `X`, `f`, `Ctrl+D` | Start, pause, resume, stop, fork, delete when valid for the current state |
+| `e`, `l` | Run a durable command; inspect/cancel exec history and output |
+| `t` | Open `/bin/sh -l` in a PTY on a running sandbox |
+| `q`, `Ctrl+C` | Leave the TUI |
+
+Stop, delete, and cold-starting a paused sandbox require confirmation. While a shell owns its dedicated terminal screen, ordinary `Ctrl+C` and `Ctrl+D` are sent to the remote shell. `Ctrl+]` kills the TUI-created shell and returns to the sandbox list. Durable output display is sanitized and capped at 256 KiB so remote control sequences or very large results cannot damage or freeze the terminal; the SDK result itself is not truncated.
+
+The public API does not expose fork ancestry, backing-disk identity, or a process-list endpoint, and it has no post-create resize/update operation. The TUI therefore does not show placeholders for those capabilities. It can reconnect only to a runtime process whose ID is already known.
+
+For an opt-in real-account smoke test, create a disposable profile and resources with a unique prefix, exercise lifecycle/exec/shell actions at 80x24 and a wide size, test both normal shell exit and `Ctrl+]`, then delete every created sandbox. Never run destructive smoke testing in an account without an explicit disposable-resource rule.
 
 ## Library
 
@@ -87,6 +133,7 @@ const sandbox = await client.sandboxes.create({
   name: "prepared-environment",
   vcpuCount: 4,
   memSizeMiB: 8192,
+  portMappings: [{ containerPort: 8080, protocol: "tcp" }],
 });
 
 const execution = await sandbox.processes.start("uname -a");

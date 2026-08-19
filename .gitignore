@@ -1,4 +1,5 @@
 dist/
+.tui-fixture-dist/
 node_modules/
 .ruff_cache/
 python/uv.lock

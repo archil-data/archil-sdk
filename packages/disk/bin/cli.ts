@@ -483,4 +483,11 @@ function rewriteSugar(argv: string[]): string[] {
   return argv;
 }
 
+program.addHelpText("after", `
+Examples:
+  disk auth login --profile test-yellow --region aws-us-east-1
+  disk sandboxes --profile test-yellow
+  ARCHIL_API_KEY=... ARCHIL_REGION=aws-us-east-1 disk list
+`);
+
 program.parseAsync(rewriteSugar(process.argv));

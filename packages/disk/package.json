@@ -42,7 +42,9 @@
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "tui:fixture": "tsx bin/tui-fixture.ts"
+    "tui:fixture": "tsx bin/tui-fixture.ts",
+    "build:tui-fixture": "tsdown --no-config bin/tui-fixture.ts --out-dir .tui-fixture-dist --format esm --target node22.19.0",
+    "tui:fixture:built": "node .tui-fixture-dist/tui-fixture.mjs"
   },
   "dependencies": {
     "@archildata/api-types": "^0.0.18",
@@ -54,6 +56,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.0.1",
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0",
     "tsdown": "catalog:",
     "tsx": "^4.23.0",
     "typescript": "catalog:",

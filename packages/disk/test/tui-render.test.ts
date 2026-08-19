@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import type { Sandbox } from "../src/sandbox.js";
 import type { SandboxModelSnapshot } from "../src/tui/model.js";
 import { SandboxDetails } from "../src/tui/components/sandbox-details.js";
@@ -36,6 +36,14 @@ test("sandbox table and details never exceed narrow, normal, or wide widths", ()
       for (const line of lines) assert.ok(visibleWidth(line) <= width, `${visibleWidth(line)} > ${width}: ${line}`);
     }
   }
+});
+
+test("wide table shares flexible space evenly between name and image", () => {
+  const header = stripTerminalSequences(new SandboxTable(() => snapshot).render(160)[0]!);
+  const nameSpan = header.indexOf("STATUS");
+  const imageStart = header.indexOf("IMAGE");
+  const imageSpan = header.indexOf("ACTIVE") - imageStart;
+  assert.ok(Math.abs(nameSpan - imageSpan) <= 1, `${nameSpan} vs ${imageSpan}`);
 });
 
 test("API-provided cells cannot inject terminal controls", () => {

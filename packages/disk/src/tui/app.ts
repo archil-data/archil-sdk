@@ -41,7 +41,7 @@ class BottomBar implements Component {
   render(width: number): string[] {
     const input = this.getFilterInput();
     if (!input) return [truncateToWidth(dim(this.getHints()), width, "…")];
-    const prefix = bold(cyan(" FILTER › "));
+    const prefix = bold(cyan(" FILTER "));
     const suffix = dim("  Enter/Esc done");
     const editorWidth = Math.max(1, width - visibleWidth(prefix) - visibleWidth(suffix));
     const editor = input.render(editorWidth)[0] ?? "";
@@ -142,9 +142,9 @@ class OutputContent implements Component {
   invalidate(): void {}
 }
 
-class OutputDialog extends ScrollView {
-  constructor(stdout: string, stderr: string, private readonly close: () => void) {
-    super(new OutputContent(stdout, stderr), { scrollbar: "always", overscroll: "contain" });
+class ClosableScrollView extends ScrollView {
+  constructor(component: Component, private readonly close: () => void) {
+    super(component, { scrollbar: "always", overscroll: "contain" });
   }
   handleInput(data: string): void {
     if (matchesKey(data, Key.escape) || matchesKey(data, "q")) this.close();
@@ -152,6 +152,12 @@ class OutputDialog extends ScrollView {
     else if (matchesKey(data, Key.down) || matchesKey(data, "j")) this.scrollBy(1);
     else if (matchesKey(data, Key.pageUp)) this.scrollBy(-10);
     else if (matchesKey(data, Key.pageDown)) this.scrollBy(10);
+  }
+}
+
+class OutputDialog extends ClosableScrollView {
+  constructor(stdout: string, stderr: string, close: () => void) {
+    super(new OutputContent(stdout, stderr), close);
   }
 }
 
