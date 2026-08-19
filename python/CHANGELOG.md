@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Remove the deprecated sandbox exec and raw connection APIs. Use `sandbox.processes` instead.
+
 ## 0.11.0
 
 - Add runtime-owned sandbox processes with terminal I/O, disconnect, and reconnect support.

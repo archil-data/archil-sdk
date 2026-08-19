@@ -9,7 +9,6 @@ import pytest
 import archil as archil_module
 from archil import (
     Sandbox,
-    SandboxExec,
     SandboxProcess,
     SandboxProcessOutput,
     SandboxStartError,
@@ -112,20 +111,6 @@ def sandbox_json(status: str = "running", **overrides) -> dict:
     }
 
 
-def exec_json(status: str = "completed", **overrides) -> dict:
-    return {
-        "sandbox_id": "sbx-1",
-        "exec_id": "exec-1",
-        "command": "echo hello",
-        "status": status,
-        "started_at": NOW,
-        "exit_code": 0 if status != "running" else None,
-        "stdout": "hello\n" if status != "running" else None,
-        "stderr": "" if status != "running" else None,
-        **overrides,
-    }
-
-
 def test_create_and_list_sandboxes(archil, router):
     def handler(request):
         if request.method == "POST":
@@ -164,41 +149,6 @@ def test_create_and_list_sandboxes(archil, router):
     assert router.requests[1].query == {"filesystem": "dsk-1"}
 
 
-@pytest.mark.asyncio
-async def test_create_and_exec_poll_server_wait_expiry(archil, router, monkeypatch):
-    import archil._sandbox as sandbox_module
-
-    monkeypatch.setattr(sandbox_module, "_POLL_INTERVAL_SECONDS", 0)
-    gets = 0
-
-    def handler(request):
-        nonlocal gets
-        if request.method == "POST" and request.url.path == "/api/sandboxes":
-            return ok_envelope(sandbox_json("pending", running_at=None))
-        if request.method == "GET" and request.url.path == "/api/sandboxes/sbx-1":
-            return ok_envelope(sandbox_json())
-        if request.method == "POST" and request.url.path.endswith("/execs"):
-            return ok_envelope(exec_json("running"))
-        if request.method == "GET" and request.url.path.endswith("/execs/exec-1"):
-            gets += 1
-            return ok_envelope(exec_json())
-        raise AssertionError(f"Unexpected request: {request.method} {request.url.path}")
-
-    router.set(handler)
-    sandbox = await archil.sandboxes.create.aio(name="harbor-trial")
-    result = await sandbox.exec.aio("echo hello", env={"A": "b"}, timeout_seconds=30)
-
-    assert isinstance(result, SandboxExec)
-    assert result.status == "completed"
-    assert result.stdout == "hello\n"
-    assert gets == 1
-    assert router.requests[2].json == {
-        "command": "echo hello",
-        "env": {"A": "b"},
-        "timeout_seconds": 30,
-    }
-
-
 def test_create_surfaces_terminal_start_failure(archil, router, monkeypatch):
     import archil._sandbox as sandbox_module
 
@@ -222,7 +172,7 @@ def test_create_surfaces_terminal_start_failure(archil, router, monkeypatch):
     assert "root filesystem failed to mount" in str(caught.value)
 
 
-def test_lifecycle_fork_connection_and_delete(archil, router, monkeypatch):
+def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
     import archil._sandbox as sandbox_module
 
     monkeypatch.setattr(sandbox_module, "_POLL_INTERVAL_SECONDS", 0)
@@ -235,8 +185,6 @@ def test_lifecycle_fork_connection_and_delete(archil, router, monkeypatch):
                     name="forked",
                 )
             )
-        if request.url.path.endswith("/connections"):
-            return ok_envelope({"url": "wss://sandbox.example/ws", "expires_at": NOW})
         if request.url.path.endswith("/stop"):
             return ok_envelope(sandbox_json("stopped", finished_at=NOW))
         if request.method == "DELETE":
@@ -246,12 +194,10 @@ def test_lifecycle_fork_connection_and_delete(archil, router, monkeypatch):
     router.set(handler)
     sandbox = archil.sandboxes.get("sbx-1")
     fork = sandbox.fork(name="forked")
-    connection = fork.create_connection()
     stopped = sandbox.stop()
     stopped.delete()
 
     assert fork.id == "sbx-fork"
-    assert connection.url == "wss://sandbox.example/ws"
     assert stopped.status == "stopped"
     assert router.requests[1].json == {"name": "forked"}
     assert router.requests[-1].method == "DELETE"
@@ -260,11 +206,10 @@ def test_lifecycle_fork_connection_and_delete(archil, router, monkeypatch):
     assert stop_request.query == {}
 
 
-def test_empty_sandbox_and_exec_lists(archil, router):
-    responses = iter([ok_envelope(None), ok_envelope(sandbox_json()), ok_envelope(None)])
+def test_empty_sandbox_list(archil, router):
+    responses = iter([ok_envelope(None)])
     router.set(lambda request: next(responses))
     assert archil.sandboxes.list() == []
-    assert archil.sandboxes.get("sbx-1").list_execs() == []
 
 
 def test_lifecycle_waiting_matches_wire_contract(archil, router, monkeypatch):
@@ -309,31 +254,6 @@ def test_lifecycle_waiting_matches_wire_contract(archil, router, monkeypatch):
         {},
         {"wait": "true"},
     ]
-
-
-def test_exec_management_methods(archil, router):
-    def handler(request):
-        if "/execs" not in request.url.path:
-            return ok_envelope(sandbox_json())
-        if request.url.path.endswith("/execs"):
-            return ok_envelope({"execs": [exec_json()]})
-        if request.method == "POST":
-            return ok_envelope(exec_json("cancelled"))
-        return ok_envelope(exec_json())
-
-    router.set(handler)
-    sandbox = archil.sandboxes.get("sbx-1")
-    listed = sandbox.list_execs()
-    fetched = sandbox.get_exec("exec-1")
-    cancelled = sandbox.cancel_exec("exec-1")
-    refreshed = fetched.refresh()
-    cancelled_again = refreshed.cancel()
-
-    assert [execution.id for execution in listed] == ["exec-1"]
-    assert fetched.status == "completed"
-    assert cancelled.status == "cancelled"
-    assert refreshed.status == "completed"
-    assert cancelled_again.status == "cancelled"
 
 
 def test_module_level_sandbox_helpers(monkeypatch):

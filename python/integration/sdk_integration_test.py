@@ -87,7 +87,7 @@ def run_sandbox_suite(archil) -> None:
             )
 
         with step("Execute command in sandbox"):
-            result = sandbox.exec("printf sandbox-ready")
+            result = sandbox.processes.start("printf sandbox-ready").wait()
             assert_that(result.exit_code == 0, f"sandbox exec failed: {result.stderr}")
             assert_that(
                 result.stdout == "sandbox-ready",
@@ -104,7 +104,7 @@ def run_sandbox_suite(archil) -> None:
                 sandbox.files.upload_file(source, "/tmp/sdk-source.bin")
                 sandbox.files.download_file("/tmp/sdk-source.bin", downloaded)
                 assert_that(downloaded.read_bytes() == payload, "sandbox file transfer mismatch")
-                mode = sandbox.exec("stat -c %a /tmp/sdk-source.bin")
+                mode = sandbox.processes.start("stat -c %a /tmp/sdk-source.bin").wait()
                 assert_that(mode.stdout == "640\n", f"unexpected uploaded mode: {mode.stdout!r}")
 
         with step("Execute runtime process with streamed stdin"):
@@ -152,7 +152,7 @@ def run_sandbox_suite(archil) -> None:
             assert_that(sandbox.status == "running", f"unexpected resumed status: {sandbox.status}")
 
         with step("Prepare sandbox state for fork"):
-            result = sandbox.exec("printf fork-state > /tmp/sdk-fork-state")
+            result = sandbox.processes.start("printf fork-state > /tmp/sdk-fork-state").wait()
             assert_that(result.exit_code == 0, f"failed to prepare fork state: {result.stderr}")
 
         with step("Stop and fork sandbox"):
@@ -163,7 +163,7 @@ def run_sandbox_suite(archil) -> None:
             assert_that(fork.status == "running", f"unexpected fork status: {fork.status}")
 
         with step("Verify forked sandbox state"):
-            result = fork.exec("cat /tmp/sdk-fork-state")
+            result = fork.processes.start("cat /tmp/sdk-fork-state").wait()
             assert_that(result.exit_code == 0, f"fork exec failed: {result.stderr}")
             assert_that(result.stdout == "fork-state", f"unexpected fork stdout: {result.stdout!r}")
 

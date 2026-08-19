@@ -65,12 +65,8 @@ execution = sandbox.processes.start("uname -a")
 result = execution.wait()
 print(result.stdout)
 
-# Existing API for durable control-plane exec records.
-running_exec = sandbox.exec("sleep 60", wait=False)
-
 sandbox.stop()
 fork = sandbox.fork(name="agent-task")
-connection = fork.create_connection()
 fork.stop()
 fork.delete()
 
@@ -112,7 +108,7 @@ only closes the client connection; `kill()` terminates the process. Set
 output in the process handle or result. Resize and kill use separate one-shot
 process controls, so they do not wait behind stdin. `kill()` returns after the
 control is acknowledged; `wait()` observes exit. `max_concurrent_execs`
-limits attached exec sessions; detached processes and one-shot controls do not
+limits attached process sessions; detached processes and one-shot controls do not
 count. Pausing a sandbox disconnects attachments but preserves its processes
 for reattachment after resume.
 Processes end when their sandbox is stopped or expires. After reconnecting with

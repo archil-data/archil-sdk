@@ -112,12 +112,8 @@ await resumed.kill();
 await sandbox.start();
 await sandbox.resume();
 
-// Existing exec API for durable control-plane exec records.
-const runningExec = await sandbox.exec("sleep 60", { wait: false });
-
 await sandbox.stop();
 const fork = await sandbox.fork({ name: "agent-task" });
-const connection = await fork.createConnection();
 await fork.stop();
 await fork.delete();
 
@@ -141,7 +137,7 @@ frames. Set `collectOutput: false` to stream through `onOutput` without
 retaining decoded output in the process handle or result. Resize and kill use
 separate one-shot process controls, so they do not wait behind stdin.
 `kill()` returns after the control is acknowledged; `wait()` observes exit.
-`maxConcurrentExecs` limits attached exec sessions; detached processes and
+`maxConcurrentExecs` limits attached process sessions; detached processes and
 one-shot controls do not count. Pausing a sandbox disconnects attachments but
 preserves its processes for reattachment after resume. Processes end when
 their sandbox is stopped or expires.
