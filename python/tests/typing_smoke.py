@@ -8,7 +8,6 @@ types to users. Runtime is never executed; only static analysis matters here.
 
 import asyncio
 from typing import Optional
-
 import archil
 from archil import (
     AgentToolset,
@@ -19,7 +18,6 @@ from archil import (
     S3CompatibleMount,
     S3Mount,
     Sandbox,
-    SandboxExec,
     SandboxProcess,
     SandboxProcessOutput,
     SandboxTerminal,
@@ -44,8 +42,6 @@ def sync_usage() -> None:
     module_sandbox: Sandbox = archil.create_sandbox(name="trial")
     _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
     module_sandbox = archil.get_sandbox(module_sandbox.id)
-    sandbox_exec: SandboxExec = sandbox.exec("echo ready")
-    _sandbox_stdout: Optional[str] = sandbox_exec.stdout
     sandbox.files.upload_file("local.txt", "/workspace/remote.txt", mode=0o640)
     sandbox.files.download_file("/workspace/remote.txt", "downloaded.txt")
     process: SandboxProcess = sandbox.processes.start(
@@ -98,8 +94,8 @@ def sync_usage() -> None:
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
         sandbox = await client.sandboxes.create.aio(name="trial")
-        result = await sandbox.exec.aio("echo ready")
-        _sandbox_exit: Optional[int] = result.exit_code
+        process = await sandbox.processes.start.aio("echo ready")
+        _sandbox_exit: Optional[int] = (await process.wait.aio()).exit_code
         await sandbox.files.upload_file.aio("local.txt", "/workspace/remote.txt")
         await sandbox.files.download_file.aio("/workspace/remote.txt", "downloaded.txt")
         await (await sandbox.stop.aio()).delete.aio()
