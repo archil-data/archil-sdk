@@ -251,12 +251,15 @@ program
   .action(async () => {
     try {
       if (!activeCliContext) throw new Error("Sandbox CLI context was not initialized");
-      const [{ runSandboxTui }, { listSandboxes }] = await Promise.all([
+      const [{ runSandboxTui }, { createSandbox, listSandboxes }] = await Promise.all([
         import("../src/tui/run.js"),
         import("../src/index.js"),
       ]);
       await runSandboxTui({
-        service: { list: () => listSandboxes() },
+        service: {
+          list: () => listSandboxes(),
+          create: (request, options) => createSandbox(request, options),
+        },
         profile: activeCliContext.profile,
         region: activeCliContext.region,
       });

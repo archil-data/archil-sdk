@@ -9,6 +9,11 @@ import {
   waitForSandboxStart,
 } from "./sandbox.js";
 
+export interface SandboxPortMapping {
+  containerPort: number;
+  protocol: "tcp" | "udp";
+}
+
 export interface CreateSandboxRequest {
   /** Name for the sandbox. The server generates one when omitted. */
   name?: string;
@@ -26,6 +31,8 @@ export interface CreateSandboxRequest {
    * `alpine@sha256:<digest>`.
    */
   baseImage?: string;
+  /** Ports exposed by the sandbox process. */
+  portMappings?: SandboxPortMapping[];
   env?: Record<string, string>;
   maxTtlSeconds?: number;
   /** Maximum concurrently attached exec sessions. Detached processes and one-shot controls do not count. */
@@ -78,6 +85,10 @@ export class Sandboxes {
       vcpu_count: request.vcpuCount,
       mem_size_mib: request.memSizeMiB,
       base_image: request.baseImage,
+      port_mappings: request.portMappings?.map(({ containerPort, protocol }) => ({
+        container_port: containerPort,
+        protocol,
+      })),
       env: request.env,
       max_ttl_seconds: request.maxTtlSeconds,
       max_concurrent_execs: request.maxConcurrentExecs,

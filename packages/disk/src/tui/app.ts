@@ -8,8 +8,10 @@ import {
   truncateToWidth,
   visibleWidth,
   type Component,
+  type Focusable,
   type TUI,
 } from "@earendil-works/pi-tui";
+import { ACTIONS_BY_STATUS, parseCreateSandboxForm, type CreateSandboxForm, type SandboxAction } from "./actions.js";
 import { SandboxModel, type SandboxSort } from "./model.js";
 import { SandboxDetails } from "./components/sandbox-details.js";
 import { SandboxTable, safeCell } from "./components/sandbox-table.js";
@@ -58,6 +60,71 @@ class TextDialog implements Component {
   invalidate(): void {}
 }
 
+class ConfirmDialog implements Component {
+  constructor(private readonly question: string, private readonly confirm: () => void, private readonly close: () => void) {}
+  render(width: number): string[] { return [truncateToWidth(this.question, width, "…"), "y confirm · any other key cancels"].map((line) => truncateToWidth(line, width)); }
+  handleInput(data: string): void { if (matchesKey(data, "y")) this.confirm(); else this.close(); }
+  invalidate(): void {}
+}
+
+class InputDialog implements Component, Focusable {
+  private readonly input = new Input();
+  private _focused = false;
+  get focused(): boolean { return this._focused; }
+  set focused(value: boolean) { this._focused = value; this.input.focused = value; }
+
+  constructor(
+    private readonly title: string,
+    initial: string,
+    submit: (value: string) => void,
+    close: () => void,
+  ) {
+    this.input.setValue(initial);
+    this.input.onSubmit = submit;
+    this.input.onEscape = close;
+  }
+  render(width: number): string[] {
+    return [truncateToWidth(this.title, width), ...this.input.render(width), truncateToWidth("Enter apply · Esc cancel", width)];
+  }
+  handleInput(data: string): void { this.input.handleInput(data); }
+  invalidate(): void { this.input.invalidate(); }
+}
+
+class CreateDialog implements Component, Focusable {
+  private readonly input = new Input();
+  private index = 0;
+  private _focused = false;
+  private readonly values: CreateSandboxForm = {
+    name: "", vcpuCount: "1", memSizeMiB: "2048", baseImage: "ubuntu:26.04",
+    maxTtlSeconds: "", maxConcurrentExecs: "", portMappings: "", env: "",
+  };
+  private readonly fields: Array<[keyof CreateSandboxForm, string]> = [
+    ["name", "Name (optional)"], ["vcpuCount", "CPU count (1–32)"], ["memSizeMiB", "Memory MiB (256–65536)"],
+    ["baseImage", "Base image"], ["maxTtlSeconds", "Max TTL seconds (optional)"],
+    ["maxConcurrentExecs", "Max concurrent execs (optional)"], ["portMappings", "Ports, comma-separated (e.g. 80/tcp,53/udp)"],
+    ["env", "Environment, comma-separated (e.g. A=one,B=two)"],
+  ];
+  get focused(): boolean { return this._focused; }
+  set focused(value: boolean) { this._focused = value; this.input.focused = value; }
+  constructor(private readonly submit: (form: CreateSandboxForm) => void, private readonly close: () => void) {
+    this.input.setValue(this.values[this.fields[0]![0]]);
+    this.input.onEscape = close;
+    this.input.onSubmit = (value) => {
+      this.values[this.fields[this.index]![0]] = value;
+      if (this.index === this.fields.length - 1) submit(this.values);
+      else {
+        this.index++;
+        this.input.setValue(this.values[this.fields[this.index]![0]]);
+      }
+    };
+  }
+  render(width: number): string[] {
+    return [truncateToWidth(`Create sandbox · ${this.index + 1}/${this.fields.length} · ${this.fields[this.index]![1]}`, width, "…"), ...this.input.render(width), truncateToWidth("Enter next · Esc cancel", width)];
+  }
+  handleInput(data: string): void { this.input.handleInput(data); }
+  invalidate(): void { this.input.invalidate(); }
+}
+
 export interface SandboxAppOptions {
   profile?: string;
   region: string;
@@ -100,7 +167,10 @@ export class SandboxApp extends VStack {
     });
     const footer = new BottomBar(() => this.filterInput, () => {
       const filtered = model.snapshot().filter;
-      return `↑/↓ j/k select · g/G ends · / filter${filtered ? ` (${safeCell(filtered)})` : ""} · r refresh · o sort · ? help · q quit`;
+      const selected = model.snapshot().selected;
+      const actions = selected ? ACTIONS_BY_STATUS[selected.status] : [];
+      const hints = [actions.includes("start") && "S start", actions.includes("pause") && "P pause", actions.includes("resume") && "R resume", actions.includes("stop") && "X stop", actions.includes("fork") && "f fork", actions.includes("delete") && "Ctrl+D delete"].filter(Boolean).join(" · ");
+      return `↑/↓ j/k select · g/G ends · / filter${filtered ? ` (${safeCell(filtered)})` : ""} · r refresh · o sort · c create${hints ? ` · ${hints}` : ""} · ? help · q quit`;
     });
     super([
       { component: header, basis: 1 },
@@ -128,6 +198,13 @@ export class SandboxApp extends VStack {
     else if (matchesKey(data, "shift+g") || data === "G") this.model.selectLast();
     else if (matchesKey(data, "/")) this.showFilter();
     else if (matchesKey(data, "r")) void this.model.refresh();
+    else if (matchesKey(data, "c")) this.showCreate();
+    else if (matchesKey(data, "shift+s") || data === "S") this.requestAction("start");
+    else if (matchesKey(data, "shift+p") || data === "P") this.requestAction("pause");
+    else if (matchesKey(data, "shift+r") || data === "R") this.requestAction("resume");
+    else if (matchesKey(data, "shift+x") || data === "X") this.requestAction("stop");
+    else if (matchesKey(data, "f")) this.showFork();
+    else if (matchesKey(data, Key.ctrl("d"))) this.requestAction("delete");
     else if (matchesKey(data, "o")) {
       const sorts: SandboxSort[] = ["lastActive", "name", "status"];
       const current = this.model.snapshot().sort;
@@ -143,6 +220,57 @@ export class SandboxApp extends VStack {
     this.overlayClose?.();
     this.unsubscribe();
     this.model.stopPolling();
+  }
+
+  private requestAction(action: SandboxAction): void {
+    const sandbox = this.model.snapshot().selected;
+    if (!sandbox || !ACTIONS_BY_STATUS[sandbox.status].includes(action)) return;
+    const confirmation = action === "stop"
+      ? `Stop sandbox '${safeCell(sandbox.name)}'?`
+      : action === "delete"
+        ? `Delete sandbox '${safeCell(sandbox.name)}' permanently?`
+        : action === "start" && sandbox.status === "paused"
+          ? `Cold-start '${safeCell(sandbox.name)}' and discard its memory snapshot?`
+          : undefined;
+    if (!confirmation) {
+      void this.model.performAction(action);
+      return;
+    }
+    let handle: ReturnType<TUI["showOverlay"]>;
+    const close = () => { handle.hide(); this.overlayClose = undefined; };
+    const dialog = new ConfirmDialog(confirmation, () => { close(); void this.model.performAction(action); }, close);
+    handle = this.tui.showOverlay(dialog, { width: "70%", minWidth: 40, maxHeight: 4, anchor: "center" });
+    this.overlayClose = close;
+  }
+
+  private showCreate(): void {
+    let handle: ReturnType<TUI["showOverlay"]>;
+    const close = () => { handle.hide(); this.overlayClose = undefined; };
+    const dialog = new CreateDialog((form) => {
+      try {
+        const request = parseCreateSandboxForm(form);
+        close();
+        void this.model.create(request);
+      } catch (error) {
+        this.notification = error instanceof Error ? error.message : String(error);
+        this.tui.requestRender();
+      }
+    }, close);
+    handle = this.tui.showOverlay(dialog, { width: "75%", minWidth: 45, maxHeight: 5, anchor: "center" });
+    this.overlayClose = close;
+  }
+
+  private showFork(): void {
+    const sandbox = this.model.snapshot().selected;
+    if (!sandbox || !ACTIONS_BY_STATUS[sandbox.status].includes("fork")) return;
+    let handle: ReturnType<TUI["showOverlay"]>;
+    const close = () => { handle.hide(); this.overlayClose = undefined; };
+    const dialog = new InputDialog(`Fork '${safeCell(sandbox.name)}' · optional name`, "", (name) => {
+      close();
+      void this.model.performAction("fork", name.trim());
+    }, close);
+    handle = this.tui.showOverlay(dialog, { width: "60%", minWidth: 40, maxHeight: 5, anchor: "center" });
+    this.overlayClose = close;
   }
 
   private showFilter(): void {
@@ -163,7 +291,7 @@ export class SandboxApp extends VStack {
     let handle: ReturnType<TUI["showOverlay"]>;
     const close = () => { handle.hide(); this.overlayClose = undefined; };
     const dialog = new TextDialog([
-      "SANDBOX KEYS", "↑/↓ or j/k  move selection", "g / G        first / last", "/            live filter", "r            refresh", "o            cycle sort", "?            this help", "q / Ctrl+C   quit", "", "Esc, Enter, or q closes this help",
+      "SANDBOX KEYS", "↑/↓ or j/k  move selection", "g / G        first / last", "/            live filter", "r            refresh", "o            cycle sort", "c            create sandbox", "S/P/R/X      start/pause/resume/stop", "f            fork", "Ctrl+D       delete", "?            this help", "q / Ctrl+C   quit", "", "Esc, Enter, or q closes this help",
     ], close);
     handle = this.tui.showOverlay(dialog, { width: 48, maxHeight: "80%", anchor: "center" });
     this.overlayClose = close;

@@ -1,9 +1,12 @@
+import type { CreateSandboxRequest } from "../sandboxes.js";
 import type { Sandbox } from "../sandbox.js";
+import { ACTIONS_BY_STATUS, type SandboxAction } from "./actions.js";
 
 export type SandboxSort = "lastActive" | "name" | "status";
 
 export interface SandboxService {
   list(): Promise<Sandbox[]>;
+  create?(request: CreateSandboxRequest, options: { wait: false }): Promise<Sandbox>;
 }
 
 export interface SandboxModelSnapshot {
@@ -144,6 +147,46 @@ export class SandboxModel {
     if (busy) this.busyIds.add(id);
     else this.busyIds.delete(id);
     this.emit();
+  }
+
+  async create(request: CreateSandboxRequest): Promise<boolean> {
+    if (!this.service.create) {
+      this.error = "Sandbox creation is unavailable";
+      this.emit();
+      return false;
+    }
+    try {
+      const created = await this.service.create(request, { wait: false });
+      this.selectedId = created.id;
+      await this.refresh();
+      return true;
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+      this.emit();
+      return false;
+    }
+  }
+
+  async performAction(action: SandboxAction, forkName?: string): Promise<boolean> {
+    const sandbox = this.snapshot().selected;
+    if (!sandbox || !ACTIONS_BY_STATUS[sandbox.status].includes(action) || this.busyIds.has(sandbox.id)) return false;
+    this.setBusy(sandbox.id, true);
+    try {
+      if (action === "start") await sandbox.start({ wait: false });
+      else if (action === "pause") await sandbox.pause({ wait: false });
+      else if (action === "resume") await sandbox.resume({ wait: false });
+      else if (action === "stop") await sandbox.stop({ wait: false });
+      else if (action === "fork") await sandbox.fork({ name: forkName || undefined, wait: false });
+      else await sandbox.delete();
+      await this.refresh();
+      return true;
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+      this.emit();
+      return false;
+    } finally {
+      this.setBusy(sandbox.id, false);
+    }
   }
 
   private filteredAndSorted(): Sandbox[] {
