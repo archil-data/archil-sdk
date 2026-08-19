@@ -2,6 +2,17 @@
 import { createRequire } from "node:module";
 import { Command, Option } from "commander";
 import {
+  deleteProfileCredential,
+  promptSecret,
+  resolveCliCredentials,
+  writeProfileCredential,
+} from "../src/cli/credentials.js";
+import {
+  deleteProfile,
+  loadProfiles,
+  saveProfiles,
+} from "../src/cli/profiles.js";
+import {
   ArchilApiError,
   configure,
   createApiKey,
@@ -22,13 +33,16 @@ program
   .name("disk")
   .description("Manage Archil disks from the command line")
   .version(pkg.version)
-  .addOption(new Option("-k, --api-key <key>", "Archil API key").env("ARCHIL_API_KEY"))
+  .addOption(new Option("-k, --api-key <key>", "Archil API key (prefer login, environment variables, or stdin)").env("ARCHIL_API_KEY"))
   .addOption(new Option("-r, --region <region>", "Archil region").env("ARCHIL_REGION"))
-  .addOption(new Option("--base-url <url>", "Override control-plane base URL"))
-  .hook("preAction", () => {
-    const opts = program.opts<{ apiKey?: string; region?: string; baseUrl?: string }>();
+  .addOption(new Option("--base-url <url>", "Override control-plane base URL").env("ARCHIL_BASE_URL"))
+  .addOption(new Option("--profile <name>", "Named Archil profile").env("ARCHIL_PROFILE"))
+  .hook("preAction", async (_thisCommand, actionCommand) => {
+    if (["auth", "profile"].includes(actionCommand.parent?.name() ?? "")) return;
+    const opts = program.opts<{ apiKey?: string; region?: string; baseUrl?: string; profile?: string }>();
     try {
-      configure({ apiKey: opts.apiKey, region: opts.region, baseUrl: opts.baseUrl });
+      const resolved = await resolveCliCredentials(opts, await loadProfiles());
+      configure({ apiKey: resolved.apiKey, region: resolved.region, baseUrl: resolved.baseUrl });
     } catch (err) {
       fail(err);
     }
@@ -152,6 +166,82 @@ function printDisk(d: Disk): void {
     section("Connected clients", renderTable(rows, ["id", "ip", "connected at"]));
   }
 }
+
+const auth = program.command("auth").description("Manage persistent Archil credentials");
+
+auth
+  .command("login")
+  .description("Create or update a named profile")
+  .action(async () => {
+    try {
+      const global = program.opts<{ apiKey?: string; region?: string; baseUrl?: string; profile?: string }>();
+      const config = await loadProfiles();
+      const name = global.profile ?? config.currentProfile;
+      if (!name) throw new Error("Login requires --profile <name>");
+      const region = global.region ?? config.profiles[name]?.region;
+      if (!region) throw new Error("Login requires --region <region>");
+      await writeProfileCredential(name, global.apiKey ?? await promptSecret());
+      config.profiles[name] = { region, baseUrl: global.baseUrl };
+      config.currentProfile = name;
+      await saveProfiles(config);
+      console.log(`Logged in profile '${name}' (${region})`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+auth
+  .command("logout")
+  .description("Remove the stored credential for a profile")
+  .action(async () => {
+    try {
+      const global = program.opts<{ profile?: string }>();
+      const config = await loadProfiles();
+      const name = global.profile ?? config.currentProfile;
+      if (!name || !config.profiles[name]) throw new Error("Logout requires an existing --profile <name>");
+      await deleteProfileCredential(name);
+      console.log(`Logged out profile '${name}'`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const profilesCommand = program.command("profile").description("Manage named Archil profiles");
+
+profilesCommand.command("list").description("List profiles without revealing credentials").action(async () => {
+  try {
+    const config = await loadProfiles();
+    for (const [name, profile] of Object.entries(config.profiles).sort(([a], [b]) => a.localeCompare(b))) {
+      console.log(`${config.currentProfile === name ? "*" : " "} ${name}\t${profile.region}\t${profile.baseUrl ?? "default"}`);
+    }
+  } catch (err) {
+    fail(err);
+  }
+});
+
+profilesCommand.command("use <name>").description("Select the default profile").action(async (name: string) => {
+  try {
+    const config = await loadProfiles();
+    if (!config.profiles[name]) throw new Error(`Profile '${name}' does not exist`);
+    config.currentProfile = name;
+    await saveProfiles(config);
+    console.log(`Using profile '${name}'`);
+  } catch (err) {
+    fail(err);
+  }
+});
+
+profilesCommand.command("delete <name>").description("Delete a profile and its stored credential").action(async (name: string) => {
+  try {
+    const config = await loadProfiles();
+    if (!config.profiles[name]) throw new Error(`Profile '${name}' does not exist`);
+    await deleteProfileCredential(name);
+    await deleteProfile(name);
+    console.log(`Deleted profile '${name}'`);
+  } catch (err) {
+    fail(err);
+  }
+});
 
 program
   .command("list")
@@ -359,7 +449,7 @@ keys
 
 // Support `disk <id> exec <cmd...>` as a sugar form for `disk exec <id> <cmd...>`.
 function rewriteSugar(argv: string[]): string[] {
-  const known = new Set(["list", "get", "create", "delete", "exec", "grep", "api-keys", "help", "--help", "-h", "--version", "-V"]);
+  const known = new Set(["list", "get", "create", "delete", "exec", "grep", "api-keys", "auth", "profile", "sandboxes", "help", "--help", "-h", "--version", "-V"]);
   const head = argv[2];
   const next = argv[3];
   if (head && next === "exec" && !known.has(head) && !head.startsWith("-")) {
