@@ -9,10 +9,13 @@ import {
   visibleWidth,
   type Component,
   type Focusable,
+  wrapTextWithAnsi,
   type TUI,
 } from "@earendil-works/pi-tui";
 import { ACTIONS_BY_STATUS, parseCreateSandboxForm, type CreateSandboxForm, type SandboxAction } from "./actions.js";
+import { ExecModel, sanitizeRemoteOutput } from "./exec-model.js";
 import { SandboxModel, type SandboxSort } from "./model.js";
+import { ExecTable } from "./components/exec-table.js";
 import { SandboxDetails } from "./components/sandbox-details.js";
 import { SandboxTable, safeCell } from "./components/sandbox-table.js";
 import { bold, cyan, dim, green, red, yellow } from "./components/theme.js";
@@ -125,6 +128,62 @@ class CreateDialog implements Component, Focusable {
   invalidate(): void { this.input.invalidate(); }
 }
 
+class OutputContent implements Component {
+  constructor(private readonly stdout: string, private readonly stderr: string) {}
+  render(width: number): string[] {
+    const renderStream = (label: string, value: string) => {
+      const safe = sanitizeRemoteOutput(value);
+      const body = safe.text ? wrapTextWithAnsi(safe.text, Math.max(1, width)) : ["(empty)"];
+      return [label, ...body, ...(safe.truncated ? ["(display cap reached; SDK result is unchanged)"] : [])].map((line) => truncateToWidth(line, width, ""));
+    };
+    return [...renderStream("STDOUT", this.stdout), "", ...renderStream("STDERR", this.stderr)];
+  }
+  invalidate(): void {}
+}
+
+class OutputDialog extends ScrollView {
+  constructor(stdout: string, stderr: string, private readonly close: () => void) {
+    super(new OutputContent(stdout, stderr), { scrollbar: "always", overscroll: "contain" });
+  }
+  handleInput(data: string): void {
+    if (matchesKey(data, Key.escape) || matchesKey(data, "q")) this.close();
+    else if (matchesKey(data, Key.up) || matchesKey(data, "k")) this.scrollBy(-1);
+    else if (matchesKey(data, Key.down) || matchesKey(data, "j")) this.scrollBy(1);
+    else if (matchesKey(data, Key.pageUp)) this.scrollBy(-10);
+    else if (matchesKey(data, Key.pageDown)) this.scrollBy(10);
+  }
+}
+
+class ExecHistoryDialog implements Component {
+  private readonly table: ExecTable;
+  private readonly unsubscribe: () => void;
+  constructor(
+    private readonly tui: TUI,
+    private readonly model: ExecModel,
+    private readonly close: () => void,
+    private readonly output: (stdout: string, stderr: string) => void,
+  ) {
+    this.table = new ExecTable(() => model.snapshot());
+    this.unsubscribe = model.subscribe(() => tui.requestRender());
+    model.startPolling();
+  }
+  render(width: number): string[] {
+    return ["EXEC HISTORY", ...this.table.render(width), truncateToWidth(this.model.snapshot().error ?? "↑/↓ select · Enter output · Ctrl+C cancel running exec · Esc close", width, "…")];
+  }
+  handleInput(data: string): void {
+    if (matchesKey(data, Key.escape) || matchesKey(data, "q")) this.close();
+    else if (matchesKey(data, Key.up) || matchesKey(data, "k")) this.model.selectOffset(-1);
+    else if (matchesKey(data, Key.down) || matchesKey(data, "j")) this.model.selectOffset(1);
+    else if (matchesKey(data, Key.ctrl("c"))) void this.model.cancel();
+    else if (matchesKey(data, Key.enter)) void this.model.detail().then((execution) => {
+      if (execution) this.output(execution.stdout ?? "", execution.stderr ?? "");
+    });
+    this.tui.requestRender();
+  }
+  dispose(): void { this.unsubscribe(); this.model.stopPolling(); }
+  invalidate(): void { this.table.invalidate(); }
+}
+
 export interface SandboxAppOptions {
   profile?: string;
   region: string;
@@ -170,7 +229,8 @@ export class SandboxApp extends VStack {
       const selected = model.snapshot().selected;
       const actions = selected ? ACTIONS_BY_STATUS[selected.status] : [];
       const hints = [actions.includes("start") && "S start", actions.includes("pause") && "P pause", actions.includes("resume") && "R resume", actions.includes("stop") && "X stop", actions.includes("fork") && "f fork", actions.includes("delete") && "Ctrl+D delete"].filter(Boolean).join(" · ");
-      return `↑/↓ j/k select · g/G ends · / filter${filtered ? ` (${safeCell(filtered)})` : ""} · r refresh · o sort · c create${hints ? ` · ${hints}` : ""} · ? help · q quit`;
+      const execHints = selected ? ` · l execs${selected.status === "running" ? " · e run" : ""}` : "";
+      return `↑/↓ j/k select · g/G ends · / filter${filtered ? ` (${safeCell(filtered)})` : ""} · r refresh · o sort · c create${hints ? ` · ${hints}` : ""}${execHints} · ? help · q quit`;
     });
     super([
       { component: header, basis: 1 },
@@ -199,6 +259,8 @@ export class SandboxApp extends VStack {
     else if (matchesKey(data, "/")) this.showFilter();
     else if (matchesKey(data, "r")) void this.model.refresh();
     else if (matchesKey(data, "c")) this.showCreate();
+    else if (matchesKey(data, "e")) this.showExecCommand();
+    else if (matchesKey(data, "l")) this.showExecHistory();
     else if (matchesKey(data, "shift+s") || data === "S") this.requestAction("start");
     else if (matchesKey(data, "shift+p") || data === "P") this.requestAction("pause");
     else if (matchesKey(data, "shift+r") || data === "R") this.requestAction("resume");
@@ -220,6 +282,43 @@ export class SandboxApp extends VStack {
     this.overlayClose?.();
     this.unsubscribe();
     this.model.stopPolling();
+  }
+
+  private showExecCommand(): void {
+    const sandbox = this.model.snapshot().selected;
+    if (!sandbox || sandbox.status !== "running") return;
+    let handle: ReturnType<TUI["showOverlay"]>;
+    const close = () => { handle.hide(); this.overlayClose = undefined; };
+    const dialog = new InputDialog(`Run command in '${safeCell(sandbox.name)}'`, "", (command) => {
+      if (!command.trim()) return;
+      close();
+      const execModel = new ExecModel(sandbox);
+      void execModel.submit(command).then((ok) => {
+        this.notification = ok ? `Submitted command to '${safeCell(sandbox.name)}'` : execModel.snapshot().error ?? "Command submission failed";
+        this.tui.requestRender();
+      });
+    }, close);
+    handle = this.tui.showOverlay(dialog, { width: "75%", minWidth: 45, maxHeight: 5, anchor: "center" });
+    this.overlayClose = close;
+  }
+
+  private showExecHistory(): void {
+    const sandbox = this.model.snapshot().selected;
+    if (!sandbox) return;
+    let handle: ReturnType<TUI["showOverlay"]>;
+    let dialog: ExecHistoryDialog;
+    const close = () => { dialog.dispose(); handle.hide(); this.overlayClose = undefined; };
+    dialog = new ExecHistoryDialog(this.tui, new ExecModel(sandbox), close, (stdout, stderr) => this.showExecOutput(stdout, stderr, close));
+    handle = this.tui.showOverlay(dialog, { width: "90%", minWidth: 55, maxHeight: "85%", anchor: "center" });
+    this.overlayClose = close;
+  }
+
+  private showExecOutput(stdout: string, stderr: string, historyClose: () => void): void {
+    let handle: ReturnType<TUI["showOverlay"]>;
+    const close = () => { handle.hide(); this.overlayClose = historyClose; };
+    const dialog = new OutputDialog(stdout, stderr, close);
+    handle = this.tui.showOverlay(dialog, { width: "90%", minWidth: 45, maxHeight: "85%", anchor: "center" });
+    this.overlayClose = close;
   }
 
   private requestAction(action: SandboxAction): void {
@@ -291,7 +390,7 @@ export class SandboxApp extends VStack {
     let handle: ReturnType<TUI["showOverlay"]>;
     const close = () => { handle.hide(); this.overlayClose = undefined; };
     const dialog = new TextDialog([
-      "SANDBOX KEYS", "↑/↓ or j/k  move selection", "g / G        first / last", "/            live filter", "r            refresh", "o            cycle sort", "c            create sandbox", "S/P/R/X      start/pause/resume/stop", "f            fork", "Ctrl+D       delete", "?            this help", "q / Ctrl+C   quit", "", "Esc, Enter, or q closes this help",
+      "SANDBOX KEYS", "↑/↓ or j/k  move selection", "g / G        first / last", "/            live filter", "r            refresh", "o            cycle sort", "c            create sandbox", "S/P/R/X      start/pause/resume/stop", "f            fork", "Ctrl+D       delete", "e            run durable command", "l            exec history", "?            this help", "q / Ctrl+C   quit", "", "Esc, Enter, or q closes this help",
     ], close);
     handle = this.tui.showOverlay(dialog, { width: 48, maxHeight: "80%", anchor: "center" });
     this.overlayClose = close;
