@@ -15,6 +15,7 @@ import {
 import { ACTIONS_BY_STATUS, parseCreateSandboxForm, type CreateSandboxForm, type SandboxAction } from "./actions.js";
 import { ExecModel, sanitizeRemoteOutput } from "./exec-model.js";
 import { SandboxModel, type SandboxSort } from "./model.js";
+import { runShellHandoff } from "./shell.js";
 import { ExecTable } from "./components/exec-table.js";
 import { SandboxDetails } from "./components/sandbox-details.js";
 import { SandboxTable, safeCell } from "./components/sandbox-table.js";
@@ -195,6 +196,7 @@ export class SandboxApp extends VStack {
   private notification = "";
   private overlayClose?: () => void;
   private filterInput?: Input;
+  private shellActive = false;
 
   constructor(
     private readonly tui: TUI,
@@ -229,7 +231,7 @@ export class SandboxApp extends VStack {
       const selected = model.snapshot().selected;
       const actions = selected ? ACTIONS_BY_STATUS[selected.status] : [];
       const hints = [actions.includes("start") && "S start", actions.includes("pause") && "P pause", actions.includes("resume") && "R resume", actions.includes("stop") && "X stop", actions.includes("fork") && "f fork", actions.includes("delete") && "Ctrl+D delete"].filter(Boolean).join(" · ");
-      const execHints = selected ? ` · l execs${selected.status === "running" ? " · e run" : ""}` : "";
+      const execHints = selected ? ` · l execs${selected.status === "running" ? " · e run · t shell" : ""}` : "";
       return `↑/↓ j/k select · g/G ends · / filter${filtered ? ` (${safeCell(filtered)})` : ""} · r refresh · o sort · c create${hints ? ` · ${hints}` : ""}${execHints} · ? help · q quit`;
     });
     super([
@@ -261,6 +263,7 @@ export class SandboxApp extends VStack {
     else if (matchesKey(data, "c")) this.showCreate();
     else if (matchesKey(data, "e")) this.showExecCommand();
     else if (matchesKey(data, "l")) this.showExecHistory();
+    else if (matchesKey(data, "t")) void this.openShell();
     else if (matchesKey(data, "shift+s") || data === "S") this.requestAction("start");
     else if (matchesKey(data, "shift+p") || data === "P") this.requestAction("pause");
     else if (matchesKey(data, "shift+r") || data === "R") this.requestAction("resume");
@@ -282,6 +285,21 @@ export class SandboxApp extends VStack {
     this.overlayClose?.();
     this.unsubscribe();
     this.model.stopPolling();
+  }
+
+  private async openShell(): Promise<void> {
+    const sandbox = this.model.snapshot().selected;
+    if (!sandbox || sandbox.status !== "running" || this.shellActive) return;
+    this.shellActive = true;
+    try {
+      const { processId, result } = await runShellHandoff({ tui: this.tui, model: this.model, sandbox });
+      this.notification = `Shell ${processId ?? "unknown"} returned (${result?.status ?? "no result"})`;
+    } catch (error) {
+      this.notification = `Shell returned: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      this.shellActive = false;
+      this.tui.requestRender(true);
+    }
   }
 
   private showExecCommand(): void {
@@ -390,7 +408,7 @@ export class SandboxApp extends VStack {
     let handle: ReturnType<TUI["showOverlay"]>;
     const close = () => { handle.hide(); this.overlayClose = undefined; };
     const dialog = new TextDialog([
-      "SANDBOX KEYS", "↑/↓ or j/k  move selection", "g / G        first / last", "/            live filter", "r            refresh", "o            cycle sort", "c            create sandbox", "S/P/R/X      start/pause/resume/stop", "f            fork", "Ctrl+D       delete", "e            run durable command", "l            exec history", "?            this help", "q / Ctrl+C   quit", "", "Esc, Enter, or q closes this help",
+      "SANDBOX KEYS", "↑/↓ or j/k  move selection", "g / G        first / last", "/            live filter", "r            refresh", "o            cycle sort", "c            create sandbox", "S/P/R/X      start/pause/resume/stop", "f            fork", "Ctrl+D       delete", "e            run durable command", "l            exec history", "t            interactive shell (Ctrl+] returns)", "?            this help", "q / Ctrl+C   quit", "", "Esc, Enter, or q closes this help",
     ], close);
     handle = this.tui.showOverlay(dialog, { width: 48, maxHeight: "80%", anchor: "center" });
     this.overlayClose = close;

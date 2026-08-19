@@ -621,9 +621,11 @@ test("a terminal is a process with terminal sizing, input, and kill", async () =
   vi.stubGlobal("WebSocket", TestWebSocket);
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
+  const output: Array<{ stream: string; offset: number; data: string }> = [];
 
   const starting = sandbox.processes.start("codex", {
     terminal: { cols: 132, rows: 43 },
+    onOutput: ({ stream, offset, data }) => output.push({ stream, offset, data: new TextDecoder().decode(data) }),
   });
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
@@ -638,6 +640,14 @@ test("a terminal is a process with terminal sizing, input, and kill", async () =
     terminal: { cols: 132, rows: 43 },
     env: {},
   });
+  socket.emit("message", { data: outputFrame(1, 0, "# ") });
+  socket.emit("message", { data: outputFrame(1, 2, "ready\r\n") });
+  assert.deepEqual(output, [
+    { stream: "stdout", offset: 0, data: "# " },
+    { stream: "stdout", offset: 2, data: "ready\r\n" },
+  ]);
+  assert.equal(process.stdout, "# ready\r\n");
+  assert.equal(process.cursor, 9);
 
   await process.sendInput("Review this repository\n");
   await process.sendInput(new Uint8Array([3]));
