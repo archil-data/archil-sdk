@@ -1,6 +1,6 @@
 {
   "name": "@archildata/mastra",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Archil filesystem adapter for Mastra",
   "keywords": [
     "archil",

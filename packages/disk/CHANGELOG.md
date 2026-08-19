@@ -1,5 +1,12 @@
 # disk
 
+## 0.11.0
+
+### Minor Changes
+
+- ae19201: Add runtime-owned sandbox processes with optional terminal I/O, disconnect, and reconnect support.
+- 36be5e2: Add streaming file transfers between local clients and running sandboxes.
+
 ## 0.10.0
 
 ### Minor Changes
