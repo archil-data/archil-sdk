@@ -1,13 +1,12 @@
 import type { SandboxProcessStartOptions } from "../sandbox-process.js";
-import type { CreateSandboxRequest, SandboxPortMapping } from "../sandboxes.js";
+import type { CreateSandboxRequest } from "../sandboxes.js";
 
 export interface CreateSandboxCliOptions {
   vcpuCount?: string;
-  memSizeMiB?: string;
+  memSizeMib?: string;
   baseImage?: string;
   maxTtlSeconds?: string;
   maxConcurrentProcesses?: string;
-  port: string[];
   env: string[];
 }
 
@@ -45,25 +44,13 @@ export function parseEnvironment(entries: string[]): Record<string, string> | un
 }
 
 export function parseCreateSandboxOptions(name: string | undefined, options: CreateSandboxCliOptions): CreateSandboxRequest {
-  const portMappings: SandboxPortMapping[] | undefined = options.port.length === 0
-    ? undefined
-    : options.port.map((entry) => {
-        const match = entry.match(/^(\d+)(?:\/(tcp|udp))?$/);
-        if (!match) throw new Error(`Invalid port mapping '${entry}'; use PORT/tcp or PORT/udp`);
-        const containerPort = Number(match[1]);
-        if (containerPort < 1 || containerPort > 65_535) {
-          throw new Error("Port mappings must use ports from 1 to 65535");
-        }
-        return { containerPort, protocol: (match[2] ?? "tcp") as "tcp" | "udp" };
-      });
   return {
     name: validateSandboxName(name),
     vcpuCount: optionalInteger(options.vcpuCount, "CPU count", 1, 32),
-    memSizeMiB: optionalInteger(options.memSizeMiB, "Memory", 256, 65_536),
+    memSizeMiB: optionalInteger(options.memSizeMib, "Memory", 256, 65_536),
     baseImage: options.baseImage,
     maxTtlSeconds: optionalInteger(options.maxTtlSeconds, "Max TTL", 1, 2_147_483_647),
     maxConcurrentExecs: optionalInteger(options.maxConcurrentProcesses, "Max concurrent processes", 1, 1024),
-    portMappings,
     env: parseEnvironment(options.env),
   };
 }

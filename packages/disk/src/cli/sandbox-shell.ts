@@ -46,6 +46,8 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
   let remote: SandboxProcess | undefined;
   let result: SandboxProcessResult | undefined;
   let terminationRequested = false;
+  let terminationStarted = false;
+  let terminationReason = "terminated locally";
   let failureSettled = false;
   let rejectFailure!: (error: Error) => void;
   const failure = new Promise<never>((_resolve, reject) => { rejectFailure = reject; });
@@ -54,15 +56,34 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     failureSettled = true;
     rejectFailure(error instanceof Error ? error : new Error(String(error)));
   };
+  let resolveTermination!: (value: SandboxProcessResult) => void;
+  let rejectTermination!: (error: Error) => void;
+  const termination = new Promise<SandboxProcessResult>((resolve, reject) => {
+    resolveTermination = resolve;
+    rejectTermination = reject;
+  });
+  const startTermination = () => {
+    if (!remote || terminationStarted) return;
+    terminationStarted = true;
+    void remote.kill().then(
+      () => resolveTermination({ status: "cancelled", exitReason: terminationReason, stdout: "", stderr: "" }),
+      (error: unknown) => rejectTermination(error instanceof Error ? error : new Error(String(error))),
+    );
+  };
+  const requestTermination = (reason: string) => {
+    if (terminationRequested) return;
+    terminationRequested = true;
+    terminationReason = reason;
+    startTermination();
+  };
   const onInput = (chunk: Buffer | string) => {
     const bytes = typeof chunk === "string" ? new TextEncoder().encode(chunk) : new Uint8Array(chunk);
     const emergency = bytes.indexOf(0x1d);
     if (emergency >= 0) {
-      if (emergency > 0) void remote?.sendInput(bytes.subarray(0, emergency)).catch(fail);
-      terminationRequested = true;
-      void remote?.kill().catch(fail);
+      if (emergency > 0) void remote!.sendInput(bytes.subarray(0, emergency)).catch(fail);
+      requestTermination("terminated by Ctrl+]");
     } else {
-      void remote?.sendInput(bytes).catch(fail);
+      void remote!.sendInput(bytes).catch(fail);
     }
   };
   const onResize = () => {
@@ -70,16 +91,11 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
       void remote.resize({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 }).catch(fail);
     }
   };
-  const onSignal = () => {
-    terminationRequested = true;
-    void remote?.kill().catch(fail);
-  };
+  const onSignal = () => requestTermination("terminated by local signal");
   const priorRaw = stdin.isRaw ?? false;
 
   try {
     stdin.setRawMode(true);
-    stdin.resume();
-    stdin.on("data", onInput);
     stdout.on("resize", onResize);
     signals.on("SIGINT", onSignal);
     signals.on("SIGTERM", onSignal);
@@ -96,8 +112,10 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
       },
     });
     stderr.write(`Archil shell process ${remote.id}; Ctrl+] exits\n`);
-    if (terminationRequested) await remote.kill();
-    result = await Promise.race([remote.wait(), failure]);
+    stdin.on("data", onInput);
+    stdin.resume();
+    if (terminationRequested) startTermination();
+    result = await Promise.race([remote.wait(), termination, failure]);
     failureSettled = true;
     return result;
   } finally {
@@ -107,7 +125,7 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     signals.off("SIGTERM", onSignal);
     signals.off("SIGHUP", onSignal);
     stdin.setRawMode(priorRaw);
-    if (remote && !result) await remote.kill().catch(() => {});
+    if (remote && !result && !terminationRequested) await remote.kill().catch(() => {});
     if (remote) await remote.disconnect().catch(() => {});
   }
 }

@@ -22,6 +22,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   await rm(configDirectory, { recursive: true, force: true });
 });
@@ -46,6 +47,7 @@ function fakeSandbox(overrides: Partial<Sandbox> = {}): Sandbox {
     stop: vi.fn(async function(this: Sandbox) { return this; }),
     fork: vi.fn(async () => fakeSandbox({ id: "sbx-fork", name: "fork" })),
     delete: vi.fn(async () => undefined),
+    refresh: vi.fn(async function(this: Sandbox) { return this; }),
     exec: vi.fn(async () => ({ status: "completed", exitCode: 0, stdout: "", stderr: "" })),
     processes: { start: vi.fn() },
     ...overrides,
@@ -75,6 +77,11 @@ function harness(sandboxes: Sandbox[], options: { tty?: boolean; confirm?: boole
   stdin.isTTY = options.tty ?? false;
   const service: SandboxService = {
     list: vi.fn(async () => sandboxes),
+    get: vi.fn(async (id) => {
+      const sandbox = sandboxes.find((candidate) => candidate.id === id);
+      if (!sandbox) throw new Error(`No sandbox '${id}'`);
+      return sandbox;
+    }),
     create: vi.fn(async (request) => fakeSandbox({
       id: "sbx-created",
       name: request?.name ?? "generated",
@@ -84,6 +91,7 @@ function harness(sandboxes: Sandbox[], options: { tty?: boolean; confirm?: boole
   };
   const exitCodes: number[] = [];
   const confirmations: string[] = [];
+  let clock = 0;
   const program = createSandboxProgram({
     version: "test",
     createClient: () => ({ sandboxes: service }),
@@ -93,6 +101,8 @@ function harness(sandboxes: Sandbox[], options: { tty?: boolean; confirm?: boole
     signals: new EventEmitter() as NodeJS.Process,
     confirm: async (question) => { confirmations.push(question); return options.confirm ?? false; },
     setExitCode: (code) => exitCodes.push(code),
+    now: () => clock,
+    sleep: async (milliseconds) => { clock += milliseconds; },
   });
   const run = (...args: string[]) => program.parseAsync(["node", "sandbox", "--api-key", "key-test", "--region", "test", ...args]);
   return { stdout, stderr, stdin, service, exitCodes, confirmations, run };
@@ -114,41 +124,48 @@ test("list is deterministic and get supports JSON", async () => {
   assert.equal(JSON.parse(text(get.stdout.values)).id, "sbx-new");
 });
 
-test("target resolution prefers IDs and reports missing and ambiguous names", async () => {
-  const duplicateOne = fakeSandbox({ id: "sbx-a", name: "same" });
-  const duplicateTwo = fakeSandbox({ id: "sbx-b", name: "same" });
-  const service = { list: async () => [duplicateOne, duplicateTwo], create: vi.fn() } as SandboxService;
-  assert.equal((await resolveSandbox(service, "sbx-b")).id, "sbx-b");
+test("target resolution gets UUIDs directly and lists only for names", async () => {
+  const id = "0198aabb-1234-7abc-8def-0123456789ab";
+  const duplicateOne = fakeSandbox({ id, name: "same" });
+  const duplicateTwo = fakeSandbox({ id: "0198aabb-1234-7abc-8def-0123456789ac", name: "same" });
+  const service = {
+    list: vi.fn(async () => [duplicateOne, duplicateTwo]),
+    get: vi.fn(async () => duplicateOne),
+    create: vi.fn(),
+  } as SandboxService;
+  assert.equal((await resolveSandbox(service, id)).id, id);
+  assert.equal((service.get as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+  assert.equal((service.list as ReturnType<typeof vi.fn>).mock.calls.length, 0);
   await assert.rejects(resolveSandbox(service, "missing"), /No sandbox found/);
   await assert.rejects(resolveSandbox(service, "same"), /Multiple sandboxes/);
+  assert.equal((service.get as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+  assert.equal((service.list as ReturnType<typeof vi.fn>).mock.calls.length, 2);
 });
 
 test("create validates options, maps repeated values, and dispatches no-wait", async () => {
   const parsed = parseCreateSandboxOptions("agent-task", {
     vcpuCount: "32",
-    memSizeMiB: "65536",
+    memSizeMib: "65536",
     baseImage: "alpine",
     maxTtlSeconds: "600",
     maxConcurrentProcesses: "8",
-    port: ["80", "53/udp"],
     env: ["A=one", "B=two=three"],
   });
-  assert.deepEqual(parsed.portMappings, [
-    { containerPort: 80, protocol: "tcp" },
-    { containerPort: 53, protocol: "udp" },
-  ]);
   assert.deepEqual(parsed.env, { A: "one", B: "two=three" });
-  assert.throws(() => parseCreateSandboxOptions("Bad_Name", { port: [], env: [] }), /Name must/);
-  assert.throws(() => parseCreateSandboxOptions("ok", { vcpuCount: "33", port: [], env: [] }), /CPU count/);
-  assert.throws(() => parseCreateSandboxOptions("ok", { memSizeMiB: "255", port: [], env: [] }), /Memory/);
-  assert.throws(() => parseCreateSandboxOptions("ok", { port: ["70000"], env: [] }), /ports from/);
+  assert.throws(() => parseCreateSandboxOptions("Bad_Name", { env: [] }), /Name must/);
+  assert.throws(() => parseCreateSandboxOptions("ok", { vcpuCount: "33", env: [] }), /CPU count/);
+  assert.throws(() => parseCreateSandboxOptions("ok", { memSizeMib: "255", env: [] }), /Memory/);
 
   const cli = harness([]);
-  await cli.run("create", "agent-task", "--vcpu-count", "4", "--port", "8080/tcp", "--env", "A=b", "--no-wait");
+  await cli.run("create", "agent-task", "--vcpu-count", "4", "--mem-size-mib", "512", "--env", "A=b", "--no-wait");
   const create = cli.service.create as ReturnType<typeof vi.fn>;
   assert.equal(create.mock.calls[0]![0].name, "agent-task");
-  assert.deepEqual(create.mock.calls[0]![0].portMappings, [{ containerPort: 8080, protocol: "tcp" }]);
+  assert.equal(create.mock.calls[0]![0].memSizeMiB, 512);
   assert.deepEqual(create.mock.calls[0]![1], { wait: false });
+
+  const invalidMemory = harness([]);
+  await assert.rejects(invalidMemory.run("create", "agent-task", "--mem-size-mib", "255"), /Memory/);
+  assert.equal((invalidMemory.service.create as ReturnType<typeof vi.fn>).mock.calls.length, 0);
 });
 
 test("state matrix covers every state and lifecycle passes wait behavior", async () => {
@@ -197,7 +214,36 @@ test("delete matches disk CLI behavior while paused cold-start requires confirma
 
 });
 
-test("run uses one-shot exec, streams both outputs, and propagates status", async () => {
+test("wait handles stable and transitional states, targets, output, and timeouts", async () => {
+  const immediate = harness([fakeSandbox({ status: "running" })]);
+  await immediate.run("wait", "one", "--output", "json");
+  assert.equal(JSON.parse(text(immediate.stdout.values)).status, "running");
+
+  for (const [initial, final] of [["pending", "running"], ["pausing", "paused"], ["stopping", "stopped"]] as const) {
+    const item = fakeSandbox({ status: initial });
+    item.refresh = vi.fn(async function(this: Sandbox) { this.status = final; return this; });
+    const cli = harness([item]);
+    await cli.run("wait", "one");
+    assert.equal(item.status, final);
+    assert.match(text(cli.stdout.values), new RegExp(final));
+  }
+
+  const targeted = fakeSandbox({ status: "paused" });
+  targeted.refresh = vi.fn(async function(this: Sandbox) { this.status = "running"; return this; });
+  const targetCli = harness([targeted]);
+  await targetCli.run("wait", "one", "--status", "running");
+  assert.equal(targeted.status, "running");
+
+  const invalid = harness([fakeSandbox()]);
+  await assert.rejects(invalid.run("wait", "one", "--status", "pending"), /Status must be one of/);
+  await assert.rejects(invalid.run("wait", "one", "--timeout", "0"), /at least 1 second/);
+
+  const pending = fakeSandbox({ status: "pending" });
+  const timeoutCli = harness([pending]);
+  await assert.rejects(timeoutCli.run("wait", "one", "--timeout", "1"), /current status is 'pending'/);
+});
+
+test("run preserves argv, streams output, and propagates remote status", async () => {
   const result: SandboxProcessResult = { status: "failed", exitCode: 7, stdout: "", stderr: "" };
   const exec = vi.fn(async (_command: string, options: Parameters<Sandbox["exec"]>[1]) => {
     options?.onOutput?.({ stream: "stdout", offset: 0, data: new TextEncoder().encode("out") });
@@ -206,8 +252,12 @@ test("run uses one-shot exec, streams both outputs, and propagates status", asyn
   });
   const item = fakeSandbox({ exec: exec as Sandbox["exec"] });
   const cli = harness([item]);
-  await cli.run("run", "one", "--env", "A=b", "--timeout", "9", "--", "sh", "-c", "exit 7");
-  assert.equal(exec.mock.calls[0]![0], "sh -c exit 7");
+  const args = ["sh", "-c", "printf '%s\\n' \"$1\"; echo done", "", "a b", "single'quote", "double\"quote", "$HOME", "line\nfeed"];
+  await cli.run("run", "one", "--env", "A=b", "--timeout", "9", "--", ...args);
+  assert.equal(
+    exec.mock.calls[0]![0],
+    `'sh' '-c' 'printf '"'"'%s\\n'"'"' "$1"; echo done' '' 'a b' 'single'"'"'quote' 'double"quote' '$HOME' 'line\nfeed'`,
+  );
   assert.deepEqual(exec.mock.calls[0]![1]?.env, { A: "b" });
   assert.equal(exec.mock.calls[0]![1]?.timeoutSeconds, 9);
   assert.equal(exec.mock.calls[0]![1]?.collectOutput, false);
@@ -217,9 +267,18 @@ test("run uses one-shot exec, streams both outputs, and propagates status", asyn
 
   const paused = harness([fakeSandbox({ status: "paused" })]);
   await assert.rejects(paused.run("run", "one", "echo", "no"), /while it is paused/);
+});
 
-  const timedOut = fakeSandbox({ exec: vi.fn(async () => ({ status: "timed_out", stdout: "", stderr: "" })) as Sandbox["exec"] });
-  const noRemoteCode = harness([timedOut]);
-  await noRemoteCode.run("run", "one", "sleep", "60");
-  assert.deepEqual(noRemoteCode.exitCodes, [1]);
+test("run reports failures without remote stderr", async () => {
+  for (const [result, args, expected] of [
+    [{ status: "timed_out", stdout: "", stderr: "" }, ["--timeout", "1", "--", "sleep", "5"], /Process timed out after 1 second/],
+    [{ status: "failed", exitCode: 9, exitReason: "signal", stdout: "", stderr: "" }, ["false"], /Process failed with exit code 9: signal/],
+    [{ status: "cancelled", exitReason: "sandbox stopped", stdout: "", stderr: "" }, ["false"], /Process cancelled: sandbox stopped/],
+  ] as const) {
+    const item = fakeSandbox({ exec: vi.fn(async () => result) as Sandbox["exec"] });
+    const cli = harness([item]);
+    await cli.run("run", "one", ...args);
+    assert.match(text(cli.stderr.values), expected);
+    assert.deepEqual(cli.exitCodes, [result.exitCode ?? 1]);
+  }
 });

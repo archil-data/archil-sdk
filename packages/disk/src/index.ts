@@ -17,7 +17,7 @@ export { Tokens } from "./tokens.js";
 export type { ListTokensOptions } from "./tokens.js";
 
 export { Sandboxes } from "./sandboxes.js";
-export type { CreateSandboxRequest, ListSandboxesOptions, SandboxPortMapping } from "./sandboxes.js";
+export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
 
 export { Sandbox } from "./sandbox.js";
 export type {

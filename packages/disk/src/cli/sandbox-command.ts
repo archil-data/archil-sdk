@@ -27,6 +27,7 @@ import { runSandboxShell } from "./sandbox-shell.js";
 
 export interface SandboxService {
   list(): Promise<Sandbox[]>;
+  get(id: string): Promise<Sandbox>;
   create(request?: CreateSandboxRequest, options?: { wait?: boolean }): Promise<Sandbox>;
 }
 
@@ -43,6 +44,8 @@ interface SandboxCliDependencies {
   signals?: NodeJS.Process;
   confirm?: (question: string) => Promise<boolean>;
   setExitCode?: (code: number) => void;
+  now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
   validateCredential?: ProfileCredentialValidator;
 }
 
@@ -62,9 +65,10 @@ export const SANDBOX_ACTIONS: Readonly<Record<SandboxStatus, readonly LifecycleA
 };
 
 export async function resolveSandbox(service: SandboxService, idOrName: string): Promise<Sandbox> {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrName)) {
+    return service.get(idOrName);
+  }
   const sandboxes = await service.list();
-  const byId = sandboxes.find(({ id }) => id === idOrName);
-  if (byId) return byId;
   const byName = sandboxes.filter(({ name }) => name === idOrName);
   if (byName.length === 0) throw new Error(`No sandbox found with id or name '${idOrName}'`);
   if (byName.length > 1) {
@@ -83,6 +87,8 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   const stdin = dependencies.stdin ?? process.stdin;
   const signals = dependencies.signals ?? process;
   const setExitCode = dependencies.setExitCode ?? ((code: number) => { process.exitCode = code; });
+  const now = dependencies.now ?? Date.now;
+  const sleep = dependencies.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let service: SandboxService | undefined;
   const program = new Command()
     .name("sandbox")
@@ -134,7 +140,6 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
     .option("--base-image <image>", "Public OCI image", "ubuntu:26.04")
     .option("--max-ttl-seconds <seconds>", "Maximum sandbox lifetime")
     .option("--max-concurrent-processes <count>", "Maximum attached processes")
-    .option("--port <port[/protocol]>", "Expose a container port (repeatable)", (value, previous: string[]) => [...previous, value], [])
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], []);
   create.action(async (name: string | undefined, options: CreateSandboxCliOptions & { output: OutputFormat; wait: boolean }) => {
     const sandbox = await requireService().create(parseCreateSandboxOptions(name, options), { wait: options.wait });
@@ -184,6 +189,34 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
       else output(`Deleted '${sandbox.name}' (${sandbox.id}).`);
     });
 
+  const stableStatuses = ["running", "paused", "stopped", "exited", "failed"] as const satisfies readonly SandboxStatus[];
+  formatOption(program.command("wait <id|name>").description("Wait for a sandbox to reach a stable state"))
+    .option("--status <status>", "Stable status: running | paused | stopped | exited | failed", (value: string) => {
+      if (!(stableStatuses as readonly string[]).includes(value)) {
+        throw new Error(`Status must be one of: ${stableStatuses.join(", ")}`);
+      }
+      return value as typeof stableStatuses[number];
+    })
+    .option("--timeout <seconds>", "Maximum time to wait in seconds", "300")
+    .action(async (target: string, options: { output: OutputFormat; status?: typeof stableStatuses[number]; timeout: string }) => {
+      const timeoutSeconds = Number(options.timeout);
+      if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1) {
+        throw new Error("Wait timeout must be an integer of at least 1 second");
+      }
+      const sandbox = await resolveSandbox(requireService(), target);
+      const deadline = now() + timeoutSeconds * 1000;
+      while (options.status ? sandbox.status !== options.status : !(stableStatuses as readonly SandboxStatus[]).includes(sandbox.status)) {
+        const remaining = deadline - now();
+        if (remaining <= 0) {
+          const desired = options.status ? `status '${options.status}'` : "a stable state";
+          throw new Error(`Timed out after ${timeoutSeconds} seconds waiting for sandbox '${sandbox.name}' to reach ${desired}; current status is '${sandbox.status}'`);
+        }
+        await sleep(Math.min(500, remaining));
+        await sandbox.refresh();
+      }
+      output(formatSandbox(sandbox, options.output));
+    });
+
   program.command("run <id|name> <command...>")
     .description("Run a one-shot command in a running sandbox")
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], [])
@@ -192,11 +225,29 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
       const sandbox = await resolveSandbox(requireService(), target);
       if (sandbox.status !== "running") throw new Error(`Cannot run a command in sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       const runOptions = parseRunOptions(options);
-      const result = await sandbox.exec(command.join(" "), {
+      let receivedStderr = false;
+      const shellCommand = command.map((argument) => argument === ""
+        ? "''"
+        : `'${argument.replaceAll("'", `'"'"'`)}'`).join(" ");
+      const result = await sandbox.exec(shellCommand, {
         ...runOptions,
         collectOutput: false,
-        onOutput: ({ stream, data }) => (stream === "stdout" ? stdout : stderr).write(data),
+        onOutput: ({ stream, data }) => {
+          if (stream === "stderr" && data.byteLength > 0) receivedStderr = true;
+          return (stream === "stdout" ? stdout : stderr).write(data);
+        },
       });
+      if (result.status !== "completed" && !receivedStderr) {
+        let diagnostic: string;
+        if (result.status === "timed_out") {
+          diagnostic = `Process timed out${runOptions.timeoutSeconds === undefined ? "" : ` after ${runOptions.timeoutSeconds} second${runOptions.timeoutSeconds === 1 ? "" : "s"}`}`;
+        } else if (result.status === "failed") {
+          diagnostic = `Process failed${result.exitCode === undefined ? "" : ` with exit code ${result.exitCode}`}`;
+        } else {
+          diagnostic = "Process cancelled";
+        }
+        stderr.write(`${diagnostic}${result.exitReason ? `: ${result.exitReason}` : ""}\n`);
+      }
       setExitCode(resultExitCode(result));
     });
 

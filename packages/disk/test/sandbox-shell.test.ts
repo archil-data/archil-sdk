@@ -9,8 +9,18 @@ class FakeInput extends EventEmitter {
   isTTY = true;
   isRaw = false;
   rawChanges: boolean[] = [];
+  private readonly pendingData: Array<Buffer | string> = [];
   setRawMode(value: boolean) { this.isRaw = value; this.rawChanges.push(value); }
-  resume() {}
+  override emit(eventName: string | symbol, ...args: any[]): boolean {
+    if (eventName === "data" && this.listenerCount("data") === 0) {
+      this.pendingData.push(args[0] as Buffer | string);
+      return false;
+    }
+    return super.emit(eventName, ...args);
+  }
+  resume() {
+    for (const data of this.pendingData.splice(0)) super.emit("data", data);
+  }
 }
 
 class FakeOutput extends EventEmitter {
@@ -21,7 +31,7 @@ class FakeOutput extends EventEmitter {
   write(data: string | Uint8Array) { this.writes.push(data); return true; }
 }
 
-function harness(processOverrides: Partial<SandboxProcess> = {}, startError?: Error) {
+function harness(processOverrides: Partial<SandboxProcess> = {}, startError?: Error, startGate?: Promise<void>) {
   const stdin = new FakeInput();
   const stdout = new FakeOutput();
   const stderr = new FakeOutput();
@@ -42,6 +52,7 @@ function harness(processOverrides: Partial<SandboxProcess> = {}, startError?: Er
     processes: {
       start: vi.fn(async (_command: string, options: { onOutput?: typeof output }) => {
         if (startError) throw startError;
+        await startGate;
         output = options.onOutput;
         return remote;
       }),
@@ -72,21 +83,55 @@ test("normal shell exit restores raw mode and removes every listener", async () 
   assert.equal((h.remote.disconnect as ReturnType<typeof vi.fn>).mock.calls.length, 1);
 });
 
-test("Ctrl+] kills the shell while Ctrl+C and Ctrl+D are forwarded", async () => {
-  let finish!: (result: SandboxProcessResult) => void;
-  const waiting = new Promise<SandboxProcessResult>((resolve) => { finish = resolve; });
-  const h = harness({ wait: vi.fn(() => waiting) as SandboxProcess["wait"] });
-  (h.remote.kill as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-    finish({ status: "cancelled", stdout: "", stderr: "" });
-  });
+test("Ctrl+] returns after kill acknowledgement without waiting for a remote exit", async () => {
+  const h = harness({ wait: vi.fn(() => new Promise(() => {})) as SandboxProcess["wait"] });
   const shell = runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
   await vi.waitFor(() => assert.equal(h.stdin.listenerCount("data"), 1));
   h.stdin.emit("data", Buffer.from([3, 4]));
   await vi.waitFor(() => assert.equal((h.remote.sendInput as ReturnType<typeof vi.fn>).mock.calls.length, 1));
   assert.deepEqual((h.remote.sendInput as ReturnType<typeof vi.fn>).mock.calls[0]![0], new Uint8Array([3, 4]));
-  h.stdin.emit("data", Buffer.from([0x1d]));
-  assert.equal((await shell).status, "cancelled");
+  h.stdin.emit("data", Buffer.from([65, 0x1d, 66]));
+  const result = await shell;
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.exitReason, "terminated by Ctrl+]");
+  assert.deepEqual((h.remote.sendInput as ReturnType<typeof vi.fn>).mock.calls[1]![0], new Uint8Array([65]));
   assert.equal((h.remote.kill as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+});
+
+test("input typed during startup is buffered until the remote handle exists", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const h = harness({}, undefined, gate);
+  const shell = runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
+  await vi.waitFor(() => assert.deepEqual(h.stdin.rawChanges, [true]));
+  assert.equal(h.stdin.listenerCount("data"), 0);
+  h.stdin.emit("data", Buffer.from("buffered\n"));
+  release();
+  await shell;
+  assert.deepEqual((h.remote.sendInput as ReturnType<typeof vi.fn>).mock.calls[0]![0], new Uint8Array(Buffer.from("buffered\n")));
+});
+
+test("termination is idempotent and kill failures reject after cleanup", async () => {
+  const duplicate = harness({ wait: vi.fn(() => new Promise(() => {})) as SandboxProcess["wait"] });
+  const shell = runSandboxShell({ sandbox: duplicate.sandbox, stdin: duplicate.stdin, stdout: duplicate.stdout, stderr: duplicate.stderr, signals: duplicate.signals as never });
+  await vi.waitFor(() => assert.equal(duplicate.stdin.listenerCount("data"), 1));
+  duplicate.stdin.emit("data", Buffer.from([0x1d]));
+  duplicate.stdin.emit("data", Buffer.from([0x1d]));
+  duplicate.signals.emit("SIGTERM");
+  await shell;
+  assert.equal((duplicate.remote.kill as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+
+  const failed = harness({
+    wait: vi.fn(() => new Promise(() => {})) as SandboxProcess["wait"],
+    kill: vi.fn(async () => { throw new Error("kill failed"); }) as SandboxProcess["kill"],
+  });
+  const failing = runSandboxShell({ sandbox: failed.sandbox, stdin: failed.stdin, stdout: failed.stdout, stderr: failed.stderr, signals: failed.signals as never });
+  await vi.waitFor(() => assert.equal(failed.stdin.listenerCount("data"), 1));
+  failed.stdin.emit("data", Buffer.from([0x1d]));
+  await assert.rejects(failing, /kill failed/);
+  assert.equal(failed.stdin.listenerCount("data"), 0);
+  assert.deepEqual(failed.stdin.rawChanges, [true, false]);
+  assert.equal((failed.remote.disconnect as ReturnType<typeof vi.fn>).mock.calls.length, 1);
 });
 
 test("resize and local signals control the remote process", async () => {
