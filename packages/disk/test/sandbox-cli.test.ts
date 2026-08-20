@@ -62,18 +62,20 @@ class FakeInput extends EventEmitter {
   resume() {}
 }
 
-function harness(sandboxes: Sandbox[], options: { tty?: boolean; confirm?: boolean } = {}) {
+function harness(sandboxes: Sandbox[], options: { tty?: boolean; stdoutTty?: boolean; confirm?: boolean } = {}) {
   const stdout = Object.assign(new EventEmitter(), {
-    isTTY: options.tty ?? false,
+    isTTY: options.stdoutTty ?? options.tty ?? false,
     columns: 100,
     rows: 30,
     values: [] as Array<string | Uint8Array>,
     write(data: string | Uint8Array) { this.values.push(data); return true; },
   });
-  const stderr = {
+  const stderr = Object.assign(new EventEmitter(), {
+    isTTY: options.tty ?? false,
+    columns: 100,
     values: [] as Array<string | Uint8Array>,
     write(data: string | Uint8Array) { this.values.push(data); return true; },
-  };
+  });
   const stdin = new FakeInput();
   stdin.isTTY = options.tty ?? false;
   const service: SandboxService = {
@@ -242,6 +244,11 @@ test("delete matches disk CLI behavior while paused cold-start requires confirma
   await accepted.run("start", "one", "--yes");
   assert.deepEqual((paused.start as ReturnType<typeof vi.fn>).mock.calls[0], [{ wait: true }]);
 
+  const redirected = fakeSandbox({ status: "paused" });
+  const redirectedStart = harness([redirected], { tty: true, stdoutTty: false, confirm: true });
+  await redirectedStart.run("start", "one");
+  assert.deepEqual(redirectedStart.confirmations, ["Cold-start 'one' and discard its memory snapshot?"]);
+  assert.deepEqual((redirected.start as ReturnType<typeof vi.fn>).mock.calls[0], [{ wait: true }]);
 });
 
 test("wait handles stable and transitional states, targets, output, and timeouts", async () => {

@@ -129,7 +129,7 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   const waitOption = (command: Command) => command.option("--no-wait", "Return after the operation is accepted");
   const confirmDestructive = async (question: string, yes: boolean): Promise<boolean> => {
     if (yes) return true;
-    if (!stdin.isTTY || !stdout.isTTY) throw new Error("This operation requires --yes when stdin/stdout is non-interactive");
+    if (!stdin.isTTY || !stderr.isTTY) throw new Error("This operation requires --yes when stdin/stderr is non-interactive");
     if (dependencies.confirm) return dependencies.confirm(question);
     const prompt = createInterface({ input: stdin, output: stderr as NodeJS.WritableStream });
     try {
