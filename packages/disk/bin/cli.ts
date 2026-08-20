@@ -185,14 +185,22 @@ profilesCommand
       const existing = config.profiles[name];
       const apiKey = validateApiKey(global.apiKey ?? await promptSecret());
       const regionSource = program.getOptionValueSource("region");
+      const baseUrlSource = program.getOptionValueSource("baseUrl");
       const regionWasExplicit = regionSource === "cli";
       const regionWasConfigured = regionWasExplicit || regionSource === "env";
-      const baseUrl = global.baseUrl ?? (regionWasExplicit ? undefined : existing?.baseUrl);
-      const region = await validateCredentialAndResolveRegion({
-        apiKey,
-        region: regionWasConfigured ? global.region : baseUrl ? existing?.region : undefined,
-        baseUrl,
-      });
+      let baseUrl = global.baseUrl ?? (regionWasExplicit ? undefined : existing?.baseUrl);
+      let region: string;
+      try {
+        region = await validateCredentialAndResolveRegion({
+          apiKey,
+          region: regionWasConfigured ? global.region : baseUrl ? existing?.region : undefined,
+          baseUrl,
+        });
+      } catch (error) {
+        if (regionSource !== undefined || baseUrlSource !== undefined || !existing?.baseUrl) throw error;
+        baseUrl = undefined;
+        region = await validateCredentialAndResolveRegion({ apiKey });
+      }
       await writeProfileCredential(name, apiKey);
       config.profiles[name] = { region, baseUrl };
       config.currentProfile = name;
