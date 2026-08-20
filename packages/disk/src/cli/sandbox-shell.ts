@@ -82,7 +82,14 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
   const requestTermination = (reason: string, signal?: NodeJS.Signals) => {
     if (terminationRequested) {
       if (signal) {
+        stdin.off("data", onInput);
+        stdout.off("resize", onResize);
         removeSignalListeners();
+        if (terminalConfigured) {
+          stdin.setRawMode(priorRaw);
+          terminalConfigured = false;
+        }
+        stdin.pause();
         forceExit(signal);
       }
       return;
@@ -96,7 +103,7 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     const emergency = bytes.indexOf(0x1d);
     if (emergency >= 0) {
       if (emergency > 0) void remote!.sendInput(bytes.subarray(0, emergency)).catch(fail);
-      requestTermination("terminated by Ctrl+]");
+      requestTermination("terminated by Ctrl+]", "SIGTERM");
     } else {
       void remote!.sendInput(bytes).catch(fail);
     }

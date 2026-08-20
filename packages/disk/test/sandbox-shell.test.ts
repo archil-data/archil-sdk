@@ -120,18 +120,33 @@ test("input typed during startup is buffered until the remote handle exists", as
   assert.deepEqual((h.remote.sendInput as ReturnType<typeof vi.fn>).mock.calls[0]![0], new Uint8Array(Buffer.from("buffered\n")));
 });
 
-test("termination is idempotent and kill failures reject after cleanup", async () => {
+test("repeated termination restores the terminal before forcing exit", async () => {
   const duplicate = harness({ wait: vi.fn(() => new Promise(() => {})) as SandboxProcess["wait"] });
   const forcedSignals: NodeJS.Signals[] = [];
-  const shell = runSandboxShell({ sandbox: duplicate.sandbox, stdin: duplicate.stdin, stdout: duplicate.stdout, stderr: duplicate.stderr, signals: duplicate.signals as never, forceExit: (signal) => forcedSignals.push(signal) });
+  const rawAtForceExit: boolean[] = [];
+  const shell = runSandboxShell({
+    sandbox: duplicate.sandbox,
+    stdin: duplicate.stdin,
+    stdout: duplicate.stdout,
+    stderr: duplicate.stderr,
+    signals: duplicate.signals as never,
+    forceExit: (signal) => {
+      forcedSignals.push(signal);
+      rawAtForceExit.push(duplicate.stdin.isRaw);
+    },
+  });
   await vi.waitFor(() => assert.equal(duplicate.stdin.listenerCount("data"), 1));
   duplicate.stdin.emit("data", Buffer.from([0x1d]));
   duplicate.stdin.emit("data", Buffer.from([0x1d]));
-  duplicate.signals.emit("SIGTERM");
   await shell;
   assert.equal((duplicate.remote.kill as ReturnType<typeof vi.fn>).mock.calls.length, 1);
   assert.deepEqual(forcedSignals, ["SIGTERM"]);
+  assert.deepEqual(rawAtForceExit, [false]);
+  assert.equal(duplicate.stdin.listenerCount("data"), 0);
+  assert.equal(duplicate.stdout.listenerCount("resize"), 0);
+});
 
+test("kill failures reject after cleanup", async () => {
   const failed = harness({
     wait: vi.fn(() => new Promise(() => {})) as SandboxProcess["wait"],
     kill: vi.fn(async () => { throw new Error("kill failed"); }) as SandboxProcess["kill"],
