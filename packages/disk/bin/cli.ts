@@ -180,9 +180,9 @@ profilesCommand
     try {
       const global = program.opts<{ apiKey?: string; region?: string; baseUrl?: string; profile?: string }>();
       const config = await loadProfiles();
-      const name = global.profile ?? config.currentProfile;
-      if (!name) throw new Error("Login requires --profile <name>");
-      const existing = config.profiles[name];
+      const selectedName = global.profile ?? config.currentProfile;
+      const existing = selectedName ? config.profiles[selectedName] : undefined;
+      const profileWasExplicit = program.getOptionValueSource("profile") === "cli";
       const apiKey = validateApiKey(global.apiKey ?? await promptSecret());
       const regionSource = program.getOptionValueSource("region");
       const baseUrlSource = program.getOptionValueSource("baseUrl");
@@ -201,6 +201,21 @@ profilesCommand
         baseUrl = undefined;
         region = await validateCredentialAndResolveRegion({ apiKey });
       }
+      let name = selectedName;
+      if (!profileWasExplicit && (!existing || existing.region !== region || existing.baseUrl !== baseUrl)) {
+        name = Object.entries(config.profiles).find(([, profile]) =>
+          profile.region === region && profile.baseUrl === baseUrl)?.[0];
+        if (!name) {
+          name = region;
+          let suffix = 2;
+          while (config.profiles[name] && (
+            config.profiles[name].region !== region || config.profiles[name].baseUrl !== baseUrl
+          )) {
+            name = `${region}-${suffix++}`;
+          }
+        }
+      }
+      if (!name) throw new Error("Unable to select a profile name");
       await writeProfileCredential(name, apiKey);
       config.profiles[name] = { region, baseUrl };
       config.currentProfile = name;
