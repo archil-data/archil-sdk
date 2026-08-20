@@ -67,7 +67,7 @@ test("profile credentials always use protected files and reject unsafe permissio
   }
   await deleteProfileCredential("test", env);
   await assert.rejects(readFile(path), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
-  await assert.rejects(readProfileCredential("test", env), /Missing API key for profile 'test'.*profile login/);
+  await assert.rejects(readProfileCredential("test", env), /Missing API key for profile 'test'.*profile create/);
   assert.equal(validateApiKey("key-one"), "key-one");
   assert.equal(validateApiKey("adt_two"), "adt_two");
   assert.throws(() => validateApiKey(""), /empty/);
@@ -98,7 +98,7 @@ test("TTY secret prompt restores raw mode and always pauses stdin", async () => 
   assert.deepEqual(output, ["Secret: ", "\n"]);
 });
 
-test("login validates explicit regions and auto-detects known production regions", async () => {
+test("profile creation validates explicit regions and auto-detects known production regions", async () => {
   const probes: string[] = [];
   const keys: string[] = [];
   const probe = async ({ apiKey, region }: { apiKey: string; region: string }) => {

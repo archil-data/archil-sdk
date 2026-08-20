@@ -25,7 +25,7 @@ export async function readProfileCredential(
     return validateApiKey(await readFile(path, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`Missing API key for profile '${profile}': run 'disk profile login --profile ${profile}'`);
+      throw new Error(`Missing API key for profile '${profile}': delete and recreate the profile with 'disk profile create --profile ${profile}'`);
     }
     throw error;
   }
@@ -75,7 +75,7 @@ export async function resolveCliCredentials(
   const apiKey = options.apiKey ?? env.ARCHIL_API_KEY ?? (profile && selected ? await readCredential(selected, env) : undefined);
   const region = options.region ?? env.ARCHIL_REGION ?? profile?.region;
   const baseUrl = options.baseUrl ?? env.ARCHIL_BASE_URL ?? profile?.baseUrl;
-  if (!apiKey) throw new Error("Missing API key: pass --api-key, set ARCHIL_API_KEY, or run 'disk profile login'");
+  if (!apiKey) throw new Error("Missing API key: pass --api-key, set ARCHIL_API_KEY, or run 'disk profile create'");
   if (!region) throw new Error("Missing region: pass --region, set ARCHIL_REGION, or select a profile");
   return { apiKey: validateApiKey(apiKey), region, baseUrl, profile: selected };
 }
@@ -120,7 +120,7 @@ export async function promptSecret(
       for (const byte of chunk) {
         if (byte === 3) {
           cleanup();
-          reject(new Error("Login cancelled"));
+          reject(new Error("Profile creation cancelled"));
           return;
         }
         if (byte === 13 || byte === 10) {

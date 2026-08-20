@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
+import { spinner } from "@clack/prompts";
 import { Command, Option } from "commander";
 import { validateCredentialAndResolveRegion } from "../src/cli/credential-validation.js";
 import {
@@ -36,7 +37,7 @@ program
   .description("Manage Archil disks from the command line")
   .version(pkg.version)
   .configureHelp({ showGlobalOptions: true })
-  .addOption(new Option("-k, --api-key <key>", "Archil API key (prefer login, environment variables, or stdin)").env("ARCHIL_API_KEY"))
+  .addOption(new Option("-k, --api-key <key>", "Archil API key (prefer profiles, environment variables, or stdin)").env("ARCHIL_API_KEY"))
   .addOption(new Option("-r, --region <region>", "Archil region").env("ARCHIL_REGION"))
   .addOption(new Option("--base-url <url>", "Override control-plane base URL").env("ARCHIL_BASE_URL"))
   .addOption(new Option("--profile <name>", "Named Archil profile").env("ARCHIL_PROFILE"))
@@ -173,79 +174,45 @@ function printDisk(d: Disk): void {
 const profilesCommand = program.command("profile").description("Manage named Archil profiles and credentials");
 
 profilesCommand
-  .command("login")
-  .description("Create or update a named profile")
+  .command("create")
+  .description("Create a named profile")
   .option("-o, --output <format>", "Output format: text | json", "text")
   .action(async (options: { output: string }) => {
     try {
       const global = program.opts<{ apiKey?: string; region?: string; baseUrl?: string; profile?: string }>();
       const config = await loadProfiles();
-      const selectedName = global.profile ?? config.currentProfile;
-      const existing = selectedName ? config.profiles[selectedName] : undefined;
-      const profileWasExplicit = program.getOptionValueSource("profile") === "cli";
+      if (global.profile && config.profiles[global.profile]) {
+        throw new Error(`Profile '${global.profile}' already exists`);
+      }
       const apiKey = validateApiKey(global.apiKey ?? await promptSecret());
-      const regionSource = program.getOptionValueSource("region");
-      const baseUrlSource = program.getOptionValueSource("baseUrl");
-      const regionWasExplicit = regionSource === "cli";
-      const regionWasConfigured = regionWasExplicit || regionSource === "env";
-      let baseUrl = global.baseUrl ?? (regionWasExplicit ? undefined : existing?.baseUrl);
+      const progress = !global.region && !global.baseUrl && process.stderr.isTTY
+        ? spinner({ output: process.stderr, withGuide: false })
+        : undefined;
+      progress?.start("Finding the API key's region");
       let region: string;
       try {
         region = await validateCredentialAndResolveRegion({
           apiKey,
-          region: regionWasConfigured ? global.region : baseUrl ? existing?.region : undefined,
-          baseUrl,
+          region: global.region,
+          baseUrl: global.baseUrl,
         });
-      } catch (error) {
-        if (
-          regionSource !== undefined || baseUrlSource !== undefined || !existing?.baseUrl ||
-          !(error instanceof ArchilApiError) || error.status !== 401
-        ) throw error;
-        baseUrl = undefined;
-        region = await validateCredentialAndResolveRegion({ apiKey });
+      } finally {
+        progress?.stop("Finished testing regions");
       }
-      let name = selectedName;
-      if (!profileWasExplicit && (!existing || existing.region !== region || existing.baseUrl !== baseUrl)) {
-        name = Object.entries(config.profiles).find(([, profile]) =>
-          profile.region === region && profile.baseUrl === baseUrl)?.[0];
-        if (!name) {
-          name = region;
-          let suffix = 2;
-          while (config.profiles[name] && (
-            config.profiles[name].region !== region || config.profiles[name].baseUrl !== baseUrl
-          )) {
-            name = `${region}-${suffix++}`;
-          }
-        }
+      let name = global.profile ?? region;
+      if (!global.profile) {
+        let suffix = 2;
+        while (config.profiles[name]) name = `${region}-${suffix++}`;
       }
-      if (!name) throw new Error("Unable to select a profile name");
       await writeProfileCredential(name, apiKey);
-      config.profiles[name] = { region, baseUrl };
+      config.profiles[name] = { region, baseUrl: global.baseUrl };
       config.currentProfile = name;
       await saveProfiles(config);
       if (options.output === "json") {
-        console.log(JSON.stringify({ name, region, baseUrl, current: true, loggedIn: true }, null, 2));
+        console.log(JSON.stringify({ name, region, baseUrl: global.baseUrl, current: true }, null, 2));
       } else {
-        console.log(`Logged in profile '${name}' (${region})`);
+        console.log(`Created profile '${name}' (${region})`);
       }
-    } catch (err) {
-      fail(err);
-    }
-  });
-
-profilesCommand
-  .command("logout")
-  .description("Remove the stored credential for a profile")
-  .option("-o, --output <format>", "Output format: text | json", "text")
-  .action(async (options: { output: string }) => {
-    try {
-      const global = program.opts<{ profile?: string }>();
-      const config = await loadProfiles();
-      const name = global.profile ?? config.currentProfile;
-      if (!name || !config.profiles[name]) throw new Error("Logout requires an existing --profile <name>");
-      await deleteProfileCredential(name);
-      if (options.output === "json") console.log(JSON.stringify({ name, loggedIn: false }, null, 2));
-      else console.log(`Logged out profile '${name}'`);
     } catch (err) {
       fail(err);
     }
@@ -267,9 +234,15 @@ profilesCommand
           current: config.currentProfile === name,
         }));
       if (options.output === "json") console.log(JSON.stringify(profiles, null, 2));
-      else for (const profile of profiles) {
-        console.log(`${profile.current ? "*" : " "} ${profile.name}\t${profile.region}\t${profile.baseUrl ?? "default"}`);
-      }
+      else console.log(renderTable(
+        profiles.map((profile) => [
+          profile.current ? "*" : "",
+          profile.name,
+          profile.region,
+          profile.baseUrl ?? "default",
+        ]),
+        ["current", "name", "region", "base URL"],
+      ));
     } catch (err) {
       fail(err);
     }
