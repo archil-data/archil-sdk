@@ -944,77 +944,33 @@ class Disk:
         ...
 
 
-class SandboxExec:
+class SandboxFiles:
 
-    def __init__(self, transport: archil._http._Transport, data: archil._models.SandboxExecData) -> None:
+    def __init__(self, sandbox: typing.Any) -> None:
         ...
 
-    @property
-    def sandbox_id(self) -> str:
-        ...
-
-    @property
-    def id(self) -> str:
-        ...
-
-    @property
-    def command(self) -> str:
-        ...
-
-    @property
-    def status(self) -> typing.Literal['running', 'completed', 'failed', 'cancelled', 'timed_out']:
-        ...
-
-    @property
-    def exit_code(self) -> int | None:
-        ...
-
-    @property
-    def stdout(self) -> str | None:
-        ...
-
-    @property
-    def stderr(self) -> str | None:
-        ...
-
-    @property
-    def exit_reason(self) -> str | None:
-        ...
-
-    @property
-    def execute_time_ms(self) -> int | None:
-        ...
-
-    @property
-    def started_at(self):
-        ...
-
-    @property
-    def finished_at(self):
-        ...
-
-    class __refresh_spec(typing_extensions.Protocol):
-        def __call__(self, /) -> SandboxExec:
+    class __upload_file_spec(typing_extensions.Protocol):
+        def __call__(self, /, local_path: str | os.PathLike, remote_path: str, *, mode: int | None = None) -> None:
             ...
 
-        async def aio(self, /) -> SandboxExec:
+        async def aio(self, /, local_path: str | os.PathLike, remote_path: str, *, mode: int | None = None) -> None:
             ...
 
-    refresh: __refresh_spec
+    upload_file: __upload_file_spec
 
-    class __cancel_spec(typing_extensions.Protocol):
-        def __call__(self, /) -> SandboxExec:
+    class __download_file_spec(typing_extensions.Protocol):
+        def __call__(self, /, remote_path: str, local_path: str | os.PathLike) -> None:
             ...
 
-        async def aio(self, /) -> SandboxExec:
+        async def aio(self, /, remote_path: str, local_path: str | os.PathLike) -> None:
             ...
 
-    cancel: __cancel_spec
+    download_file: __download_file_spec
 
 
 class SandboxProcess:
 
-    def __init__(self, process_id: str, cursor: int, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None, collect_output: bool, new_connection: collections.abc.Callable[[], websockets.asyncio.client.ClientConnection]) -> None:
+    def __init__(self, process_id: str, cursor: int, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None, collect_output: bool, new_connection: collections.abc.Callable[[], websockets.asyncio.client.ClientConnection], control_process: collections.abc.Callable[[dict[str, object]], None]) -> None:
         ...
 
     @property
@@ -1075,10 +1031,10 @@ class SandboxProcess:
     wait: __wait_spec
 
     class __kill_spec(typing_extensions.Protocol):
-        def __call__(self, /) -> archil._models.SandboxProcessResult:
+        def __call__(self, /) -> None:
             ...
 
-        async def aio(self, /) -> archil._models.SandboxProcessResult:
+        async def aio(self, /) -> None:
             ...
 
     kill: __kill_spec
@@ -1100,15 +1056,6 @@ class SandboxProcess:
             ...
 
     _receive: ___receive_spec
-
-    class ___send_input_chunk_spec(typing_extensions.Protocol):
-        def __call__(self, /, data: bytes) -> bool:
-            ...
-
-        async def aio(self, /, data: bytes) -> bool:
-            ...
-
-    _send_input_chunk: ___send_input_chunk_spec
 
     class ___send_json_spec(typing_extensions.Protocol):
         def __call__(self, /, message: dict[str, object]) -> None:
@@ -1183,28 +1130,15 @@ class SandboxProcesses:
             ...
 
     _new_connection: ___new_connection_spec
-class SandboxFiles:
 
-    def __init__(self, sandbox: typing.Any) -> None:
-        ...
-
-    class __upload_file_spec(typing_extensions.Protocol):
-        def __call__(self, /, local_path: str | os.PathLike, remote_path: str, *, mode: int | None = None) -> None:
+    class ___control_spec(typing_extensions.Protocol):
+        def __call__(self, /, request: dict[str, object]) -> None:
             ...
 
-        async def aio(self, /, local_path: str | os.PathLike, remote_path: str, *, mode: int | None = None) -> None:
+        async def aio(self, /, request: dict[str, object]) -> None:
             ...
 
-    upload_file: __upload_file_spec
-
-    class __download_file_spec(typing_extensions.Protocol):
-        def __call__(self, /, remote_path: str, local_path: str | os.PathLike) -> None:
-            ...
-
-        async def aio(self, /, remote_path: str, local_path: str | os.PathLike) -> None:
-            ...
-
-    download_file: __download_file_spec
+    _control: ___control_spec
 
 
 class Sandbox:
@@ -1287,6 +1221,15 @@ class Sandbox:
     def files(self) -> SandboxFiles:
         ...
 
+    class __exec_spec(typing_extensions.Protocol):
+        def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> archil._models.SandboxProcessResult:
+            ...
+
+        async def aio(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> archil._models.SandboxProcessResult:
+            ...
+
+    exec: __exec_spec
+
     class __refresh_spec(typing_extensions.Protocol):
         def __call__(self, /) -> Sandbox:
             ...
@@ -1359,15 +1302,6 @@ class Sandbox:
 
     fork: __fork_spec
 
-    class __create_connection_spec(typing_extensions.Protocol):
-        def __call__(self, /) -> archil._models.SandboxConnection:
-            ...
-
-        async def aio(self, /) -> archil._models.SandboxConnection:
-            ...
-
-    create_connection: __create_connection_spec
-
     class __delete_spec(typing_extensions.Protocol):
         def __call__(self, /) -> None:
             ...
@@ -1376,42 +1310,6 @@ class Sandbox:
             ...
 
     delete: __delete_spec
-
-    class __exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, command: str, *, command_tty: bool = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, wait: bool = True) -> SandboxExec:
-            ...
-
-        async def aio(self, /, command: str, *, command_tty: bool = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, wait: bool = True) -> SandboxExec:
-            ...
-
-    exec: __exec_spec
-
-    class __list_execs_spec(typing_extensions.Protocol):
-        def __call__(self, /) -> list[SandboxExec]:
-            ...
-
-        async def aio(self, /) -> list[SandboxExec]:
-            ...
-
-    list_execs: __list_execs_spec
-
-    class __get_exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, exec_id: str) -> SandboxExec:
-            ...
-
-        async def aio(self, /, exec_id: str) -> SandboxExec:
-            ...
-
-    get_exec: __get_exec_spec
-
-    class __cancel_exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, exec_id: str) -> SandboxExec:
-            ...
-
-        async def aio(self, /, exec_id: str) -> SandboxExec:
-            ...
-
-    cancel_exec: __cancel_exec_spec
 
 
 class Sandboxes:

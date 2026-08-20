@@ -61,16 +61,11 @@ sandbox = archil.create_sandbox(
     mem_size_mib=8192,
 )
 
-execution = sandbox.processes.start("uname -a")
-result = execution.wait()
+result = sandbox.exec("uname -a")
 print(result.stdout)
-
-# Existing API for durable control-plane exec records.
-running_exec = sandbox.exec("sleep 60", wait=False)
 
 sandbox.stop()
 fork = sandbox.fork(name="agent-task")
-connection = fork.create_connection()
 fork.stop()
 fork.delete()
 
@@ -112,13 +107,15 @@ only closes the client connection; `kill()` terminates the process. Set
 output in the process handle or result. Resize and kill use separate one-shot
 process controls, so they do not wait behind stdin. `kill()` returns after the
 control is acknowledged; `wait()` observes exit. `max_concurrent_execs`
-limits attached exec sessions; detached processes and one-shot controls do not
+limits attached process sessions; detached processes and one-shot controls do not
 count. Pausing a sandbox disconnects attachments but preserves its processes
 for reattachment after resume.
 Processes end when their sandbox is stopped or expires. After reconnecting with
 an offset, `wait().stdout` and `wait().stderr` contain the output received by
-that handle from that offset, not output from before it. The existing `exec`
-API remains available for durable control-plane exec records.
+that handle from that offset, not output from before it. `sandbox.exec()` is the
+one-call start-and-wait convenience for ordinary commands. It uses
+`sandbox.processes` internally and does not create a durable control-plane exec
+record; use `sandbox.processes.start()` when you need the process handle.
 
 Transfer files directly between the local machine and a running sandbox:
 
@@ -132,10 +129,10 @@ file in memory. Downloads request one bounded chunk at a time; a short or empty
 chunk marks end-of-file. Uploads and downloads replace their destination only
 after the transfer succeeds.
 
-`create`, `start`, `stop`, `pause`, `resume`, `fork`, and non-interactive
-`exec` wait for completion by default. The server handles the initial wait; if
-its wait budget expires first, the SDK continues polling. Pass `wait=False` to
-return as soon as the operation is accepted.
+`create`, `start`, `stop`, `pause`, `resume`, and `fork` wait for completion by
+default. The server handles the initial wait; if its wait budget expires first,
+the SDK continues polling. Pass `wait=False` to return as soon as the lifecycle
+operation is accepted. `sandbox.exec()` always waits for process exit.
 
 ### Delegations
 

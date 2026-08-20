@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Remove the deprecated control-plane sandbox exec resources and raw connection API. `sandbox.exec()` now starts
+  and waits for a runtime-owned process; use `sandbox.processes` for detachable and resumable processes.
+
 ## 0.11.0
 
 - Add runtime-owned sandbox processes with terminal I/O, disconnect, and reconnect support.

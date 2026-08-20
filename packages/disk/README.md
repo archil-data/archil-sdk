@@ -89,8 +89,7 @@ const sandbox = await client.sandboxes.create({
   memSizeMiB: 8192,
 });
 
-const execution = await sandbox.processes.start("uname -a");
-const result = await execution.wait();
+const result = await sandbox.exec("uname -a");
 console.log(result.stdout);
 
 const terminal = await sandbox.processes.start("codex", {
@@ -112,12 +111,8 @@ await resumed.kill();
 await sandbox.start();
 await sandbox.resume();
 
-// Existing exec API for durable control-plane exec records.
-const runningExec = await sandbox.exec("sleep 60", { wait: false });
-
 await sandbox.stop();
 const fork = await sandbox.fork({ name: "agent-task" });
-const connection = await fork.createConnection();
 await fork.stop();
 await fork.delete();
 
@@ -141,11 +136,14 @@ frames. Set `collectOutput: false` to stream through `onOutput` without
 retaining decoded output in the process handle or result. Resize and kill use
 separate one-shot process controls, so they do not wait behind stdin.
 `kill()` returns after the control is acknowledged; `wait()` observes exit.
-`maxConcurrentExecs` limits attached exec sessions; detached processes and
+`maxConcurrentExecs` limits attached process sessions; detached processes and
 one-shot controls do not count. Pausing a sandbox disconnects attachments but
 preserves its processes for reattachment after resume. Processes end when
 their sandbox is stopped or expires.
-The existing `exec` API remains available for durable control-plane exec records.
+`sandbox.exec()` is the one-call start-and-wait convenience for ordinary
+commands. It uses `sandbox.processes` internally and does not create a durable
+control-plane exec record; use `sandbox.processes.start()` when you need the
+process handle.
 
 Transfer files through the sandbox process connection without buffering the
 whole file in memory:

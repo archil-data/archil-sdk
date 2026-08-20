@@ -236,7 +236,6 @@ SandboxStatus = Literal[
     "deleting",
     "deleted",
 ]
-SandboxExecStatus = Literal["running", "completed", "failed", "cancelled", "timed_out"]
 SandboxProcessStatus = Literal["running", "completed", "failed", "cancelled", "timed_out"]
 SandboxProcessStream = Literal["stdout", "stderr"]
 SandboxPlatform = Literal["arm64", "amd64"]
@@ -295,47 +294,6 @@ class SandboxData:
             expires_at=_parse_datetime(d["expires_at"]) if d.get("expires_at") else None,
             exit_reason=d.get("exit_reason"),
         )
-
-
-@dataclass(frozen=True)
-class SandboxExecData:
-    sandbox_id: str
-    id: str
-    command: str
-    status: SandboxExecStatus
-    started_at: datetime
-    exit_code: Optional[int] = None
-    stdout: Optional[str] = None
-    stderr: Optional[str] = None
-    exit_reason: Optional[str] = None
-    execute_time_ms: Optional[int] = None
-    finished_at: Optional[datetime] = None
-
-    @classmethod
-    def from_json(cls, d: dict) -> "SandboxExecData":
-        return cls(
-            sandbox_id=d["sandbox_id"],
-            id=d["exec_id"],
-            command=d["command"],
-            status=d["status"],
-            exit_code=d.get("exit_code"),
-            stdout=d.get("stdout"),
-            stderr=d.get("stderr"),
-            exit_reason=d.get("exit_reason"),
-            execute_time_ms=d.get("execute_time_ms"),
-            started_at=_parse_datetime(d["started_at"]),
-            finished_at=_parse_datetime(d["finished_at"]) if d.get("finished_at") else None,
-        )
-
-
-@dataclass(frozen=True)
-class SandboxConnection:
-    url: str
-    expires_at: datetime
-
-    @classmethod
-    def from_json(cls, d: dict) -> "SandboxConnection":
-        return cls(url=d["url"], expires_at=_parse_datetime(d["expires_at"]))
 
 
 @dataclass(frozen=True)
