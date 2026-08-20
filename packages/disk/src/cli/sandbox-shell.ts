@@ -6,6 +6,7 @@ interface ShellInput {
   isRaw?: boolean;
   setRawMode(mode: boolean): unknown;
   resume(): unknown;
+  pause(): unknown;
   on(event: "data", listener: (data: Buffer | string) => void): unknown;
   off(event: "data", listener: (data: Buffer | string) => void): unknown;
 }
@@ -125,6 +126,7 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     signals.off("SIGTERM", onSignal);
     signals.off("SIGHUP", onSignal);
     stdin.setRawMode(priorRaw);
+    stdin.pause();
     if (remote && !result && !terminationRequested) await remote.kill().catch(() => {});
     if (remote) await remote.disconnect().catch(() => {});
   }

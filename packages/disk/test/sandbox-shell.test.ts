@@ -8,9 +8,12 @@ import { runSandboxShell } from "../src/cli/sandbox-shell.js";
 class FakeInput extends EventEmitter {
   isTTY = true;
   isRaw = false;
+  paused = true;
+  pauseCalls = 0;
   rawChanges: boolean[] = [];
   private readonly pendingData: Array<Buffer | string> = [];
   setRawMode(value: boolean) { this.isRaw = value; this.rawChanges.push(value); }
+  isPaused() { return this.paused; }
   override emit(eventName: string | symbol, ...args: any[]): boolean {
     if (eventName === "data" && this.listenerCount("data") === 0) {
       this.pendingData.push(args[0] as Buffer | string);
@@ -19,8 +22,10 @@ class FakeInput extends EventEmitter {
     return super.emit(eventName, ...args);
   }
   resume() {
+    this.paused = false;
     for (const data of this.pendingData.splice(0)) super.emit("data", data);
   }
+  pause() { this.paused = true; this.pauseCalls++; }
 }
 
 class FakeOutput extends EventEmitter {
@@ -72,6 +77,8 @@ test("normal shell exit restores raw mode and removes every listener", async () 
   });
   assert.equal(result.exitCode, 0);
   assert.deepEqual(h.stdin.rawChanges, [true, false]);
+  assert.equal(h.stdin.paused, true);
+  assert.equal(h.stdin.pauseCalls, 1);
   assert.equal(h.stdin.listenerCount("data"), 0);
   assert.equal(h.stdout.listenerCount("resize"), 0);
   assert.equal(h.signals.listenerCount("SIGINT"), 0);

@@ -52,8 +52,8 @@ async function runFixture(mode: "exit" | "escape"): Promise<string> {
 test.skipIf(process.platform === "win32")("real PTY restores raw mode after ordinary exit and Ctrl+]", async () => {
   const ordinary = await runFixture("exit");
   assert.match(ordinary, /pty-ok/);
-  assert.match(ordinary, /RESULT completed RAW false/);
+  assert.match(ordinary, /RESULT completed RAW false PAUSED true/);
 
   const escaped = await runFixture("escape");
-  assert.match(escaped, /RESULT cancelled RAW false/);
+  assert.match(escaped, /RESULT cancelled RAW false PAUSED true/);
 }, 30_000);

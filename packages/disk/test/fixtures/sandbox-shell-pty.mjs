@@ -1,35 +1,28 @@
 import process from "node:process";
-import * as pty from "node-pty";
 import { runSandboxShell } from "../../src/cli/sandbox-shell.ts";
 
 const mode = process.argv[2];
 if (mode !== "exit" && mode !== "escape") throw new Error("expected exit or escape mode");
 
-let remote;
+let finish;
+const exited = new Promise((resolve) => { finish = resolve; });
 const sandbox = {
   processes: {
     async start(_command, options) {
-      remote = pty.spawn("/bin/sh", ["-l"], {
-        cols: options.terminal.cols,
-        rows: options.terminal.rows,
-        env: process.env,
-      });
-      remote.onData((data) => options.onOutput({
-        stream: "stdout",
-        offset: 0,
-        data: new TextEncoder().encode(data),
-      }));
-      const exited = new Promise((resolve) => remote.onExit(({ exitCode }) => resolve({
-        status: "completed",
-        exitCode,
-        stdout: "",
-        stderr: "",
-      })));
+      options.onOutput({ stream: "stdout", offset: 0, data: new TextEncoder().encode("$ ") });
       return {
         id: `local-${mode}`,
-        sendInput: async (data) => remote.write(typeof data === "string" ? data : Buffer.from(data).toString()),
-        resize: async ({ cols, rows }) => remote.resize(cols, rows),
-        kill: async () => remote.kill(),
+        sendInput: async (data) => {
+          const input = typeof data === "string" ? data : Buffer.from(data).toString();
+          if (input.includes("echo pty-ok")) {
+            options.onOutput({ stream: "stdout", offset: 2, data: new TextEncoder().encode("pty-ok\r\n$ ") });
+          }
+          if (input.includes("exit")) {
+            finish({ status: "completed", exitCode: 0, stdout: "", stderr: "" });
+          }
+        },
+        resize: async () => {},
+        kill: async () => {},
         wait: () => mode === "escape" ? new Promise(() => {}) : exited,
         disconnect: async () => {},
       };
@@ -39,7 +32,8 @@ const sandbox = {
 
 try {
   const result = await runSandboxShell({ sandbox });
-  process.stdout.write(`\r\nRESULT ${result.status} RAW ${String(process.stdin.isRaw)}\r\n`, () => process.exit(0));
+  process.stdout.write(`\r\nRESULT ${result.status} RAW ${String(process.stdin.isRaw)} PAUSED ${String(process.stdin.isPaused())}\r\n`);
 } catch (error) {
-  process.stderr.write(`\r\nFIXTURE ERROR ${error instanceof Error ? error.stack : String(error)}\r\n`, () => process.exit(1));
+  process.stderr.write(`\r\nFIXTURE ERROR ${error instanceof Error ? error.stack : String(error)}\r\n`);
+  process.exitCode = 1;
 }

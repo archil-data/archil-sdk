@@ -239,7 +239,7 @@ The findings above remain the original evidence from commit `0a0d2a1`. The remed
 | --- | --- | --- |
 | 1. Memory option ignored | Align Commander's `memSizeMib` attribute and add parser-level coverage. | Automated PASS; live retest pending |
 | 2. Run argument corruption | POSIX-quote each collected argv token; keep `sh -c` explicit. | Automated PASS; live retest pending |
-| 3. Shell cannot exit | Return after acknowledged emergency kill and buffer startup input. Ordinary PTY exit remains a control-plane/runtime release blocker. | Unit and real-PTY fixture PASS; deployed retest pending |
+| 3. Shell cannot exit | Return after acknowledged emergency kill, buffer startup input, and pause local stdin during cleanup so Node can exit. | Unit, real-PTY fixture, and deployed retest PASS |
 | 4. Unsupported ports | Remove sandbox port mappings from this SDK/CLI; API-types contract update remains external. | SDK/CLI automated PASS; API-types release pending |
 | 5. Re-login clears URL | Preserve omitted region/base URL values and test explicit replacement. | Automated PASS; live retest pending |
 | 6. Logged-out profile ENOENT | Emit a profile-specific login diagnostic and show login state in `profile list`. | Automated PASS; live retest pending |
@@ -273,7 +273,7 @@ The locally built remediation was exercised against test yellow after automated 
 - **PASS:** `pause --no-wait`, `resume --no-wait`, and `stop --no-wait` each synchronized through `sandbox wait --status ...`.
 - **PASS:** isolated-profile re-login preserved the test-yellow base URL; profile state and the logged-out diagnostic were correct.
 - **FAIL (backend blocker):** deleting a stopped fork and immediately deleting its stopped parent still returned the dependent-fork 409. Retrying after ten seconds succeeded.
-- **FAIL (backend blocker):** ordinary PTY `exit` still did not settle. Ctrl+] also did not return because the separate process-kill control request itself was not acknowledged within 30 seconds; the CLI no longer waits for a subsequent process exit once an acknowledgement arrives.
+- **PASS:** ordinary PTY `exit` and Ctrl+] both returned within ten seconds. Raw protocol probes proved the runtime had already emitted exit/kill responses; the remaining hang was resumed local stdin keeping the Node process alive after shell cleanup.
 - **PASS:** all remediation-created sandboxes were removed after the retest.
 
-Release remains blocked until the API-types update, PTY exit/kill-control fixes, fork-deletion consistency fix, and the remaining test-yellow retest all pass.
+Release remains blocked until the API-types update, fork-deletion consistency fix, and the remaining test-yellow retest all pass.
