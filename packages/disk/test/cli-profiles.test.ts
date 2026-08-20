@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
 import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "vitest";
@@ -74,28 +74,28 @@ test("profile credentials always use protected files and reject unsafe permissio
   assert.throws(() => validateApiKey("key one"), /whitespace/);
 });
 
-test("TTY secret prompt restores raw mode and always pauses stdin", async () => {
-  class TestInput extends EventEmitter {
+test("TTY secret prompt uses Clack and restores raw mode", async () => {
+  class TestInput extends PassThrough {
     isTTY = true;
     isRaw = false;
-    paused = false;
     rawChanges: boolean[] = [];
-    pauseCalls = 0;
-    isPaused() { return this.paused; }
     setRawMode(value: boolean) { this.isRaw = value; this.rawChanges.push(value); }
-    resume() { this.paused = false; }
-    pause() { this.paused = true; this.pauseCalls++; }
-    async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {}
+  }
+  class TestOutput extends PassThrough {
+    columns = 80;
   }
   const input = new TestInput();
-  const output: string[] = [];
-  const secret = promptSecret("Secret: ", input, { write: (value) => output.push(value) });
-  input.emit("data", Buffer.from("key-value\r"));
+  const output = new TestOutput();
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString(); });
+  const secret = promptSecret("Secret: ", input, output);
+  input.write("key-value\r");
   assert.equal(await secret, "key-value");
-  assert.deepEqual(input.rawChanges, [true, false]);
-  assert.equal(input.pauseCalls, 1);
-  assert.equal(input.listenerCount("data"), 0);
-  assert.deepEqual(output, ["Secret: ", "\n"]);
+  assert.equal(input.rawChanges[0], true);
+  assert.equal(input.rawChanges.at(-1), false);
+  assert.equal(input.isRaw, false);
+  assert.match(rendered, /Secret/);
+  assert.equal(rendered.includes("key-value"), false);
 });
 
 test("profile creation validates explicit regions and auto-detects known production regions", async () => {

@@ -1,5 +1,7 @@
 import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { Readable, Writable } from "node:stream";
+import { isCancel, password } from "@clack/prompts";
 import { credentialFilePath } from "./config-paths.js";
 import type { DiskProfile } from "./profiles.js";
 
@@ -104,34 +106,19 @@ export async function promptSecret(
     for await (const chunk of input) chunks.push(Buffer.from(chunk));
     return validateApiKey(Buffer.concat(chunks).toString("utf8"));
   }
-  output.write(prompt);
-  const wasRaw = input.isRaw;
-  input.setRawMode(true);
-  input.resume();
-  return new Promise((resolve, reject) => {
-    let value = "";
-    const cleanup = () => {
-      input.off("data", onData);
-      input.setRawMode(wasRaw);
-      input.pause();
-      output.write("\n");
-    };
-    const onData = (chunk: Buffer) => {
-      for (const byte of chunk) {
-        if (byte === 3) {
-          cleanup();
-          reject(new Error("Profile creation cancelled"));
-          return;
-        }
-        if (byte === 13 || byte === 10) {
-          cleanup();
-          try { resolve(validateApiKey(value)); } catch (error) { reject(error); }
-          return;
-        }
-        if (byte === 127 || byte === 8) value = value.slice(0, -1);
-        else if (byte >= 32) value += String.fromCharCode(byte);
+  const result = await password({
+    message: prompt.replace(/:\s*$/, ""),
+    input: input as unknown as Readable,
+    output: output as unknown as Writable,
+    withGuide: false,
+    validate(value) {
+      try {
+        validateApiKey(value ?? "");
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
       }
-    };
-    input.on("data", onData);
+    },
   });
+  if (isCancel(result)) throw new Error("Profile creation cancelled");
+  return validateApiKey(result);
 }
