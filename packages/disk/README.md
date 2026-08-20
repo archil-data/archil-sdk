@@ -41,78 +41,34 @@ npx disk api-keys delete key-abc123
 
 ### Profiles
 
-The package installs both `disk` and `sandbox`. They share the same named profiles, so a profile created with either executable is immediately available to the other:
+`disk` and `sandbox` share named profiles:
 
 ```bash
 npx disk profile create --profile test-yellow --region aws-us-east-1
-npx sandbox profile list
 npx sandbox profile use test-yellow
 npx sandbox list
-
-# Select a profile for one invocation without changing the default.
-npx sandbox --profile test-yellow list
-
-npx disk profile delete test-yellow
 ```
 
-Profile creation reads the API key without echo from an interactive terminal, or from stdin in headless use. Profile metadata is stored in the platform's per-user configuration directory. Credentials are stored separately in files protected with user-only permissions; the CLIs refuse group/world-readable credential files on Unix. Profile listings never display credentials.
-
-Credential precedence is explicit flags, then `ARCHIL_API_KEY` / `ARCHIL_REGION` / `ARCHIL_BASE_URL` / `ARCHIL_PROFILE`, then the selected profile. Prefer profiles, environment variables, or stdin over `--api-key`, because command arguments may appear in shell history and process listings. Profiles are a CLI feature only: `new Archil()` and `configure()` never read profile files.
+`profile create` securely prompts for the API key. Flags override environment variables, which override the selected profile. The library API does not read profiles.
 
 ### Sandbox CLI
 
-Use the sibling `sandbox` executable to manage persistent sandboxes:
+The `sandbox` executable manages persistent sandboxes:
 
 ```bash
-# Inspect. Tables are the default; JSON is suitable for scripts.
 npx sandbox list
-npx sandbox list -o json | jq '.[].id'
-npx sandbox get prepared-environment
-
-# Create and wait for it to start.
-npx sandbox create prepared-environment \
-  --vcpu-count 4 \
-  --mem-size-mib 8192 \
-  --base-image ubuntu:26.04 \
-  --max-ttl-seconds 3600 \
-  --max-concurrent-processes 8 \
-  --env NODE_ENV=development
-
-# Lifecycle operations wait by default; --no-wait returns once accepted.
-npx sandbox pause prepared-environment
-npx sandbox resume prepared-environment --no-wait
-npx sandbox wait prepared-environment --status running --timeout 60 -o json
-npx sandbox stop prepared-environment
-npx sandbox start prepared-environment
-npx sandbox fork prepared-environment agent-task
-npx sandbox delete agent-task
+npx sandbox create dev --vcpu-count 4 --mem-size-mib 8192 --env NODE_ENV=development
+npx sandbox pause dev
+npx sandbox resume dev --no-wait
+npx sandbox wait dev --status running --timeout 60
+npx sandbox fork dev agent-task
+npx sandbox run dev -- sh -c 'echo "$NODE_ENV"'
+npx sandbox shell dev
+npx sandbox stop dev
+npx sandbox delete dev
 ```
 
-Targets may be exact sandbox IDs or exact, uniquely matching names. `create`, `start`, `pause`, `resume`, `stop`, and `fork` accept `--no-wait`. Read/create/lifecycle commands that return a sandbox accept `-o table|json`.
-
-The create limits are 1–32 vCPUs and 256–65,536 MiB of memory. `--env` is repeatable with syntax `NAME=value`. Port exposure is not available on sandbox creation; the deployed API uses a separate sandbox-service model that is not yet exposed by this SDK.
-
-`sandbox wait <id|name>` polls every 500 ms until the sandbox reaches any stable state (`running`, `paused`, `stopped`, `exited`, or `failed`). Pass `--status` to require one exact stable state and `--timeout` to change the default 300-second deadline. This is the supported synchronization primitive after a `--no-wait` operation.
-
-Like `disk delete`, `sandbox delete` treats the explicit delete command as confirmation and does not prompt. Cold-starting a paused sandbox does prompt because it discards the saved memory state; pass `start --yes` for scripts. Declining that prompt makes no API request.
-
-Run an ordinary command through the one-shot process API:
-
-```bash
-npx sandbox run prepared-environment -- uname -a
-npx sandbox run prepared-environment --env MODE=ci --timeout 30 -- sh -c 'echo "$MODE"; exit 0'
-npx sandbox run prepared-environment -- printf '<%s>\n' 'argument with spaces'
-```
-
-`run` requires a running sandbox. Every token after `--` remains one remote argument: the CLI POSIX-quotes each argument before sending it to the remote shell, so spaces, empty arguments, quotes, `$`, and shell metacharacters are not reinterpreted. Use explicit `sh -c SCRIPT` arguments when shell evaluation is intended. The command streams remote stdout and stderr to the matching local streams and exits with the remote status. If a failed, cancelled, or timed-out process supplies no stderr, the CLI prints a local diagnostic; timeout diagnostics include the configured duration. It does not attach local stdin. The CLI does not expose the removed durable exec-record history, lookup, or cancellation APIs.
-
-Open an interactive PTY when a command needs input:
-
-```bash
-npx sandbox shell prepared-environment
-```
-
-The shell runs `/bin/sh -l`, forwards resize events and ordinary `Ctrl+C`/`Ctrl+D`, and restores the local terminal on exit. `Ctrl+]` is an emergency escape that kills the CLI-created remote shell and returns as soon as the kill is acknowledged; it does not depend on a later remote exit event.
+Commands accept an exact ID or unique name. Lifecycle commands wait by default; use `--no-wait` to return once accepted. Use `-o json` for structured output. Starting a paused sandbox discards its memory snapshot and prompts unless `--yes` is passed. In a shell, `Ctrl+]` is the emergency escape.
 
 ## Library
 

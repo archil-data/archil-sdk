@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { spinner } from "@clack/prompts";
 import { Command } from "commander";
+import { validate as isUuid } from "uuid";
 import type { ArchilOptions } from "../archil.js";
 import type { SandboxProcess, SandboxProcessResult } from "../sandbox-process.js";
 import type { Sandbox, SandboxStatus } from "../sandbox.js";
@@ -67,9 +68,7 @@ export const SANDBOX_ACTIONS: Readonly<Record<SandboxStatus, readonly LifecycleA
 };
 
 export async function resolveSandbox(service: SandboxService, idOrName: string): Promise<Sandbox> {
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrName)) {
-    return service.get(idOrName);
-  }
+  if (isUuid(idOrName)) return service.get(idOrName);
   const sandboxes = await service.list();
   const byName = sandboxes.filter(({ name }) => name === idOrName);
   if (byName.length === 0) throw new Error(`No sandbox found with id or name '${idOrName}'`);

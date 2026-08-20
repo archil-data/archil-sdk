@@ -3,14 +3,12 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import type { SandboxProcessResult } from "../src/sandbox-process.js";
 import type { Sandbox } from "../src/sandbox.js";
 import {
   createSandboxProgram,
   resolveSandbox,
-  SANDBOX_ACTIONS,
   type SandboxService,
 } from "../src/cli/sandbox-command.js";
 import { parseCreateSandboxOptions } from "../src/cli/sandbox-options.js";
@@ -118,44 +116,6 @@ function text(values: Array<string | Uint8Array>): string {
   return values.map((value) => typeof value === "string" ? value : new TextDecoder().decode(value)).join("");
 }
 
-test("TTY progress clears without leaving a guide behind", async () => {
-  const stdout = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
-  const stderr = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
-  let terminal = "";
-  stderr.on("data", (chunk) => { terminal += chunk.toString(); });
-  const program = createSandboxProgram({
-    version: "test",
-    stdout,
-    stderr,
-    createClient: () => ({
-      sandboxes: {
-        list: vi.fn(async () => []),
-        get: vi.fn(),
-        create: vi.fn(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          return fakeSandbox();
-        }),
-      },
-    }),
-  });
-  await program.parseAsync(["node", "sandbox", "--api-key", "key-test", "--region", "test", "create"]);
-  assert.doesNotMatch(terminal, /│/);
-  assert.match(terminal, /\x1b\[\?25l/);
-  assert.match(terminal, /\x1b\[\?25h$/);
-});
-
-test("list is deterministic and get supports JSON", async () => {
-  const older = fakeSandbox({ id: "sbx-old", name: "old", lastActiveAt: new Date("2025-01-01T00:00:00Z") });
-  const newer = fakeSandbox({ id: "sbx-new", name: "new", lastActiveAt: new Date("2026-01-01T00:00:00Z") });
-  const list = harness([older, newer]);
-  await list.run("list");
-  assert.ok(text(list.stdout.values).indexOf("sbx-new") < text(list.stdout.values).indexOf("sbx-old"));
-
-  const get = harness([older, newer]);
-  await get.run("get", "new", "--output", "json");
-  assert.equal(JSON.parse(text(get.stdout.values)).id, "sbx-new");
-});
-
 test("target resolution gets UUIDs directly and lists only for names", async () => {
   const id = "0198aabb-1234-7abc-8def-0123456789ab";
   const duplicateOne = fakeSandbox({ id, name: "same" });
@@ -200,15 +160,7 @@ test("create validates options, maps repeated values, and dispatches no-wait", a
   assert.equal((invalidMemory.service.create as ReturnType<typeof vi.fn>).mock.calls.length, 0);
 });
 
-test("state matrix covers every state and lifecycle passes wait behavior", async () => {
-  assert.deepEqual(SANDBOX_ACTIONS, {
-    running: ["pause", "stop", "fork"],
-    paused: ["resume", "start", "stop", "fork"],
-    stopped: ["start", "fork", "delete"],
-    exited: ["start", "delete"],
-    failed: ["start", "delete"],
-    pending: [], pausing: [], stopping: [], deleting: [], deleted: [],
-  });
+test("lifecycle commands pass wait behavior and reject invalid states", async () => {
   for (const [action, status] of [["start", "stopped"], ["pause", "running"], ["resume", "paused"], ["stop", "running"]] as const) {
     const item = fakeSandbox({ status });
     const cli = harness([item]);

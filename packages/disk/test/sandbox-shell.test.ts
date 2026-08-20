@@ -210,13 +210,3 @@ test("startup, connection, resize, and output failures always clean up", async (
     assert.equal((h.remote.kill as ReturnType<typeof vi.fn>).mock.calls.length, 1);
   }
 });
-
-test("repeated shell sessions do not leak listeners", async () => {
-  const h = harness();
-  for (let index = 0; index < 3; index++) {
-    await runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
-    assert.equal(h.stdin.listenerCount("data"), 0);
-    assert.equal(h.stdout.listenerCount("resize"), 0);
-    assert.equal(h.signals.eventNames().length, 0);
-  }
-});

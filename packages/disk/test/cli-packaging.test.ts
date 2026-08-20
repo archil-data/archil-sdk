@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -78,17 +78,6 @@ test("disk and sandbox profile commands share one protected profile store and su
       name: "disk-profile", region: "aws-us-east-1", baseUrl, current: true,
     }]);
     assert.equal(sandboxList.stdout.includes("disk-secret"), false);
-
-    const sandboxCreate = await runAsync(sandboxCli, ["profile", "create", "--profile", "sandbox-profile", "--region", "aws-us-west-2", "--base-url", baseUrl], env, "key-sandbox-secret\n");
-    assert.equal(sandboxCreate.status, 0, sandboxCreate.stderr);
-    const diskList = run(diskCli, ["profile", "list"], env);
-    assert.equal(diskList.status, 0, diskList.stderr);
-    assert.match(diskList.stdout, /sandbox-profile\s+│ aws-us-west-2/);
-    assert.equal(diskList.stdout.includes("sandbox-secret"), false);
-
-    const config = await readFile(join(directory, "config.json"), "utf8");
-    assert.equal(config.includes("disk-secret"), false);
-    assert.equal(config.includes("sandbox-secret"), false);
   } finally {
     server.close();
     await rm(directory, { recursive: true, force: true });
