@@ -176,17 +176,13 @@ test("state matrix covers every state and lifecycle passes wait behavior", async
   await assert.rejects(invalid.run("stop", "one"), /while it is pending/);
 });
 
-test("delete and paused cold-start enforce confirmations without dispatching on decline", async () => {
+test("delete matches disk CLI behavior while paused cold-start requires confirmation", async () => {
   const stopped = fakeSandbox({ status: "stopped" });
-  const noninteractive = harness([stopped]);
-  await assert.rejects(noninteractive.run("delete", "one"), /requires --yes/);
-  assert.equal((stopped.delete as ReturnType<typeof vi.fn>).mock.calls.length, 0);
-
-  const declinedDelete = harness([stopped], { tty: true, confirm: false });
-  await declinedDelete.run("delete", "one");
-  assert.match(text(declinedDelete.stdout.values), /Cancelled deletion/);
-  assert.deepEqual(declinedDelete.confirmations, ["Delete sandbox 'one' permanently?"]);
-  assert.equal((stopped.delete as ReturnType<typeof vi.fn>).mock.calls.length, 0);
+  const deletion = harness([stopped]);
+  await deletion.run("delete", "one", "--output", "json");
+  assert.equal((stopped.delete as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+  assert.equal(JSON.parse(text(deletion.stdout.values)).deleted, true);
+  assert.deepEqual(deletion.confirmations, []);
 
   const paused = fakeSandbox({ status: "paused" });
   const declinedStart = harness([paused], { tty: true, confirm: false });
@@ -199,11 +195,6 @@ test("delete and paused cold-start enforce confirmations without dispatching on 
   await accepted.run("start", "one", "--yes");
   assert.deepEqual((paused.start as ReturnType<typeof vi.fn>).mock.calls[0], [{ wait: true }]);
 
-  const deleted = fakeSandbox({ status: "stopped" });
-  const confirmedDelete = harness([deleted]);
-  await confirmedDelete.run("delete", "one", "--yes", "--output", "json");
-  assert.equal((deleted.delete as ReturnType<typeof vi.fn>).mock.calls.length, 1);
-  assert.equal(JSON.parse(text(confirmedDelete.stdout.values)).deleted, true);
 });
 
 test("run uses one-shot exec, streams both outputs, and propagates status", async () => {

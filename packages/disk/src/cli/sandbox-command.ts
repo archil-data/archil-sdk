@@ -174,15 +174,10 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   );
 
   formatOption(program.command("delete <id|name>").description("Delete a sandbox permanently"))
-    .option("-y, --yes", "Confirm deletion")
-    .action(async (target: string, options: { output: OutputFormat; yes?: boolean }) => {
+    .action(async (target: string, options: { output: OutputFormat }) => {
       const sandbox = await resolveSandbox(requireService(), target);
       if (!SANDBOX_ACTIONS[sandbox.status].includes("delete")) {
         throw new Error(`Cannot delete sandbox '${sandbox.name}' while it is ${sandbox.status}`);
-      }
-      if (!await confirmDestructive(`Delete sandbox '${sandbox.name}' permanently?`, options.yes ?? false)) {
-        output(`Cancelled deletion of '${sandbox.name}'.`);
-        return;
       }
       await sandbox.delete();
       if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, deleted: true }, null, 2));

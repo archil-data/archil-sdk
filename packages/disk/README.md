@@ -86,14 +86,14 @@ npx sandbox resume prepared-environment --no-wait
 npx sandbox stop prepared-environment
 npx sandbox start prepared-environment
 npx sandbox fork prepared-environment agent-task
-npx sandbox delete agent-task --yes
+npx sandbox delete agent-task
 ```
 
 Targets may be exact sandbox IDs or exact, uniquely matching names. `create`, `start`, `pause`, `resume`, `stop`, and `fork` accept `--no-wait`. Read/create/lifecycle commands that return a sandbox accept `-o table|json`.
 
 The create limits are 1–32 vCPUs and 256–65,536 MiB of memory. `--port` and `--env` are repeatable. Port syntax is `PORT`, `PORT/tcp`, or `PORT/udp`; environment syntax is `NAME=value`.
 
-Delete prompts with the resolved sandbox name in a terminal and requires `--yes` in non-interactive use. Cold-starting a paused sandbox also prompts because it discards the saved memory state; pass `start --yes` for scripts. Declining either prompt makes no API request.
+Like `disk delete`, `sandbox delete` treats the explicit delete command as confirmation and does not prompt. Cold-starting a paused sandbox does prompt because it discards the saved memory state; pass `start --yes` for scripts. Declining that prompt makes no API request.
 
 Run an ordinary command through the one-shot process API:
 
