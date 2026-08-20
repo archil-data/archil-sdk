@@ -39,6 +39,79 @@ npx disk api-keys delete key-abc123
 
 `list` and `get` pretty-print tables by default; pass `-o json` to pipe into `jq`. Credentials come from `ARCHIL_API_KEY` / `ARCHIL_REGION`, or `--api-key` / `--region` / `--base-url` flags.
 
+### Profiles
+
+The package installs both `disk` and `sandbox`. They share the same named profiles, so a profile created with either executable is immediately available to the other:
+
+```bash
+npx disk profile create --profile test-yellow --region aws-us-east-1
+npx sandbox profile list
+npx sandbox profile use test-yellow
+npx sandbox list
+
+# Select a profile for one invocation without changing the default.
+npx sandbox --profile test-yellow list
+
+npx disk profile delete test-yellow
+```
+
+Profile creation reads the API key without echo from an interactive terminal, or from stdin in headless use. Profile metadata is stored in the platform's per-user configuration directory. Credentials are stored separately in files protected with user-only permissions; the CLIs refuse group/world-readable credential files on Unix. Profile listings never display credentials.
+
+Credential precedence is explicit flags, then `ARCHIL_API_KEY` / `ARCHIL_REGION` / `ARCHIL_BASE_URL` / `ARCHIL_PROFILE`, then the selected profile. Prefer profiles, environment variables, or stdin over `--api-key`, because command arguments may appear in shell history and process listings. Profiles are a CLI feature only: `new Archil()` and `configure()` never read profile files.
+
+### Sandbox CLI
+
+Use the sibling `sandbox` executable to manage persistent sandboxes:
+
+```bash
+# Inspect. Tables are the default; JSON is suitable for scripts.
+npx sandbox list
+npx sandbox list -o json | jq '.[].id'
+npx sandbox get prepared-environment
+
+# Create and wait for it to start.
+npx sandbox create prepared-environment \
+  --vcpu-count 4 \
+  --mem-size-mib 8192 \
+  --base-image ubuntu:26.04 \
+  --max-ttl-seconds 3600 \
+  --max-concurrent-processes 8 \
+  --port 8080/tcp \
+  --port 5353/udp \
+  --env NODE_ENV=development
+
+# Lifecycle operations wait by default; --no-wait returns once accepted.
+npx sandbox pause prepared-environment
+npx sandbox resume prepared-environment --no-wait
+npx sandbox stop prepared-environment
+npx sandbox start prepared-environment
+npx sandbox fork prepared-environment agent-task
+npx sandbox delete agent-task --yes
+```
+
+Targets may be exact sandbox IDs or exact, uniquely matching names. `create`, `start`, `pause`, `resume`, `stop`, and `fork` accept `--no-wait`. Read/create/lifecycle commands that return a sandbox accept `-o table|json`.
+
+The create limits are 1–32 vCPUs and 256–65,536 MiB of memory. `--port` and `--env` are repeatable. Port syntax is `PORT`, `PORT/tcp`, or `PORT/udp`; environment syntax is `NAME=value`.
+
+Delete prompts with the resolved sandbox name in a terminal and requires `--yes` in non-interactive use. Cold-starting a paused sandbox also prompts because it discards the saved memory state; pass `start --yes` for scripts. Declining either prompt makes no API request.
+
+Run an ordinary command through the one-shot process API:
+
+```bash
+npx sandbox run prepared-environment -- uname -a
+npx sandbox run prepared-environment --env MODE=ci --timeout 30 -- 'sh -c "echo $MODE; exit 0"'
+```
+
+`run` requires a running sandbox, streams remote stdout and stderr to the matching local streams, and exits with the remote status. It does not attach local stdin. The CLI does not expose the removed durable exec-record history, lookup, or cancellation APIs.
+
+Open an interactive PTY when a command needs input:
+
+```bash
+npx sandbox shell prepared-environment
+```
+
+The shell runs `/bin/sh -l`, forwards resize events and ordinary `Ctrl+C`/`Ctrl+D`, and restores the local terminal on exit. `Ctrl+]` is an emergency escape that kills the CLI-created remote shell and returns to the local terminal.
+
 ## Library
 
 Setup:
@@ -87,6 +160,7 @@ const sandbox = await client.sandboxes.create({
   name: "prepared-environment",
   vcpuCount: 4,
   memSizeMiB: 8192,
+  portMappings: [{ containerPort: 8080, protocol: "tcp" }],
 });
 
 const result = await sandbox.exec("uname -a");

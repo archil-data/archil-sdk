@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { beforeAll, test } from "vitest";
+
+const packageRoot = resolve(import.meta.dirname, "..");
+const diskCli = join(packageRoot, "dist", "cli.mjs");
+const sandboxCli = join(packageRoot, "dist", "sandbox-cli.mjs");
+
+beforeAll(() => {
+  if (!existsSync(diskCli) || !existsSync(sandboxCli)) {
+    const built = spawnSync("pnpm", ["build"], { cwd: packageRoot, encoding: "utf8" });
+    assert.equal(built.status, 0, built.stderr);
+  }
+});
+
+function run(cli: string, args: string[], env: NodeJS.ProcessEnv = {}, input?: string) {
+  return spawnSync(process.execPath, [cli, ...args], {
+    cwd: packageRoot,
+    env: { ...process.env, ...env },
+    input,
+    encoding: "utf8",
+  });
+}
+
+test("built package exposes disk and sandbox help", () => {
+  const diskHelp = run(diskCli, ["--help"]);
+  assert.equal(diskHelp.status, 0, diskHelp.stderr);
+  assert.doesNotMatch(diskHelp.stdout, /^\s+auth\b/m);
+  assert.match(diskHelp.stdout, /profile/);
+
+  const sandboxHelp = run(sandboxCli, ["--help"]);
+  assert.equal(sandboxHelp.status, 0, sandboxHelp.stderr);
+  for (const command of ["list", "get", "create", "start", "pause", "resume", "stop", "fork", "delete", "run", "shell", "profile"]) {
+    assert.match(sandboxHelp.stdout, new RegExp(`\\b${command}\\b`));
+  }
+});
+
+test("disk and sandbox profile commands share one protected profile store and support JSON", async () => {
+  const directory = await mkdtemp(join(packageRoot, ".cli-smoke-"));
+  try {
+    const env = { ARCHIL_DISK_CONFIG_DIR: directory };
+    const diskLogin = run(diskCli, ["profile", "login", "--profile", "disk-profile", "--region", "aws-us-east-1", "--output", "json"], env, "key-disk-secret\n");
+    assert.equal(diskLogin.status, 0, diskLogin.stderr);
+    assert.deepEqual(JSON.parse(diskLogin.stdout), {
+      name: "disk-profile", region: "aws-us-east-1", current: true, loggedIn: true,
+    });
+    const sandboxList = run(sandboxCli, ["profile", "list", "--output", "json"], env);
+    assert.equal(sandboxList.status, 0, sandboxList.stderr);
+    assert.deepEqual(JSON.parse(sandboxList.stdout), [{
+      name: "disk-profile", region: "aws-us-east-1", current: true, loggedIn: true,
+    }]);
+    assert.equal(sandboxList.stdout.includes("disk-secret"), false);
+
+    const sandboxLogin = run(sandboxCli, ["profile", "login", "--profile", "sandbox-profile", "--region", "aws-us-west-2"], env, "key-sandbox-secret\n");
+    assert.equal(sandboxLogin.status, 0, sandboxLogin.stderr);
+    const diskList = run(diskCli, ["profile", "list"], env);
+    assert.equal(diskList.status, 0, diskList.stderr);
+    assert.match(diskList.stdout, /sandbox-profile\s+aws-us-west-2/);
+    assert.equal(diskList.stdout.includes("sandbox-secret"), false);
+
+    const config = await readFile(join(directory, "config.json"), "utf8");
+    assert.equal(config.includes("disk-secret"), false);
+    assert.equal(config.includes("sandbox-secret"), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -1,0 +1,151 @@
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { test, vi } from "vitest";
+import type { SandboxProcess, SandboxProcessResult } from "../src/sandbox-process.js";
+import type { Sandbox } from "../src/sandbox.js";
+import { runSandboxShell } from "../src/cli/sandbox-shell.js";
+
+class FakeInput extends EventEmitter {
+  isTTY = true;
+  isRaw = false;
+  rawChanges: boolean[] = [];
+  setRawMode(value: boolean) { this.isRaw = value; this.rawChanges.push(value); }
+  resume() {}
+}
+
+class FakeOutput extends EventEmitter {
+  isTTY = true;
+  columns = 100;
+  rows = 30;
+  writes: Array<string | Uint8Array> = [];
+  write(data: string | Uint8Array) { this.writes.push(data); return true; }
+}
+
+function harness(processOverrides: Partial<SandboxProcess> = {}, startError?: Error) {
+  const stdin = new FakeInput();
+  const stdout = new FakeOutput();
+  const stderr = new FakeOutput();
+  const signals = new EventEmitter();
+  let output: ((event: { data: Uint8Array }) => void) | undefined;
+  const result: SandboxProcessResult = { status: "completed", exitCode: 0, stdout: "", stderr: "" };
+  const remote = {
+    id: "process-123",
+    status: "running",
+    sendInput: vi.fn(async () => undefined),
+    resize: vi.fn(async () => undefined),
+    kill: vi.fn(async () => undefined),
+    wait: vi.fn(async () => result),
+    disconnect: vi.fn(async () => undefined),
+    ...processOverrides,
+  } as unknown as SandboxProcess;
+  const sandbox = {
+    processes: {
+      start: vi.fn(async (_command: string, options: { onOutput?: typeof output }) => {
+        if (startError) throw startError;
+        output = options.onOutput;
+        return remote;
+      }),
+    },
+  } as unknown as Sandbox;
+  return { stdin, stdout, stderr, signals, remote, sandbox, getOutput: () => output };
+}
+
+test("normal shell exit restores raw mode and removes every listener", async () => {
+  const h = harness();
+  const result = await runSandboxShell({
+    sandbox: h.sandbox,
+    stdin: h.stdin,
+    stdout: h.stdout,
+    stderr: h.stderr,
+    signals: h.signals as never,
+  });
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(h.stdin.rawChanges, [true, false]);
+  assert.equal(h.stdin.listenerCount("data"), 0);
+  assert.equal(h.stdout.listenerCount("resize"), 0);
+  assert.equal(h.signals.listenerCount("SIGINT"), 0);
+  assert.equal(h.signals.listenerCount("SIGTERM"), 0);
+  assert.equal(h.signals.listenerCount("SIGHUP"), 0);
+  assert.match(String(h.stderr.writes[0]), /process-123/);
+  assert.deepEqual((h.sandbox.processes.start as ReturnType<typeof vi.fn>).mock.calls[0]![0], "/bin/sh -l");
+  assert.deepEqual((h.sandbox.processes.start as ReturnType<typeof vi.fn>).mock.calls[0]![1].terminal, { cols: 100, rows: 30 });
+  assert.equal((h.remote.disconnect as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+});
+
+test("Ctrl+] kills the shell while Ctrl+C and Ctrl+D are forwarded", async () => {
+  let finish!: (result: SandboxProcessResult) => void;
+  const waiting = new Promise<SandboxProcessResult>((resolve) => { finish = resolve; });
+  const h = harness({ wait: vi.fn(() => waiting) as SandboxProcess["wait"] });
+  (h.remote.kill as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+    finish({ status: "cancelled", stdout: "", stderr: "" });
+  });
+  const shell = runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
+  await vi.waitFor(() => assert.equal(h.stdin.listenerCount("data"), 1));
+  h.stdin.emit("data", Buffer.from([3, 4]));
+  await vi.waitFor(() => assert.equal((h.remote.sendInput as ReturnType<typeof vi.fn>).mock.calls.length, 1));
+  assert.deepEqual((h.remote.sendInput as ReturnType<typeof vi.fn>).mock.calls[0]![0], new Uint8Array([3, 4]));
+  h.stdin.emit("data", Buffer.from([0x1d]));
+  assert.equal((await shell).status, "cancelled");
+  assert.equal((h.remote.kill as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+});
+
+test("resize and local signals control the remote process", async () => {
+  let finish!: (result: SandboxProcessResult) => void;
+  const waiting = new Promise<SandboxProcessResult>((resolve) => { finish = resolve; });
+  const h = harness({ wait: vi.fn(() => waiting) as SandboxProcess["wait"] });
+  (h.remote.kill as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+    finish({ status: "cancelled", stdout: "", stderr: "" });
+  });
+  const shell = runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
+  await vi.waitFor(() => assert.ok(h.getOutput()));
+  h.stdout.columns = 80;
+  h.stdout.rows = 24;
+  h.stdout.emit("resize");
+  await vi.waitFor(() => assert.equal((h.remote.resize as ReturnType<typeof vi.fn>).mock.calls.length, 1));
+  assert.deepEqual((h.remote.resize as ReturnType<typeof vi.fn>).mock.calls[0]![0], { cols: 80, rows: 24 });
+  h.signals.emit("SIGTERM");
+  await shell;
+  assert.equal(h.signals.listenerCount("SIGTERM"), 0);
+});
+
+test("startup, connection, resize, and output failures always clean up", async () => {
+  const startup = harness({}, new Error("start failed"));
+  await assert.rejects(runSandboxShell({ sandbox: startup.sandbox, stdin: startup.stdin, stdout: startup.stdout, stderr: startup.stderr, signals: startup.signals as never }), /start failed/);
+  assert.deepEqual(startup.stdin.rawChanges, [true, false]);
+
+  const connection = harness({ wait: vi.fn(async () => { throw new Error("connection closed"); }) as SandboxProcess["wait"] });
+  await assert.rejects(runSandboxShell({ sandbox: connection.sandbox, stdin: connection.stdin, stdout: connection.stdout, stderr: connection.stderr, signals: connection.signals as never }), /connection closed/);
+  assert.equal(connection.stdin.listenerCount("data"), 0);
+  assert.equal((connection.remote.kill as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+
+  for (const failure of ["resize", "output"] as const) {
+    const h = harness({
+      wait: vi.fn(() => new Promise(() => {})) as SandboxProcess["wait"],
+      resize: vi.fn(async () => { if (failure === "resize") throw new Error("resize failed"); }) as SandboxProcess["resize"],
+    });
+    if (failure === "output") h.stdout.write = (data) => {
+      if (data instanceof Uint8Array) throw new Error("output failed");
+      h.stdout.writes.push(data);
+      return true;
+    };
+    const shell = runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
+    const rejected = assert.rejects(shell, new RegExp(`${failure} failed`));
+    await vi.waitFor(() => assert.ok(h.getOutput()));
+    if (failure === "resize") h.stdout.emit("resize");
+    else h.getOutput()!({ data: new Uint8Array([65]) });
+    await rejected;
+    assert.equal(h.stdin.listenerCount("data"), 0);
+    assert.equal(h.stdout.listenerCount("resize"), 0);
+    assert.equal((h.remote.kill as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+  }
+});
+
+test("repeated shell sessions do not leak listeners", async () => {
+  const h = harness();
+  for (let index = 0; index < 3; index++) {
+    await runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
+    assert.equal(h.stdin.listenerCount("data"), 0);
+    assert.equal(h.stdout.listenerCount("resize"), 0);
+    assert.equal(h.signals.eventNames().length, 0);
+  }
+});
