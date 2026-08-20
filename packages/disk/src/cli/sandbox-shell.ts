@@ -35,6 +35,7 @@ export interface SandboxShellOptions {
   stdout?: ShellOutput;
   stderr?: ShellErrorOutput;
   signals?: SignalSource;
+  forceExit?: (signal: NodeJS.Signals) => void;
 }
 
 export async function runSandboxShell(options: SandboxShellOptions): Promise<SandboxProcessResult> {
@@ -42,6 +43,7 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
   const signals = options.signals ?? process;
+  const forceExit = options.forceExit ?? (options.signals ? (() => {}) : (signal: NodeJS.Signals) => { process.kill(process.pid, signal); });
   if (!stdin.isTTY || !stdout.isTTY) throw new Error("sandbox shell requires TTY stdin and stdout");
 
   let remote: SandboxProcess | undefined;
@@ -72,8 +74,19 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
       (error: unknown) => rejectTermination(error instanceof Error ? error : new Error(String(error))),
     );
   };
-  const requestTermination = (reason: string) => {
-    if (terminationRequested) return;
+  const removeSignalListeners = () => {
+    signals.off("SIGINT", onSigint);
+    signals.off("SIGTERM", onSigterm);
+    signals.off("SIGHUP", onSighup);
+  };
+  const requestTermination = (reason: string, signal?: NodeJS.Signals) => {
+    if (terminationRequested) {
+      if (signal) {
+        removeSignalListeners();
+        forceExit(signal);
+      }
+      return;
+    }
     terminationRequested = true;
     terminationReason = reason;
     startTermination();
@@ -93,7 +106,9 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
       void remote.resize({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 }).catch(fail);
     }
   };
-  const onSignal = () => requestTermination("terminated by local signal");
+  const onSigint = () => requestTermination("terminated by local signal", "SIGINT");
+  const onSigterm = () => requestTermination("terminated by local signal", "SIGTERM");
+  const onSighup = () => requestTermination("terminated by local signal", "SIGHUP");
   const priorRaw = stdin.isRaw ?? false;
 
   try {
@@ -111,9 +126,9 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     stdin.setRawMode(true);
     terminalConfigured = true;
     stdout.on("resize", onResize);
-    signals.on("SIGINT", onSignal);
-    signals.on("SIGTERM", onSignal);
-    signals.on("SIGHUP", onSignal);
+    signals.on("SIGINT", onSigint);
+    signals.on("SIGTERM", onSigterm);
+    signals.on("SIGHUP", onSighup);
     stderr.write(`Archil shell process ${remote.id}; Ctrl+] exits\n`);
     stdin.on("data", onInput);
     stdin.resume();
@@ -123,9 +138,7 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
   } finally {
     stdin.off("data", onInput);
     stdout.off("resize", onResize);
-    signals.off("SIGINT", onSignal);
-    signals.off("SIGTERM", onSignal);
-    signals.off("SIGHUP", onSignal);
+    removeSignalListeners();
     if (terminalConfigured) stdin.setRawMode(priorRaw);
     stdin.pause();
     if (remote && !result && !terminationRequested) await remote.kill().catch(() => {});

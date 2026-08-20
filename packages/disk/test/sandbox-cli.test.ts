@@ -92,6 +92,7 @@ function harness(sandboxes: Sandbox[], options: { tty?: boolean; confirm?: boole
   };
   const exitCodes: number[] = [];
   const confirmations: string[] = [];
+  const forcedSignals: NodeJS.Signals[] = [];
   const signals = new EventEmitter();
   let clock = 0;
   const program = createSandboxProgram({
@@ -103,11 +104,12 @@ function harness(sandboxes: Sandbox[], options: { tty?: boolean; confirm?: boole
     signals: signals as NodeJS.Process,
     confirm: async (question) => { confirmations.push(question); return options.confirm ?? false; },
     setExitCode: (code) => exitCodes.push(code),
+    forceExit: (signal) => forcedSignals.push(signal),
     now: () => clock,
     sleep: async (milliseconds) => { clock += milliseconds; },
   });
   const run = (...args: string[]) => program.parseAsync(["node", "sandbox", "--api-key", "key-test", "--region", "test", ...args]);
-  return { stdout, stderr, stdin, signals, service, exitCodes, confirmations, run };
+  return { stdout, stderr, stdin, signals, service, exitCodes, confirmations, forcedSignals, run };
 }
 
 function text(values: Array<string | Uint8Array>): string {
@@ -319,6 +321,19 @@ test("run supports JSON and kills the remote process on local signals", async ()
   assert.match(text(interrupted.stderr.values), /terminated by local signal/);
   assert.deepEqual(interrupted.exitCodes, [1]);
   assert.equal(interrupted.signals.listenerCount("SIGINT"), 0);
+
+  let acknowledgeKill!: () => void;
+  const hungKill = new Promise<void>((resolve) => { acknowledgeKill = resolve; });
+  const hungRemote = { wait: vi.fn(() => wait), kill: vi.fn(() => hungKill), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
+  const hung = harness([fakeSandbox({ processes: { start: vi.fn(async () => hungRemote) } as unknown as Sandbox["processes"] })]);
+  const hungRun = hung.run("run", "one", "sleep", "30");
+  await vi.waitFor(() => assert.equal(hung.signals.listenerCount("SIGINT"), 1));
+  hung.signals.emit("SIGINT");
+  await vi.waitFor(() => assert.equal(hungRemote.kill.mock.calls.length, 1));
+  hung.signals.emit("SIGINT");
+  assert.deepEqual(hung.forcedSignals, ["SIGINT"]);
+  acknowledgeKill();
+  await hungRun;
 
   let releaseStart!: () => void;
   const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });

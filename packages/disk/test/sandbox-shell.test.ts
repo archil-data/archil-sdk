@@ -122,13 +122,15 @@ test("input typed during startup is buffered until the remote handle exists", as
 
 test("termination is idempotent and kill failures reject after cleanup", async () => {
   const duplicate = harness({ wait: vi.fn(() => new Promise(() => {})) as SandboxProcess["wait"] });
-  const shell = runSandboxShell({ sandbox: duplicate.sandbox, stdin: duplicate.stdin, stdout: duplicate.stdout, stderr: duplicate.stderr, signals: duplicate.signals as never });
+  const forcedSignals: NodeJS.Signals[] = [];
+  const shell = runSandboxShell({ sandbox: duplicate.sandbox, stdin: duplicate.stdin, stdout: duplicate.stdout, stderr: duplicate.stderr, signals: duplicate.signals as never, forceExit: (signal) => forcedSignals.push(signal) });
   await vi.waitFor(() => assert.equal(duplicate.stdin.listenerCount("data"), 1));
   duplicate.stdin.emit("data", Buffer.from([0x1d]));
   duplicate.stdin.emit("data", Buffer.from([0x1d]));
   duplicate.signals.emit("SIGTERM");
   await shell;
   assert.equal((duplicate.remote.kill as ReturnType<typeof vi.fn>).mock.calls.length, 1);
+  assert.deepEqual(forcedSignals, ["SIGTERM"]);
 
   const failed = harness({
     wait: vi.fn(() => new Promise(() => {})) as SandboxProcess["wait"],

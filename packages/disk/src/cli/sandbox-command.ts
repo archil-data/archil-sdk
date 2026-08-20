@@ -48,6 +48,7 @@ interface SandboxCliDependencies {
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
   validateCredential?: ProfileCredentialValidator;
+  forceExit?: (signal: NodeJS.Signals) => void;
 }
 
 type LifecycleAction = "start" | "pause" | "resume" | "stop" | "fork" | "delete";
@@ -88,6 +89,7 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   const stdin = dependencies.stdin ?? process.stdin;
   const signals = dependencies.signals ?? process;
   const setExitCode = dependencies.setExitCode ?? ((code: number) => { process.exitCode = code; });
+  const forceExit = dependencies.forceExit ?? (dependencies.signals ? (() => {}) : (signal: NodeJS.Signals) => { process.kill(process.pid, signal); });
   const now = dependencies.now ?? Date.now;
   const sleep = dependencies.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let service: SandboxService | undefined;
@@ -263,14 +265,27 @@ Use -- before the command so its flags are not parsed as sandbox options.
         resolveTermination = resolve;
         rejectTermination = reject;
       });
-      const onSignal = () => {
-        if (!remote || terminationStarted) return;
+      const removeSignalListeners = () => {
+        signals.off("SIGINT", onSigint);
+        signals.off("SIGTERM", onSigterm);
+        signals.off("SIGHUP", onSighup);
+      };
+      const onSignal = (signal: NodeJS.Signals) => {
+        if (!remote) return;
+        if (terminationStarted) {
+          removeSignalListeners();
+          forceExit(signal);
+          return;
+        }
         terminationStarted = true;
         void remote.kill().then(
           () => resolveTermination({ status: "cancelled", exitReason: "terminated by local signal", stdout: remote?.stdout ?? "", stderr: remote?.stderr ?? "" }),
           (error: unknown) => rejectTermination(error instanceof Error ? error : new Error(String(error))),
         );
       };
+      const onSigint = () => onSignal("SIGINT");
+      const onSigterm = () => onSignal("SIGTERM");
+      const onSighup = () => onSignal("SIGHUP");
       try {
         const shellCommand = command.map((argument) => argument === ""
           ? "''"
@@ -283,9 +298,9 @@ Use -- before the command so its flags are not parsed as sandbox options.
             return (stream === "stdout" ? stdout : stderr).write(data);
           },
         });
-        signals.on("SIGINT", onSignal);
-        signals.on("SIGTERM", onSignal);
-        signals.on("SIGHUP", onSignal);
+        signals.on("SIGINT", onSigint);
+        signals.on("SIGTERM", onSigterm);
+        signals.on("SIGHUP", onSighup);
         const result = await Promise.race([remote.wait(), termination]);
         if (options.output === "json") {
           output(JSON.stringify(result, null, 2));
@@ -302,9 +317,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
         }
         setExitCode(resultExitCode(result));
       } finally {
-        signals.off("SIGINT", onSignal);
-        signals.off("SIGTERM", onSignal);
-        signals.off("SIGHUP", onSignal);
+        removeSignalListeners();
         await remote?.disconnect().catch(() => {});
       }
     });
@@ -315,7 +328,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
       const sandbox = await resolveSandbox(requireService(), target);
       if (sandbox.status !== "running") throw new Error(`Cannot open a shell in sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       const shellOutput = options.output === "json" ? stderr as NodeJS.WriteStream : stdout as NodeJS.WriteStream;
-      const result = await runSandboxShell({ sandbox, stdin, stdout: shellOutput, stderr, signals });
+      const result = await runSandboxShell({ sandbox, stdin, stdout: shellOutput, stderr, signals, forceExit });
       if (options.output === "json") output(JSON.stringify(result, null, 2));
       setExitCode(resultExitCode(result));
     });
