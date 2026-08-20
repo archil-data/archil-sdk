@@ -14,13 +14,20 @@ export async function readProfileCredential(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
   const path = credentialFilePath(profile, env);
-  if (process.platform !== "win32") {
-    const mode = (await stat(path)).mode & 0o777;
-    if ((mode & 0o077) !== 0) {
-      throw new Error(`Refusing to read credential file ${path}: permissions must be 0600`);
+  try {
+    if (process.platform !== "win32") {
+      const mode = (await stat(path)).mode & 0o777;
+      if ((mode & 0o077) !== 0) {
+        throw new Error(`Refusing to read credential file ${path}: permissions must be 0600`);
+      }
     }
+    return normalizeApiKey(await readFile(path, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Missing API key for profile '${profile}': run 'disk auth login --profile ${profile}'`);
+    }
+    throw error;
   }
-  return normalizeApiKey(await readFile(path, "utf8"));
 }
 
 export async function writeProfileCredential(
