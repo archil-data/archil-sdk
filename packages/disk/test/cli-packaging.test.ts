@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { beforeAll, test } from "vitest";
 
 const packageRoot = resolve(import.meta.dirname, "..");
@@ -25,6 +26,22 @@ function run(cli: string, args: string[], env: NodeJS.ProcessEnv = {}, input?: s
   });
 }
 
+function runAsync(cli: string, args: string[], env: NodeJS.ProcessEnv, input?: string) {
+  return new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+    const child = spawn(process.execPath, [cli, ...args], {
+      cwd: packageRoot,
+      env: { ...process.env, ...env },
+      stdio: "pipe",
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+    child.stdin.end(input);
+  });
+}
+
 test("built package exposes disk and sandbox help", () => {
   const diskHelp = run(diskCli, ["--help"]);
   assert.equal(diskHelp.status, 0, diskHelp.stderr);
@@ -40,21 +57,29 @@ test("built package exposes disk and sandbox help", () => {
 
 test("disk and sandbox profile commands share one protected profile store and support JSON", async () => {
   const directory = await mkdtemp(join(packageRoot, ".cli-smoke-"));
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ success: true, data: [] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
   try {
     const env = { ARCHIL_DISK_CONFIG_DIR: directory };
-    const diskLogin = run(diskCli, ["profile", "login", "--profile", "disk-profile", "--region", "aws-us-east-1", "--output", "json"], env, "key-disk-secret\n");
+    const diskLogin = await runAsync(diskCli, ["profile", "login", "--profile", "disk-profile", "--region", "aws-us-east-1", "--base-url", baseUrl, "--output", "json"], env, "key-disk-secret\n");
     assert.equal(diskLogin.status, 0, diskLogin.stderr);
     assert.deepEqual(JSON.parse(diskLogin.stdout), {
-      name: "disk-profile", region: "aws-us-east-1", current: true, loggedIn: true,
+      name: "disk-profile", region: "aws-us-east-1", baseUrl, current: true, loggedIn: true,
     });
     const sandboxList = run(sandboxCli, ["profile", "list", "--output", "json"], env);
     assert.equal(sandboxList.status, 0, sandboxList.stderr);
     assert.deepEqual(JSON.parse(sandboxList.stdout), [{
-      name: "disk-profile", region: "aws-us-east-1", current: true, loggedIn: true,
+      name: "disk-profile", region: "aws-us-east-1", baseUrl, current: true, loggedIn: true,
     }]);
     assert.equal(sandboxList.stdout.includes("disk-secret"), false);
 
-    const sandboxLogin = run(sandboxCli, ["profile", "login", "--profile", "sandbox-profile", "--region", "aws-us-west-2"], env, "key-sandbox-secret\n");
+    const sandboxLogin = await runAsync(sandboxCli, ["profile", "login", "--profile", "sandbox-profile", "--region", "aws-us-west-2", "--base-url", baseUrl], env, "key-sandbox-secret\n");
     assert.equal(sandboxLogin.status, 0, sandboxLogin.stderr);
     const diskList = run(diskCli, ["profile", "list"], env);
     assert.equal(diskList.status, 0, diskList.stderr);
@@ -65,6 +90,7 @@ test("disk and sandbox profile commands share one protected profile store and su
     assert.equal(config.includes("disk-secret"), false);
     assert.equal(config.includes("sandbox-secret"), false);
   } finally {
+    server.close();
     await rm(directory, { recursive: true, force: true });
   }
 });
