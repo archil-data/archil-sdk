@@ -106,7 +106,7 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   const output = (value: string) => stdout.write(`${value}\n`);
   const withSpinner = async <T>(label: string, enabled: boolean, operation: () => Promise<T>): Promise<T> => {
     if (!enabled || !stderr.isTTY) return operation();
-    const progress = spinner({ output: stderr as NodeJS.WriteStream });
+    const progress = spinner({ output: stderr as NodeJS.WriteStream, withGuide: false });
     progress.start(label);
     try {
       return await operation();
@@ -256,7 +256,6 @@ Use -- before the command so its flags are not parsed as sandbox options.
       const runOptions = parseRunOptions(options);
       let receivedStderr = false;
       let remote: SandboxProcess | undefined;
-      let terminationRequested = false;
       let terminationStarted = false;
       let resolveTermination!: (result: SandboxProcessResult) => void;
       let rejectTermination!: (error: Error) => void;
@@ -264,7 +263,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
         resolveTermination = resolve;
         rejectTermination = reject;
       });
-      const startTermination = () => {
+      const onSignal = () => {
         if (!remote || terminationStarted) return;
         terminationStarted = true;
         void remote.kill().then(
@@ -272,13 +271,6 @@ Use -- before the command so its flags are not parsed as sandbox options.
           (error: unknown) => rejectTermination(error instanceof Error ? error : new Error(String(error))),
         );
       };
-      const onSignal = () => {
-        terminationRequested = true;
-        startTermination();
-      };
-      signals.on("SIGINT", onSignal);
-      signals.on("SIGTERM", onSignal);
-      signals.on("SIGHUP", onSignal);
       try {
         const shellCommand = command.map((argument) => argument === ""
           ? "''"
@@ -291,7 +283,9 @@ Use -- before the command so its flags are not parsed as sandbox options.
             return (stream === "stdout" ? stdout : stderr).write(data);
           },
         });
-        if (terminationRequested) startTermination();
+        signals.on("SIGINT", onSignal);
+        signals.on("SIGTERM", onSignal);
+        signals.on("SIGHUP", onSignal);
         const result = await Promise.race([remote.wait(), termination]);
         if (options.output === "json") {
           output(JSON.stringify(result, null, 2));

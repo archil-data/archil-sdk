@@ -110,8 +110,10 @@ test("input typed during startup is buffered until the remote handle exists", as
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const h = harness({}, undefined, gate);
   const shell = runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
-  await vi.waitFor(() => assert.deepEqual(h.stdin.rawChanges, [true]));
+  await vi.waitFor(() => assert.equal((h.sandbox.processes.start as ReturnType<typeof vi.fn>).mock.calls.length, 1));
+  assert.deepEqual(h.stdin.rawChanges, []);
   assert.equal(h.stdin.listenerCount("data"), 0);
+  assert.equal(h.signals.listenerCount("SIGINT"), 0);
   h.stdin.emit("data", Buffer.from("buffered\n"));
   release();
   await shell;
@@ -163,7 +165,7 @@ test("resize and local signals control the remote process", async () => {
 test("startup, connection, resize, and output failures always clean up", async () => {
   const startup = harness({}, new Error("start failed"));
   await assert.rejects(runSandboxShell({ sandbox: startup.sandbox, stdin: startup.stdin, stdout: startup.stdout, stderr: startup.stderr, signals: startup.signals as never }), /start failed/);
-  assert.deepEqual(startup.stdin.rawChanges, [true, false]);
+  assert.deepEqual(startup.stdin.rawChanges, []);
 
   const connection = harness({ wait: vi.fn(async () => { throw new Error("connection closed"); }) as SandboxProcess["wait"] });
   await assert.rejects(runSandboxShell({ sandbox: connection.sandbox, stdin: connection.stdin, stdout: connection.stdout, stderr: connection.stderr, signals: connection.signals as never }), /connection closed/);

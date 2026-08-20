@@ -49,6 +49,7 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
   let terminationRequested = false;
   let terminationStarted = false;
   let terminationReason = "terminated locally";
+  let terminalConfigured = false;
   let failureSettled = false;
   let rejectFailure!: (error: Error) => void;
   const failure = new Promise<never>((_resolve, reject) => { rejectFailure = reject; });
@@ -96,11 +97,6 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
   const priorRaw = stdin.isRaw ?? false;
 
   try {
-    stdin.setRawMode(true);
-    stdout.on("resize", onResize);
-    signals.on("SIGINT", onSignal);
-    signals.on("SIGTERM", onSignal);
-    signals.on("SIGHUP", onSignal);
     remote = await options.sandbox.processes.start("/bin/sh -l", {
       terminal: { cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 },
       collectOutput: false,
@@ -112,10 +108,15 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
         }
       },
     });
+    stdin.setRawMode(true);
+    terminalConfigured = true;
+    stdout.on("resize", onResize);
+    signals.on("SIGINT", onSignal);
+    signals.on("SIGTERM", onSignal);
+    signals.on("SIGHUP", onSignal);
     stderr.write(`Archil shell process ${remote.id}; Ctrl+] exits\n`);
     stdin.on("data", onInput);
     stdin.resume();
-    if (terminationRequested) startTermination();
     result = await Promise.race([remote.wait(), termination, failure]);
     failureSettled = true;
     return result;
@@ -125,7 +126,7 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     signals.off("SIGINT", onSignal);
     signals.off("SIGTERM", onSignal);
     signals.off("SIGHUP", onSignal);
-    stdin.setRawMode(priorRaw);
+    if (terminalConfigured) stdin.setRawMode(priorRaw);
     stdin.pause();
     if (remote && !result && !terminationRequested) await remote.kill().catch(() => {});
     if (remote) await remote.disconnect().catch(() => {});

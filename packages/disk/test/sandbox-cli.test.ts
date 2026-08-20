@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import type { SandboxProcessResult } from "../src/sandbox-process.js";
 import type { Sandbox } from "../src/sandbox.js";
@@ -112,6 +113,32 @@ function harness(sandboxes: Sandbox[], options: { tty?: boolean; confirm?: boole
 function text(values: Array<string | Uint8Array>): string {
   return values.map((value) => typeof value === "string" ? value : new TextDecoder().decode(value)).join("");
 }
+
+test("TTY progress clears without leaving a guide behind", async () => {
+  const stdout = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
+  const stderr = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
+  let terminal = "";
+  stderr.on("data", (chunk) => { terminal += chunk.toString(); });
+  const program = createSandboxProgram({
+    version: "test",
+    stdout,
+    stderr,
+    createClient: () => ({
+      sandboxes: {
+        list: vi.fn(async () => []),
+        get: vi.fn(),
+        create: vi.fn(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          return fakeSandbox();
+        }),
+      },
+    }),
+  });
+  await program.parseAsync(["node", "sandbox", "--api-key", "key-test", "--region", "test", "create"]);
+  assert.doesNotMatch(terminal, /│/);
+  assert.match(terminal, /\x1b\[\?25l/);
+  assert.match(terminal, /\x1b\[\?25h$/);
+});
 
 test("list is deterministic and get supports JSON", async () => {
   const older = fakeSandbox({ id: "sbx-old", name: "old", lastActiveAt: new Date("2025-01-01T00:00:00Z") });
@@ -292,6 +319,17 @@ test("run supports JSON and kills the remote process on local signals", async ()
   assert.match(text(interrupted.stderr.values), /terminated by local signal/);
   assert.deepEqual(interrupted.exitCodes, [1]);
   assert.equal(interrupted.signals.listenerCount("SIGINT"), 0);
+
+  let releaseStart!: () => void;
+  const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });
+  const startingRemote = { wait: vi.fn(async () => completed), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
+  const gatedStart = vi.fn(async () => { await startGate; return startingRemote; });
+  const starting = harness([fakeSandbox({ processes: { start: gatedStart } as unknown as Sandbox["processes"] })]);
+  const startingRun = starting.run("run", "one", "echo", "ok");
+  await vi.waitFor(() => assert.equal(gatedStart.mock.calls.length, 1));
+  assert.equal(starting.signals.listenerCount("SIGINT"), 0);
+  releaseStart();
+  await startingRun;
 });
 
 test("run reports failures without remote stderr", async () => {
