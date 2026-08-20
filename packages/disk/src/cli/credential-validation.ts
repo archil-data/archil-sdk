@@ -22,7 +22,7 @@ export async function validateCredentialAndResolveRegion(
     return options.region;
   }
   if (options.baseUrl) {
-    throw new Error("Login with --base-url also requires --region because custom environments cannot be auto-detected");
+    throw new Error("Profile creation with --base-url also requires --region because custom environments cannot be auto-detected");
   }
 
   const failures: unknown[] = [];
