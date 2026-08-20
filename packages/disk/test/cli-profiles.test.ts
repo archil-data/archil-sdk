@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
-import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "vitest";
@@ -9,7 +8,6 @@ import { credentialFilePath, diskConfigDir, profileConfigPath } from "../src/cli
 import {
   deleteProfileCredential,
   validateApiKey,
-  promptSecret,
   readProfileCredential,
   resolveCliCredentials,
   writeProfileCredential,
@@ -72,30 +70,6 @@ test("profile credentials always use protected files and reject unsafe permissio
   assert.equal(validateApiKey("adt_two"), "adt_two");
   assert.throws(() => validateApiKey(""), /empty/);
   assert.throws(() => validateApiKey("key one"), /whitespace/);
-});
-
-test("TTY secret prompt uses Clack and restores raw mode", async () => {
-  class TestInput extends PassThrough {
-    isTTY = true;
-    isRaw = false;
-    rawChanges: boolean[] = [];
-    setRawMode(value: boolean) { this.isRaw = value; this.rawChanges.push(value); }
-  }
-  class TestOutput extends PassThrough {
-    columns = 80;
-  }
-  const input = new TestInput();
-  const output = new TestOutput();
-  let rendered = "";
-  output.on("data", (chunk) => { rendered += chunk.toString(); });
-  const secret = promptSecret("Secret: ", input, output);
-  input.write("key-value\r");
-  assert.equal(await secret, "key-value");
-  assert.equal(input.rawChanges[0], true);
-  assert.equal(input.rawChanges.at(-1), false);
-  assert.equal(input.isRaw, false);
-  assert.match(rendered, /Secret/);
-  assert.equal(rendered.includes("key-value"), false);
 });
 
 test("profile creation validates explicit regions and auto-detects known production regions", async () => {

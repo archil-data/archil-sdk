@@ -196,8 +196,10 @@ profilesCommand
           region: global.region,
           baseUrl: global.baseUrl,
         });
-      } finally {
         progress?.stop("Found valid region");
+      } catch (error) {
+        progress?.error("No valid region found");
+        throw error;
       }
       let name = global.profile ?? region;
       if (!global.profile) {
