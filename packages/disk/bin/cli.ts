@@ -39,7 +39,7 @@ program
   .addOption(new Option("--base-url <url>", "Override control-plane base URL").env("ARCHIL_BASE_URL"))
   .addOption(new Option("--profile <name>", "Named Archil profile").env("ARCHIL_PROFILE"))
   .hook("preAction", async (_thisCommand, actionCommand) => {
-    if (["auth", "profile"].includes(actionCommand.parent?.name() ?? "")) return;
+    if (actionCommand.parent?.name() === "profile") return;
     const opts = program.opts<{ apiKey?: string; region?: string; baseUrl?: string; profile?: string }>();
     try {
       const resolved = await resolveCliCredentials(opts, await loadProfiles());
@@ -168,12 +168,13 @@ function printDisk(d: Disk): void {
   }
 }
 
-const auth = program.command("auth").description("Manage persistent Archil credentials");
+const profilesCommand = program.command("profile").description("Manage named Archil profiles and credentials");
 
-auth
+profilesCommand
   .command("login")
   .description("Create or update a named profile")
-  .action(async () => {
+  .option("-o, --output <format>", "Output format: text | json", "text")
+  .action(async (options: { output: string }) => {
     try {
       const global = program.opts<{ apiKey?: string; region?: string; baseUrl?: string; profile?: string }>();
       const config = await loadProfiles();
@@ -185,64 +186,91 @@ auth
       config.profiles[name] = { region, baseUrl: global.baseUrl };
       config.currentProfile = name;
       await saveProfiles(config);
-      console.log(`Logged in profile '${name}' (${region})`);
+      if (options.output === "json") {
+        console.log(JSON.stringify({ name, region, baseUrl: global.baseUrl, current: true, loggedIn: true }, null, 2));
+      } else {
+        console.log(`Logged in profile '${name}' (${region})`);
+      }
     } catch (err) {
       fail(err);
     }
   });
 
-auth
+profilesCommand
   .command("logout")
   .description("Remove the stored credential for a profile")
-  .action(async () => {
+  .option("-o, --output <format>", "Output format: text | json", "text")
+  .action(async (options: { output: string }) => {
     try {
       const global = program.opts<{ profile?: string }>();
       const config = await loadProfiles();
       const name = global.profile ?? config.currentProfile;
       if (!name || !config.profiles[name]) throw new Error("Logout requires an existing --profile <name>");
       await deleteProfileCredential(name);
-      console.log(`Logged out profile '${name}'`);
+      if (options.output === "json") console.log(JSON.stringify({ name, loggedIn: false }, null, 2));
+      else console.log(`Logged out profile '${name}'`);
     } catch (err) {
       fail(err);
     }
   });
 
-const profilesCommand = program.command("profile").description("Manage named Archil profiles");
-
-profilesCommand.command("list").description("List profiles without revealing credentials").action(async () => {
-  try {
-    const config = await loadProfiles();
-    for (const [name, profile] of Object.entries(config.profiles).sort(([a], [b]) => a.localeCompare(b))) {
-      console.log(`${config.currentProfile === name ? "*" : " "} ${name}\t${profile.region}\t${profile.baseUrl ?? "default"}`);
+profilesCommand
+  .command("list")
+  .description("List profiles without revealing credentials")
+  .option("-o, --output <format>", "Output format: table | json", "table")
+  .action(async (options: { output: string }) => {
+    try {
+      const config = await loadProfiles();
+      const profiles = Object.entries(config.profiles)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, profile]) => ({
+          name,
+          region: profile.region,
+          baseUrl: profile.baseUrl,
+          current: config.currentProfile === name,
+        }));
+      if (options.output === "json") console.log(JSON.stringify(profiles, null, 2));
+      else for (const profile of profiles) {
+        console.log(`${profile.current ? "*" : " "} ${profile.name}\t${profile.region}\t${profile.baseUrl ?? "default"}`);
+      }
+    } catch (err) {
+      fail(err);
     }
-  } catch (err) {
-    fail(err);
-  }
-});
+  });
 
-profilesCommand.command("use <name>").description("Select the default profile").action(async (name: string) => {
-  try {
-    const config = await loadProfiles();
-    if (!config.profiles[name]) throw new Error(`Profile '${name}' does not exist`);
-    config.currentProfile = name;
-    await saveProfiles(config);
-    console.log(`Using profile '${name}'`);
-  } catch (err) {
-    fail(err);
-  }
-});
+profilesCommand
+  .command("use <name>")
+  .description("Select the default profile")
+  .option("-o, --output <format>", "Output format: text | json", "text")
+  .action(async (name: string, options: { output: string }) => {
+    try {
+      const config = await loadProfiles();
+      if (!config.profiles[name]) throw new Error(`Profile '${name}' does not exist`);
+      config.currentProfile = name;
+      await saveProfiles(config);
+      if (options.output === "json") console.log(JSON.stringify({ name, current: true }, null, 2));
+      else console.log(`Using profile '${name}'`);
+    } catch (err) {
+      fail(err);
+    }
+  });
 
-profilesCommand.command("delete <name>").description("Delete a profile and its stored credential").action(async (name: string) => {
-  try {
-    const config = await loadProfiles();
-    if (!config.profiles[name]) throw new Error(`Profile '${name}' does not exist`);
-    await deleteProfileCredential(name);
-    await deleteProfile(name);
-    console.log(`Deleted profile '${name}'`);
-  } catch (err) {
-    fail(err);
-  }
-});
+profilesCommand
+  .command("delete <name>")
+  .description("Delete a profile and its stored credential")
+  .option("-o, --output <format>", "Output format: text | json", "text")
+  .action(async (name: string, options: { output: string }) => {
+    try {
+      const config = await loadProfiles();
+      if (!config.profiles[name]) throw new Error(`Profile '${name}' does not exist`);
+      await deleteProfileCredential(name);
+      await deleteProfile(name);
+      if (options.output === "json") console.log(JSON.stringify({ name, deleted: true }, null, 2));
+      else console.log(`Deleted profile '${name}'`);
+    } catch (err) {
+      fail(err);
+    }
+  });
 
 program
   .command("list")
@@ -450,7 +478,7 @@ keys
 
 // Support `disk <id> exec <cmd...>` as a sugar form for `disk exec <id> <cmd...>`.
 function rewriteSugar(argv: string[]): string[] {
-  const known = new Set(["list", "get", "create", "delete", "exec", "grep", "api-keys", "auth", "profile", "sandboxes", "help", "--help", "-h", "--version", "-V"]);
+  const known = new Set(["list", "get", "create", "delete", "exec", "grep", "api-keys", "profile", "sandboxes", "help", "--help", "-h", "--version", "-V"]);
   const head = argv[2];
   const next = argv[3];
   if (head && next === "exec" && !known.has(head) && !head.startsWith("-")) {

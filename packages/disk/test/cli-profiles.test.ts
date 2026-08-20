@@ -66,7 +66,7 @@ test("profile credentials always use protected files and reject unsafe permissio
   }
   await deleteProfileCredential("test", env);
   await assert.rejects(readFile(path), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
-  await assert.rejects(readProfileCredential("test", env), /Missing API key for profile 'test'.*auth login/);
+  await assert.rejects(readProfileCredential("test", env), /Missing API key for profile 'test'.*profile login/);
   assert.equal(normalizeApiKey("key-one"), "one");
   assert.equal(normalizeApiKey("two"), "two");
   assert.throws(() => normalizeApiKey("key-"), /empty/);
