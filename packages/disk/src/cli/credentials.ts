@@ -3,10 +3,11 @@ import { dirname } from "node:path";
 import { credentialFilePath } from "./config-paths.js";
 import type { DiskProfile } from "./profiles.js";
 
-export function normalizeApiKey(value: string): string {
-  const normalized = value.trim().replace(/^key-/, "");
-  if (!normalized) throw new Error("API key is empty");
-  return normalized;
+export function validateApiKey(value: string): string {
+  const key = value.trim();
+  if (!key) throw new Error("API key is empty");
+  if (/\s/.test(key)) throw new Error("API key must not contain whitespace");
+  return key;
 }
 
 export async function readProfileCredential(
@@ -21,7 +22,7 @@ export async function readProfileCredential(
         throw new Error(`Refusing to read credential file ${path}: permissions must be 0600`);
       }
     }
-    return normalizeApiKey(await readFile(path, "utf8"));
+    return validateApiKey(await readFile(path, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(`Missing API key for profile '${profile}': run 'disk profile login --profile ${profile}'`);
@@ -40,7 +41,7 @@ export async function writeProfileCredential(
   const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(`key-${normalizeApiKey(secret)}\n`);
+    await handle.writeFile(`${validateApiKey(secret)}\n`);
     await handle.sync();
   } finally {
     await handle.close();
@@ -76,7 +77,7 @@ export async function resolveCliCredentials(
   const baseUrl = options.baseUrl ?? env.ARCHIL_BASE_URL ?? profile?.baseUrl;
   if (!apiKey) throw new Error("Missing API key: pass --api-key, set ARCHIL_API_KEY, or run 'disk profile login'");
   if (!region) throw new Error("Missing region: pass --region, set ARCHIL_REGION, or select a profile");
-  return { apiKey: normalizeApiKey(apiKey), region, baseUrl, profile: selected };
+  return { apiKey: validateApiKey(apiKey), region, baseUrl, profile: selected };
 }
 
 interface SecretInput extends AsyncIterable<string | Uint8Array> {
@@ -101,7 +102,7 @@ export async function promptSecret(
   if (!input.isTTY) {
     const chunks: Buffer[] = [];
     for await (const chunk of input) chunks.push(Buffer.from(chunk));
-    return normalizeApiKey(Buffer.concat(chunks).toString("utf8"));
+    return validateApiKey(Buffer.concat(chunks).toString("utf8"));
   }
   output.write(prompt);
   const wasRaw = input.isRaw;
@@ -124,7 +125,7 @@ export async function promptSecret(
         }
         if (byte === 13 || byte === 10) {
           cleanup();
-          try { resolve(normalizeApiKey(value)); } catch (error) { reject(error); }
+          try { resolve(validateApiKey(value)); } catch (error) { reject(error); }
           return;
         }
         if (byte === 127 || byte === 8) value = value.slice(0, -1);

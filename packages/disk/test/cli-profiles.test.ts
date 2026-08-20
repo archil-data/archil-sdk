@@ -7,7 +7,7 @@ import { afterEach, test } from "vitest";
 import { credentialFilePath, diskConfigDir, profileConfigPath } from "../src/cli/config-paths.js";
 import {
   deleteProfileCredential,
-  normalizeApiKey,
+  validateApiKey,
   promptSecret,
   readProfileCredential,
   resolveCliCredentials,
@@ -58,7 +58,7 @@ test("profile credentials always use protected files and reject unsafe permissio
   const path = credentialFilePath("test", env);
   await writeProfileCredential("test", " key-secret \n", env);
   assert.equal(await readFile(path, "utf8"), "key-secret\n");
-  assert.equal(await readProfileCredential("test", env), "secret");
+  assert.equal(await readProfileCredential("test", env), "key-secret");
   if (process.platform !== "win32") {
     assert.equal((await stat(path)).mode & 0o777, 0o600);
     await chmod(path, 0o644);
@@ -67,9 +67,10 @@ test("profile credentials always use protected files and reject unsafe permissio
   await deleteProfileCredential("test", env);
   await assert.rejects(readFile(path), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
   await assert.rejects(readProfileCredential("test", env), /Missing API key for profile 'test'.*profile login/);
-  assert.equal(normalizeApiKey("key-one"), "one");
-  assert.equal(normalizeApiKey("two"), "two");
-  assert.throws(() => normalizeApiKey("key-"), /empty/);
+  assert.equal(validateApiKey("key-one"), "key-one");
+  assert.equal(validateApiKey("adt_two"), "adt_two");
+  assert.throws(() => validateApiKey(""), /empty/);
+  assert.throws(() => validateApiKey("key one"), /whitespace/);
 });
 
 test("TTY secret prompt restores raw mode and always pauses stdin", async () => {
@@ -89,7 +90,7 @@ test("TTY secret prompt restores raw mode and always pauses stdin", async () => 
   const output: string[] = [];
   const secret = promptSecret("Secret: ", input, { write: (value) => output.push(value) });
   input.emit("data", Buffer.from("key-value\r"));
-  assert.equal(await secret, "value");
+  assert.equal(await secret, "key-value");
   assert.deepEqual(input.rawChanges, [true, false]);
   assert.equal(input.pauseCalls, 1);
   assert.equal(input.listenerCount("data"), 0);
@@ -113,7 +114,7 @@ test("credential precedence is flags, environment, then selected profile file", 
   );
   assert.deepEqual(
     await resolveCliCredentials({}, config, { ARCHIL_API_KEY: "key-env", ARCHIL_REGION: "env-region", ARCHIL_BASE_URL: "https://env", ARCHIL_PROFILE: "other" }, readCredential),
-    { apiKey: "env", region: "env-region", baseUrl: "https://env", profile: "other" },
+    { apiKey: "key-env", region: "env-region", baseUrl: "https://env", profile: "other" },
   );
   assert.deepEqual(
     await resolveCliCredentials({}, config, {}, readCredential),
