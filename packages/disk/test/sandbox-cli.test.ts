@@ -91,6 +91,7 @@ function harness(sandboxes: Sandbox[], options: { tty?: boolean; confirm?: boole
   };
   const exitCodes: number[] = [];
   const confirmations: string[] = [];
+  const signals = new EventEmitter();
   let clock = 0;
   const program = createSandboxProgram({
     version: "test",
@@ -98,14 +99,14 @@ function harness(sandboxes: Sandbox[], options: { tty?: boolean; confirm?: boole
     stdin: stdin as unknown as NodeJS.ReadStream,
     stdout,
     stderr,
-    signals: new EventEmitter() as NodeJS.Process,
+    signals: signals as NodeJS.Process,
     confirm: async (question) => { confirmations.push(question); return options.confirm ?? false; },
     setExitCode: (code) => exitCodes.push(code),
     now: () => clock,
     sleep: async (milliseconds) => { clock += milliseconds; },
   });
   const run = (...args: string[]) => program.parseAsync(["node", "sandbox", "--api-key", "key-test", "--region", "test", ...args]);
-  return { stdout, stderr, stdin, service, exitCodes, confirmations, run };
+  return { stdout, stderr, stdin, signals, service, exitCodes, confirmations, run };
 }
 
 function text(values: Array<string | Uint8Array>): string {
@@ -245,22 +246,22 @@ test("wait handles stable and transitional states, targets, output, and timeouts
 
 test("run preserves argv, streams output, and propagates remote status", async () => {
   const result: SandboxProcessResult = { status: "failed", exitCode: 7, stdout: "", stderr: "" };
-  const exec = vi.fn(async (_command: string, options: Parameters<Sandbox["exec"]>[1]) => {
+  const start = vi.fn(async (_command: string, options: Parameters<Sandbox["processes"]["start"]>[1]) => {
     options?.onOutput?.({ stream: "stdout", offset: 0, data: new TextEncoder().encode("out") });
     options?.onOutput?.({ stream: "stderr", offset: 3, data: new TextEncoder().encode("err") });
-    return result;
+    return { wait: vi.fn(async () => result), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
   });
-  const item = fakeSandbox({ exec: exec as Sandbox["exec"] });
+  const item = fakeSandbox({ processes: { start } as unknown as Sandbox["processes"] });
   const cli = harness([item]);
   const args = ["sh", "-c", "printf '%s\\n' \"$1\"; echo done", "", "a b", "single'quote", "double\"quote", "$HOME", "line\nfeed"];
   await cli.run("run", "one", "--env", "A=b", "--timeout", "9", "--", ...args);
   assert.equal(
-    exec.mock.calls[0]![0],
+    start.mock.calls[0]![0],
     `'sh' '-c' 'printf '"'"'%s\\n'"'"' "$1"; echo done' '' 'a b' 'single'"'"'quote' 'double"quote' '$HOME' 'line\nfeed'`,
   );
-  assert.deepEqual(exec.mock.calls[0]![1]?.env, { A: "b" });
-  assert.equal(exec.mock.calls[0]![1]?.timeoutSeconds, 9);
-  assert.equal(exec.mock.calls[0]![1]?.collectOutput, false);
+  assert.deepEqual(start.mock.calls[0]![1]?.env, { A: "b" });
+  assert.equal(start.mock.calls[0]![1]?.timeoutSeconds, 9);
+  assert.equal(start.mock.calls[0]![1]?.collectOutput, false);
   assert.equal(text(cli.stdout.values), "out");
   assert.equal(text(cli.stderr.values), "err");
   assert.deepEqual(cli.exitCodes, [7]);
@@ -269,13 +270,38 @@ test("run preserves argv, streams output, and propagates remote status", async (
   await assert.rejects(paused.run("run", "one", "echo", "no"), /while it is paused/);
 });
 
+test("run supports JSON and kills the remote process on local signals", async () => {
+  const completed: SandboxProcessResult = { status: "completed", exitCode: 0, stdout: "json-out", stderr: "" };
+  const jsonRemote = { wait: vi.fn(async () => completed), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "json-out", stderr: "" };
+  const jsonStart = vi.fn(async (_command: string, _options: Parameters<Sandbox["processes"]["start"]>[1]) => jsonRemote);
+  const json = harness([fakeSandbox({ processes: { start: jsonStart } as unknown as Sandbox["processes"] })]);
+  await json.run("run", "one", "echo", "ok", "--output", "json");
+  assert.deepEqual(JSON.parse(text(json.stdout.values)), completed);
+  assert.equal(jsonStart.mock.calls[0]![1]?.collectOutput, true);
+  assert.equal(jsonStart.mock.calls[0]![1]?.onOutput, undefined);
+
+  const wait = new Promise<SandboxProcessResult>(() => {});
+  const interruptedRemote = { wait: vi.fn(() => wait), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
+  const interrupted = harness([fakeSandbox({ processes: { start: vi.fn(async () => interruptedRemote) } as unknown as Sandbox["processes"] })]);
+  const running = interrupted.run("run", "one", "sleep", "30");
+  await vi.waitFor(() => assert.equal(interrupted.signals.listenerCount("SIGINT"), 1));
+  interrupted.signals.emit("SIGINT");
+  await running;
+  assert.equal(interruptedRemote.kill.mock.calls.length, 1);
+  assert.equal(interruptedRemote.disconnect.mock.calls.length, 1);
+  assert.match(text(interrupted.stderr.values), /terminated by local signal/);
+  assert.deepEqual(interrupted.exitCodes, [1]);
+  assert.equal(interrupted.signals.listenerCount("SIGINT"), 0);
+});
+
 test("run reports failures without remote stderr", async () => {
   for (const [result, args, expected] of [
     [{ status: "timed_out", stdout: "", stderr: "" }, ["--timeout", "1", "--", "sleep", "5"], /Process timed out after 1 second/],
     [{ status: "failed", exitCode: 9, exitReason: "signal", stdout: "", stderr: "" }, ["false"], /Process failed with exit code 9: signal/],
     [{ status: "cancelled", exitReason: "sandbox stopped", stdout: "", stderr: "" }, ["false"], /Process cancelled: sandbox stopped/],
   ] as const) {
-    const item = fakeSandbox({ exec: vi.fn(async () => result) as Sandbox["exec"] });
+    const remote = { wait: vi.fn(async () => result), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
+    const item = fakeSandbox({ processes: { start: vi.fn(async () => remote) } as unknown as Sandbox["processes"] });
     const cli = harness([item]);
     await cli.run("run", "one", ...args);
     assert.match(text(cli.stderr.values), expected);

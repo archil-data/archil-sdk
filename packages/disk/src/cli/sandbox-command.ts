@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import type { ArchilOptions } from "../archil.js";
-import type { SandboxProcessResult } from "../sandbox-process.js";
+import type { SandboxProcess, SandboxProcessResult } from "../sandbox-process.js";
 import type { Sandbox, SandboxStatus } from "../sandbox.js";
 import type { CreateSandboxRequest } from "../sandboxes.js";
 import {
@@ -155,7 +155,8 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
         throw new Error(`Cannot ${action} sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       }
       if (action === "start" && sandbox.status === "paused" && !await confirmDestructive(`Cold-start '${sandbox.name}' and discard its memory snapshot?`, options.yes ?? false)) {
-        output(`Cancelled cold-start of '${sandbox.name}'.`);
+        if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, action, cancelled: true }, null, 2));
+        else output(`Cancelled cold-start of '${sandbox.name}'.`);
         return;
       }
       await sandbox[action]({ wait: options.wait });
@@ -217,46 +218,83 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
       output(formatSandbox(sandbox, options.output));
     });
 
-  program.command("run <id|name> <command...>")
-    .description("Run a one-shot command in a running sandbox")
+  formatOption(program.command("run <id|name> <command...>")
+    .description("Run a one-shot command in a running sandbox"))
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], [])
     .option("--timeout <seconds>", "Command timeout in seconds")
-    .action(async (target: string, command: string[], options: { env: string[]; timeout?: string }) => {
+    .action(async (target: string, command: string[], options: { env: string[]; timeout?: string; output: OutputFormat }) => {
       const sandbox = await resolveSandbox(requireService(), target);
       if (sandbox.status !== "running") throw new Error(`Cannot run a command in sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       const runOptions = parseRunOptions(options);
       let receivedStderr = false;
-      const shellCommand = command.map((argument) => argument === ""
-        ? "''"
-        : `'${argument.replaceAll("'", `'"'"'`)}'`).join(" ");
-      const result = await sandbox.exec(shellCommand, {
-        ...runOptions,
-        collectOutput: false,
-        onOutput: ({ stream, data }) => {
-          if (stream === "stderr" && data.byteLength > 0) receivedStderr = true;
-          return (stream === "stdout" ? stdout : stderr).write(data);
-        },
+      let remote: SandboxProcess | undefined;
+      let terminationRequested = false;
+      let terminationStarted = false;
+      let resolveTermination!: (result: SandboxProcessResult) => void;
+      let rejectTermination!: (error: Error) => void;
+      const termination = new Promise<SandboxProcessResult>((resolve, reject) => {
+        resolveTermination = resolve;
+        rejectTermination = reject;
       });
-      if (result.status !== "completed" && !receivedStderr) {
-        let diagnostic: string;
-        if (result.status === "timed_out") {
-          diagnostic = `Process timed out${runOptions.timeoutSeconds === undefined ? "" : ` after ${runOptions.timeoutSeconds} second${runOptions.timeoutSeconds === 1 ? "" : "s"}`}`;
-        } else if (result.status === "failed") {
-          diagnostic = `Process failed${result.exitCode === undefined ? "" : ` with exit code ${result.exitCode}`}`;
-        } else {
-          diagnostic = "Process cancelled";
+      const startTermination = () => {
+        if (!remote || terminationStarted) return;
+        terminationStarted = true;
+        void remote.kill().then(
+          () => resolveTermination({ status: "cancelled", exitReason: "terminated by local signal", stdout: remote?.stdout ?? "", stderr: remote?.stderr ?? "" }),
+          (error: unknown) => rejectTermination(error instanceof Error ? error : new Error(String(error))),
+        );
+      };
+      const onSignal = () => {
+        terminationRequested = true;
+        startTermination();
+      };
+      signals.on("SIGINT", onSignal);
+      signals.on("SIGTERM", onSignal);
+      signals.on("SIGHUP", onSignal);
+      try {
+        const shellCommand = command.map((argument) => argument === ""
+          ? "''"
+          : `'${argument.replaceAll("'", `'"'"'`)}'`).join(" ");
+        remote = await sandbox.processes.start(shellCommand, {
+          ...runOptions,
+          collectOutput: options.output === "json",
+          onOutput: options.output === "json" ? undefined : ({ stream, data }) => {
+            if (stream === "stderr" && data.byteLength > 0) receivedStderr = true;
+            return (stream === "stdout" ? stdout : stderr).write(data);
+          },
+        });
+        if (terminationRequested) startTermination();
+        const result = await Promise.race([remote.wait(), termination]);
+        if (options.output === "json") {
+          output(JSON.stringify(result, null, 2));
+        } else if (result.status !== "completed" && !receivedStderr) {
+          let diagnostic: string;
+          if (result.status === "timed_out") {
+            diagnostic = `Process timed out${runOptions.timeoutSeconds === undefined ? "" : ` after ${runOptions.timeoutSeconds} second${runOptions.timeoutSeconds === 1 ? "" : "s"}`}`;
+          } else if (result.status === "failed") {
+            diagnostic = `Process failed${result.exitCode === undefined ? "" : ` with exit code ${result.exitCode}`}`;
+          } else {
+            diagnostic = "Process cancelled";
+          }
+          stderr.write(`${diagnostic}${result.exitReason ? `: ${result.exitReason}` : ""}\n`);
         }
-        stderr.write(`${diagnostic}${result.exitReason ? `: ${result.exitReason}` : ""}\n`);
+        setExitCode(resultExitCode(result));
+      } finally {
+        signals.off("SIGINT", onSignal);
+        signals.off("SIGTERM", onSignal);
+        signals.off("SIGHUP", onSignal);
+        await remote?.disconnect().catch(() => {});
       }
-      setExitCode(resultExitCode(result));
     });
 
-  program.command("shell <id|name>")
-    .description("Open an interactive shell in a running sandbox")
-    .action(async (target: string) => {
+  formatOption(program.command("shell <id|name>")
+    .description("Open an interactive shell in a running sandbox"))
+    .action(async (target: string, options: { output: OutputFormat }) => {
       const sandbox = await resolveSandbox(requireService(), target);
       if (sandbox.status !== "running") throw new Error(`Cannot open a shell in sandbox '${sandbox.name}' while it is ${sandbox.status}`);
-      const result = await runSandboxShell({ sandbox, stdin, stdout: stdout as NodeJS.WriteStream, stderr, signals });
+      const shellOutput = options.output === "json" ? stderr as NodeJS.WriteStream : stdout as NodeJS.WriteStream;
+      const result = await runSandboxShell({ sandbox, stdin, stdout: shellOutput, stderr, signals });
+      if (options.output === "json") output(JSON.stringify(result, null, 2));
       setExitCode(resultExitCode(result));
     });
 

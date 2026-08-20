@@ -4,7 +4,6 @@ allowBuilds:
   '@mongodb-js/zstd': true
   esbuild: true
   node-liblzma: true
-  node-pty: true
 minimumReleaseAgeExclude:
   - '@archildata/api-types@0.0.7'
   - '@archildata/api-types@0.0.18'
