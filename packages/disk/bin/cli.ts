@@ -33,6 +33,7 @@ program
   .name("disk")
   .description("Manage Archil disks from the command line")
   .version(pkg.version)
+  .configureHelp({ showGlobalOptions: true })
   .addOption(new Option("-k, --api-key <key>", "Archil API key (prefer login, environment variables, or stdin)").env("ARCHIL_API_KEY"))
   .addOption(new Option("-r, --region <region>", "Archil region").env("ARCHIL_REGION"))
   .addOption(new Option("--base-url <url>", "Override control-plane base URL").env("ARCHIL_BASE_URL"))
