@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline/promises";
+import { spinner } from "@clack/prompts";
 import { Command } from "commander";
 import type { ArchilOptions } from "../archil.js";
 import type { SandboxProcess, SandboxProcessResult } from "../sandbox-process.js";
@@ -39,7 +40,7 @@ interface SandboxCliDependencies {
   version: string;
   createClient(options: ArchilOptions): { sandboxes: SandboxService };
   stdout?: WritableOutput & { isTTY?: boolean };
-  stderr?: WritableOutput;
+  stderr?: WritableOutput & { isTTY?: boolean };
   stdin?: NodeJS.ReadStream;
   signals?: NodeJS.Process;
   confirm?: (question: string) => Promise<boolean>;
@@ -103,6 +104,16 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   addProfileCommands(program, dependencies.validateCredential);
 
   const output = (value: string) => stdout.write(`${value}\n`);
+  const withSpinner = async <T>(label: string, enabled: boolean, operation: () => Promise<T>): Promise<T> => {
+    if (!enabled || !stderr.isTTY) return operation();
+    const progress = spinner({ output: stderr as NodeJS.WriteStream });
+    progress.start(label);
+    try {
+      return await operation();
+    } finally {
+      progress.clear();
+    }
+  };
   const requireService = () => {
     if (!service) throw new Error("Sandbox client was not configured");
     return service;
@@ -142,7 +153,8 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
     .option("--max-concurrent-processes <count>", "Maximum attached processes")
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], []);
   create.action(async (name: string | undefined, options: CreateSandboxCliOptions & { output: OutputFormat; wait: boolean }) => {
-    const sandbox = await requireService().create(parseCreateSandboxOptions(name, options), { wait: options.wait });
+    const sandbox = await withSpinner("Creating sandbox", options.wait, () =>
+      requireService().create(parseCreateSandboxOptions(name, options), { wait: options.wait }));
     output(formatSandbox(sandbox, options.output));
   });
 
@@ -159,7 +171,13 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
         else output(`Cancelled cold-start of '${sandbox.name}'.`);
         return;
       }
-      await sandbox[action]({ wait: options.wait });
+      const labels: Record<Exclude<LifecycleAction, "fork" | "delete">, string> = {
+        start: "Starting sandbox",
+        pause: "Pausing sandbox",
+        resume: "Resuming sandbox",
+        stop: "Stopping sandbox",
+      };
+      await withSpinner(labels[action], options.wait, () => sandbox[action]({ wait: options.wait }));
       output(formatSandbox(sandbox, options.output));
     });
   };
@@ -174,7 +192,8 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
       if (!SANDBOX_ACTIONS[sandbox.status].includes("fork")) {
         throw new Error(`Cannot fork sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       }
-      const fork = await sandbox.fork({ name: validateSandboxName(name), wait: options.wait });
+      const fork = await withSpinner("Forking sandbox", options.wait, () =>
+        sandbox.fork({ name: validateSandboxName(name), wait: options.wait }));
       output(formatSandbox(fork, options.output));
     },
   );
@@ -185,7 +204,7 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
       if (!SANDBOX_ACTIONS[sandbox.status].includes("delete")) {
         throw new Error(`Cannot delete sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       }
-      await sandbox.delete();
+      await withSpinner("Deleting sandbox", true, () => sandbox.delete());
       if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, deleted: true }, null, 2));
       else output(`Deleted '${sandbox.name}' (${sandbox.id}).`);
     });
@@ -206,20 +225,29 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
       }
       const sandbox = await resolveSandbox(requireService(), target);
       const deadline = now() + timeoutSeconds * 1000;
-      while (options.status ? sandbox.status !== options.status : !(stableStatuses as readonly SandboxStatus[]).includes(sandbox.status)) {
-        const remaining = deadline - now();
-        if (remaining <= 0) {
-          const desired = options.status ? `status '${options.status}'` : "a stable state";
-          throw new Error(`Timed out after ${timeoutSeconds} seconds waiting for sandbox '${sandbox.name}' to reach ${desired}; current status is '${sandbox.status}'`);
+      await withSpinner(`Waiting for '${sandbox.name}'`, true, async () => {
+        while (options.status ? sandbox.status !== options.status : !(stableStatuses as readonly SandboxStatus[]).includes(sandbox.status)) {
+          const remaining = deadline - now();
+          if (remaining <= 0) {
+            const desired = options.status ? `status '${options.status}'` : "a stable state";
+            throw new Error(`Timed out after ${timeoutSeconds} seconds waiting for sandbox '${sandbox.name}' to reach ${desired}; current status is '${sandbox.status}'`);
+          }
+          await sleep(Math.min(500, remaining));
+          await sandbox.refresh();
         }
-        await sleep(Math.min(500, remaining));
-        await sandbox.refresh();
-      }
+      });
       output(formatSandbox(sandbox, options.output));
     });
 
   formatOption(program.command("run <id|name> <command...>")
-    .description("Run a one-shot command in a running sandbox"))
+    .description("Run a one-shot command in a running sandbox")
+    .addHelpText("after", `
+Examples:
+  sandbox run my-sandbox -- echo hello
+  sandbox run my-sandbox -- sh -c 'echo "$HOME"'
+
+Use -- before the command so its flags are not parsed as sandbox options.
+`))
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], [])
     .option("--timeout <seconds>", "Command timeout in seconds")
     .action(async (target: string, command: string[], options: { env: string[]; timeout?: string; output: OutputFormat }) => {
