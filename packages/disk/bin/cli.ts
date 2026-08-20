@@ -1,20 +1,13 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
-import { spinner } from "@clack/prompts";
-import { Command, Option } from "commander";
-import { validateCredentialAndResolveRegion } from "../src/cli/credential-validation.js";
+import { Command } from "commander";
 import {
-  deleteProfileCredential,
-  promptSecret,
-  resolveCliCredentials,
-  validateApiKey,
-  writeProfileCredential,
-} from "../src/cli/credentials.js";
-import {
-  deleteProfile,
-  loadProfiles,
-  saveProfiles,
-} from "../src/cli/profiles.js";
+  addGlobalOptions,
+  addProfileCommands,
+  isProfileCommand,
+  resolveProgramCredentials,
+} from "../src/cli/common.js";
+import { renderTable } from "../src/cli/output.js";
 import {
   ArchilApiError,
   configure,
@@ -36,21 +29,13 @@ program
   .name("disk")
   .description("Manage Archil disks from the command line")
   .version(pkg.version)
-  .configureHelp({ showGlobalOptions: true })
-  .addOption(new Option("-k, --api-key <key>", "Archil API key (prefer profiles, environment variables, or stdin)").env("ARCHIL_API_KEY"))
-  .addOption(new Option("-r, --region <region>", "Archil region").env("ARCHIL_REGION"))
-  .addOption(new Option("--base-url <url>", "Override control-plane base URL").env("ARCHIL_BASE_URL"))
-  .addOption(new Option("--profile <name>", "Named Archil profile").env("ARCHIL_PROFILE"))
   .hook("preAction", async (_thisCommand, actionCommand) => {
-    if (actionCommand.parent?.name() === "profile") return;
-    const opts = program.opts<{ apiKey?: string; region?: string; baseUrl?: string; profile?: string }>();
-    try {
-      const resolved = await resolveCliCredentials(opts, await loadProfiles());
-      configure({ apiKey: resolved.apiKey, region: resolved.region, baseUrl: resolved.baseUrl });
-    } catch (err) {
-      fail(err);
-    }
+    if (isProfileCommand(actionCommand)) return;
+    const resolved = await resolveProgramCredentials(program);
+    configure({ apiKey: resolved.apiKey, region: resolved.region, baseUrl: resolved.baseUrl });
   });
+addGlobalOptions(program);
+addProfileCommands(program);
 
 function fail(err: unknown): never {
   if (err instanceof ArchilApiError) {
@@ -93,28 +78,6 @@ function formatBytes(n: number | undefined): string | undefined {
     i++;
   }
   return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
-}
-
-function renderTable(rows: string[][], headers?: string[]): string {
-  const all = headers ? [headers, ...rows] : rows;
-  if (all.length === 0) return "";
-  const cols = Math.max(...all.map((r) => r.length));
-  const widths: number[] = [];
-  for (let i = 0; i < cols; i++) {
-    widths[i] = Math.max(...all.map((r) => (r[i] ?? "").length));
-  }
-  const bar = (l: string, m: string, r: string): string =>
-    l + widths.map((w) => "─".repeat(w + 2)).join(m) + r;
-  const line = (r: string[]): string =>
-    "│ " + widths.map((w, i) => (r[i] ?? "").padEnd(w)).join(" │ ") + " │";
-  const out: string[] = [bar("╭", "┬", "╮")];
-  if (headers) {
-    out.push(line(headers));
-    out.push(bar("├", "┼", "┤"));
-  }
-  for (const r of rows) out.push(line(r));
-  out.push(bar("╰", "┴", "╯"));
-  return out.join("\n");
 }
 
 function section(title: string, body: string): void {
@@ -170,119 +133,6 @@ function printDisk(d: Disk): void {
     section("Connected clients", renderTable(rows, ["id", "ip", "connected at"]));
   }
 }
-
-const profilesCommand = program.command("profile").description("Manage named Archil profiles and credentials");
-
-profilesCommand
-  .command("create")
-  .description("Create a named profile")
-  .option("-o, --output <format>", "Output format: text | json", "text")
-  .action(async (options: { output: string }) => {
-    try {
-      const global = program.opts<{ apiKey?: string; region?: string; baseUrl?: string; profile?: string }>();
-      const config = await loadProfiles();
-      if (global.profile && config.profiles[global.profile]) {
-        throw new Error(`Profile '${global.profile}' already exists`);
-      }
-      const apiKey = validateApiKey(global.apiKey ?? await promptSecret());
-      const progress = !global.region && !global.baseUrl && process.stderr.isTTY
-        ? spinner({ output: process.stderr, withGuide: false })
-        : undefined;
-      progress?.start("Finding the API key's region");
-      let region: string;
-      try {
-        region = await validateCredentialAndResolveRegion({
-          apiKey,
-          region: global.region,
-          baseUrl: global.baseUrl,
-        });
-        progress?.stop("Found valid region");
-      } catch (error) {
-        progress?.error("No valid region found");
-        throw error;
-      }
-      let name = global.profile ?? region;
-      if (!global.profile) {
-        let suffix = 2;
-        while (config.profiles[name]) name = `${region}-${suffix++}`;
-      }
-      await writeProfileCredential(name, apiKey);
-      config.profiles[name] = { region, baseUrl: global.baseUrl };
-      config.currentProfile = name;
-      await saveProfiles(config);
-      if (options.output === "json") {
-        console.log(JSON.stringify({ name, region, baseUrl: global.baseUrl, current: true }, null, 2));
-      } else {
-        console.log(`Created profile '${name}' (${region})`);
-      }
-    } catch (err) {
-      fail(err);
-    }
-  });
-
-profilesCommand
-  .command("list")
-  .description("List profiles without revealing credentials")
-  .option("-o, --output <format>", "Output format: table | json", "table")
-  .action(async (options: { output: string }) => {
-    try {
-      const config = await loadProfiles();
-      const profiles = Object.entries(config.profiles)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([name, profile]) => ({
-          name,
-          region: profile.region,
-          baseUrl: profile.baseUrl,
-          current: config.currentProfile === name,
-        }));
-      if (options.output === "json") console.log(JSON.stringify(profiles, null, 2));
-      else console.log(renderTable(
-        profiles.map((profile) => [
-          profile.current ? "*" : "",
-          profile.name,
-          profile.region,
-          profile.baseUrl ?? "default",
-        ]),
-        ["current", "name", "region", "base URL"],
-      ));
-    } catch (err) {
-      fail(err);
-    }
-  });
-
-profilesCommand
-  .command("use <name>")
-  .description("Select the default profile")
-  .option("-o, --output <format>", "Output format: text | json", "text")
-  .action(async (name: string, options: { output: string }) => {
-    try {
-      const config = await loadProfiles();
-      if (!config.profiles[name]) throw new Error(`Profile '${name}' does not exist`);
-      config.currentProfile = name;
-      await saveProfiles(config);
-      if (options.output === "json") console.log(JSON.stringify({ name, current: true }, null, 2));
-      else console.log(`Using profile '${name}'`);
-    } catch (err) {
-      fail(err);
-    }
-  });
-
-profilesCommand
-  .command("delete <name>")
-  .description("Delete a profile and its stored credential")
-  .option("-o, --output <format>", "Output format: text | json", "text")
-  .action(async (name: string, options: { output: string }) => {
-    try {
-      const config = await loadProfiles();
-      if (!config.profiles[name]) throw new Error(`Profile '${name}' does not exist`);
-      await deleteProfileCredential(name);
-      await deleteProfile(name);
-      if (options.output === "json") console.log(JSON.stringify({ name, deleted: true }, null, 2));
-      else console.log(`Deleted profile '${name}'`);
-    } catch (err) {
-      fail(err);
-    }
-  });
 
 program
   .command("list")
@@ -499,4 +349,4 @@ function rewriteSugar(argv: string[]): string[] {
   return argv;
 }
 
-program.parseAsync(rewriteSugar(process.argv));
+program.parseAsync(rewriteSugar(process.argv)).catch(fail);
