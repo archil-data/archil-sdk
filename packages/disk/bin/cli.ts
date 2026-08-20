@@ -184,11 +184,13 @@ profilesCommand
       if (!name) throw new Error("Login requires --profile <name>");
       const existing = config.profiles[name];
       const apiKey = validateApiKey(global.apiKey ?? await promptSecret());
-      const regionWasExplicit = program.getOptionValueSource("region") === "cli";
+      const regionSource = program.getOptionValueSource("region");
+      const regionWasExplicit = regionSource === "cli";
+      const regionWasConfigured = regionWasExplicit || regionSource === "env";
       const baseUrl = global.baseUrl ?? (regionWasExplicit ? undefined : existing?.baseUrl);
       const region = await validateCredentialAndResolveRegion({
         apiKey,
-        region: global.region ?? existing?.region,
+        region: regionWasConfigured ? global.region : baseUrl ? existing?.region : undefined,
         baseUrl,
       });
       await writeProfileCredential(name, apiKey);
