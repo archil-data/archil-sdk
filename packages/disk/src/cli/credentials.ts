@@ -107,7 +107,7 @@ export async function promptSecret(
     return validateApiKey(Buffer.concat(chunks).toString("utf8"));
   }
   const result = await password({
-    message: prompt.replace(/:\s*$/, ""),
+    message: prompt,
     input: input as unknown as Readable,
     output: output as unknown as Writable,
     withGuide: false,
