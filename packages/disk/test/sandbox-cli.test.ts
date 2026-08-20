@@ -347,6 +347,20 @@ test("run supports JSON and kills the remote process on local signals", async ()
   await startingRun;
 });
 
+test("run kills the remote process if its output connection fails", async () => {
+  const remote = {
+    wait: vi.fn(async () => { throw new Error("connection closed"); }),
+    kill: vi.fn(async () => undefined),
+    disconnect: vi.fn(async () => undefined),
+    stdout: "",
+    stderr: "",
+  };
+  const cli = harness([fakeSandbox({ processes: { start: vi.fn(async () => remote) } as unknown as Sandbox["processes"] })]);
+  await assert.rejects(cli.run("run", "one", "sleep", "30"), /connection closed/);
+  assert.equal(remote.kill.mock.calls.length, 1);
+  assert.equal(remote.disconnect.mock.calls.length, 1);
+});
+
 test("run reports failures without remote stderr", async () => {
   for (const [result, args, expected] of [
     [{ status: "timed_out", stdout: "", stderr: "" }, ["--timeout", "1", "--", "sleep", "5"], /Process timed out after 1 second/],

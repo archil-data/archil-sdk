@@ -258,6 +258,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
       const runOptions = parseRunOptions(options);
       let receivedStderr = false;
       let remote: SandboxProcess | undefined;
+      let result: SandboxProcessResult | undefined;
       let terminationStarted = false;
       let resolveTermination!: (result: SandboxProcessResult) => void;
       let rejectTermination!: (error: Error) => void;
@@ -301,7 +302,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
         signals.on("SIGINT", onSigint);
         signals.on("SIGTERM", onSigterm);
         signals.on("SIGHUP", onSighup);
-        const result = await Promise.race([remote.wait(), termination]);
+        result = await Promise.race([remote.wait(), termination]);
         if (options.output === "json") {
           output(JSON.stringify(result, null, 2));
         } else if (result.status !== "completed" && !receivedStderr) {
@@ -318,6 +319,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
         setExitCode(resultExitCode(result));
       } finally {
         removeSignalListeners();
+        if (remote && !result && !terminationStarted) await remote.kill().catch(() => {});
         await remote?.disconnect().catch(() => {});
       }
     });
