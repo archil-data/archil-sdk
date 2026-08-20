@@ -6,6 +6,7 @@ import {
   deleteProfileCredential,
   promptSecret,
   resolveCliCredentials,
+  validateApiKey,
   writeProfileCredential,
 } from "../src/cli/credentials.js";
 import {
@@ -182,8 +183,8 @@ profilesCommand
       const name = global.profile ?? config.currentProfile;
       if (!name) throw new Error("Login requires --profile <name>");
       const existing = config.profiles[name];
-      const apiKey = global.apiKey ?? await promptSecret();
-      const baseUrl = global.baseUrl ?? existing?.baseUrl;
+      const apiKey = validateApiKey(global.apiKey ?? await promptSecret());
+      const baseUrl = global.baseUrl ?? (global.region === undefined ? existing?.baseUrl : undefined);
       const region = await validateCredentialAndResolveRegion({
         apiKey,
         region: global.region ?? existing?.region,
@@ -194,7 +195,7 @@ profilesCommand
       config.currentProfile = name;
       await saveProfiles(config);
       if (options.output === "json") {
-        console.log(JSON.stringify({ name, region, baseUrl: global.baseUrl, current: true, loggedIn: true }, null, 2));
+        console.log(JSON.stringify({ name, region, baseUrl, current: true, loggedIn: true }, null, 2));
       } else {
         console.log(`Logged in profile '${name}' (${region})`);
       }

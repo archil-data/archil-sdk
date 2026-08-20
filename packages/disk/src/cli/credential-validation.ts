@@ -1,5 +1,6 @@
 import { Archil } from "../archil.js";
 import { REGION_URLS } from "../regions.js";
+import { validateApiKey } from "./credentials.js";
 
 export interface CredentialValidationOptions {
   apiKey: string;
@@ -15,8 +16,9 @@ export async function validateCredentialAndResolveRegion(
     await new Archil({ apiKey, region, baseUrl }).disks.list({ limit: 1 });
   },
 ): Promise<string> {
+  const apiKey = validateApiKey(options.apiKey);
   if (options.region) {
-    await probe({ ...options, region: options.region });
+    await probe({ ...options, apiKey, region: options.region });
     return options.region;
   }
   if (options.baseUrl) {
@@ -26,7 +28,7 @@ export async function validateCredentialAndResolveRegion(
   const failures: unknown[] = [];
   for (const region of Object.keys(REGION_URLS)) {
     try {
-      await probe({ apiKey: options.apiKey, region });
+      await probe({ apiKey, region });
       return region;
     } catch (error) {
       failures.push(error);

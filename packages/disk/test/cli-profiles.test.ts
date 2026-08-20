@@ -100,15 +100,18 @@ test("TTY secret prompt restores raw mode and always pauses stdin", async () => 
 
 test("login validates explicit regions and auto-detects known production regions", async () => {
   const probes: string[] = [];
-  const probe = async ({ region }: { region: string }) => {
+  const keys: string[] = [];
+  const probe = async ({ apiKey, region }: { apiKey: string; region: string }) => {
+    keys.push(apiKey);
     probes.push(region);
     if (region !== "aws-eu-west-1") throw new Error("not here");
   };
   assert.equal(
-    await validateCredentialAndResolveRegion({ apiKey: "key-test" }, probe),
+    await validateCredentialAndResolveRegion({ apiKey: " key-test\n" }, probe),
     "aws-eu-west-1",
   );
   assert.deepEqual(probes, ["aws-us-east-1", "aws-us-west-2", "aws-eu-west-1"]);
+  assert.deepEqual(keys, ["key-test", "key-test", "key-test"]);
 
   probes.length = 0;
   assert.equal(
