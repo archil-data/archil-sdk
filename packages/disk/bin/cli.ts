@@ -197,7 +197,10 @@ profilesCommand
           baseUrl,
         });
       } catch (error) {
-        if (regionSource !== undefined || baseUrlSource !== undefined || !existing?.baseUrl) throw error;
+        if (
+          regionSource !== undefined || baseUrlSource !== undefined || !existing?.baseUrl ||
+          !(error instanceof ArchilApiError) || error.status !== 401
+        ) throw error;
         baseUrl = undefined;
         region = await validateCredentialAndResolveRegion({ apiKey });
       }
