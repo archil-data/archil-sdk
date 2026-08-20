@@ -67,23 +67,23 @@ test("disk and sandbox profile commands share one protected profile store and su
   const baseUrl = `http://127.0.0.1:${address.port}`;
   try {
     const env = { ARCHIL_DISK_CONFIG_DIR: directory };
-    const diskLogin = await runAsync(diskCli, ["profile", "login", "--profile", "disk-profile", "--region", "aws-us-east-1", "--base-url", baseUrl, "--output", "json"], env, "key-disk-secret\n");
-    assert.equal(diskLogin.status, 0, diskLogin.stderr);
-    assert.deepEqual(JSON.parse(diskLogin.stdout), {
-      name: "disk-profile", region: "aws-us-east-1", baseUrl, current: true, loggedIn: true,
+    const diskCreate = await runAsync(diskCli, ["profile", "create", "--profile", "disk-profile", "--region", "aws-us-east-1", "--base-url", baseUrl, "--output", "json"], env, "key-disk-secret\n");
+    assert.equal(diskCreate.status, 0, diskCreate.stderr);
+    assert.deepEqual(JSON.parse(diskCreate.stdout), {
+      name: "disk-profile", region: "aws-us-east-1", baseUrl, current: true,
     });
     const sandboxList = run(sandboxCli, ["profile", "list", "--output", "json"], env);
     assert.equal(sandboxList.status, 0, sandboxList.stderr);
     assert.deepEqual(JSON.parse(sandboxList.stdout), [{
-      name: "disk-profile", region: "aws-us-east-1", baseUrl, current: true, loggedIn: true,
+      name: "disk-profile", region: "aws-us-east-1", baseUrl, current: true,
     }]);
     assert.equal(sandboxList.stdout.includes("disk-secret"), false);
 
-    const sandboxLogin = await runAsync(sandboxCli, ["profile", "login", "--profile", "sandbox-profile", "--region", "aws-us-west-2", "--base-url", baseUrl], env, "key-sandbox-secret\n");
-    assert.equal(sandboxLogin.status, 0, sandboxLogin.stderr);
+    const sandboxCreate = await runAsync(sandboxCli, ["profile", "create", "--profile", "sandbox-profile", "--region", "aws-us-west-2", "--base-url", baseUrl], env, "key-sandbox-secret\n");
+    assert.equal(sandboxCreate.status, 0, sandboxCreate.stderr);
     const diskList = run(diskCli, ["profile", "list"], env);
     assert.equal(diskList.status, 0, diskList.stderr);
-    assert.match(diskList.stdout, /sandbox-profile\s+aws-us-west-2/);
+    assert.match(diskList.stdout, /sandbox-profile\s+│ aws-us-west-2/);
     assert.equal(diskList.stdout.includes("sandbox-secret"), false);
 
     const config = await readFile(join(directory, "config.json"), "utf8");
