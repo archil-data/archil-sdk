@@ -4,6 +4,7 @@ import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "vitest";
+import { validateCredentialAndResolveRegion } from "../src/cli/credential-validation.js";
 import { credentialFilePath, diskConfigDir, profileConfigPath } from "../src/cli/config-paths.js";
 import {
   deleteProfileCredential,
@@ -95,6 +96,33 @@ test("TTY secret prompt restores raw mode and always pauses stdin", async () => 
   assert.equal(input.pauseCalls, 1);
   assert.equal(input.listenerCount("data"), 0);
   assert.deepEqual(output, ["Secret: ", "\n"]);
+});
+
+test("login validates explicit regions and auto-detects known production regions", async () => {
+  const probes: string[] = [];
+  const probe = async ({ region }: { region: string }) => {
+    probes.push(region);
+    if (region !== "aws-eu-west-1") throw new Error("not here");
+  };
+  assert.equal(
+    await validateCredentialAndResolveRegion({ apiKey: "key-test" }, probe),
+    "aws-eu-west-1",
+  );
+  assert.deepEqual(probes, ["aws-us-east-1", "aws-us-west-2", "aws-eu-west-1"]);
+
+  probes.length = 0;
+  assert.equal(
+    await validateCredentialAndResolveRegion(
+      { apiKey: "key-test", region: "custom", baseUrl: "https://control.test" },
+      async ({ region }) => { probes.push(region); },
+    ),
+    "custom",
+  );
+  assert.deepEqual(probes, ["custom"]);
+  await assert.rejects(
+    validateCredentialAndResolveRegion({ apiKey: "key-test", baseUrl: "https://control.test" }, probe),
+    /custom environments cannot be auto-detected/,
+  );
 });
 
 test("credential precedence is flags, environment, then selected profile file", async () => {

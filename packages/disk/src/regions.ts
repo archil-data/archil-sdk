@@ -1,4 +1,4 @@
-const REGION_URLS: Record<string, string> = {
+export const REGION_URLS: Readonly<Record<string, string>> = {
   "aws-us-east-1": "https://control.green.us-east-1.aws.prod.archil.com",
   "aws-us-west-2": "https://control.green.us-west-2.aws.prod.archil.com",
   "aws-eu-west-1": "https://control.green.eu-west-1.aws.prod.archil.com",

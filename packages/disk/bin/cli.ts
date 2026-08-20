@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
 import { Command, Option } from "commander";
+import { validateCredentialAndResolveRegion } from "../src/cli/credential-validation.js";
 import {
   deleteProfileCredential,
   promptSecret,
@@ -180,10 +181,16 @@ profilesCommand
       const config = await loadProfiles();
       const name = global.profile ?? config.currentProfile;
       if (!name) throw new Error("Login requires --profile <name>");
-      const region = global.region ?? config.profiles[name]?.region;
-      if (!region) throw new Error("Login requires --region <region>");
-      await writeProfileCredential(name, global.apiKey ?? await promptSecret());
-      config.profiles[name] = { region, baseUrl: global.baseUrl };
+      const existing = config.profiles[name];
+      const apiKey = global.apiKey ?? await promptSecret();
+      const baseUrl = global.baseUrl ?? existing?.baseUrl;
+      const region = await validateCredentialAndResolveRegion({
+        apiKey,
+        region: global.region ?? existing?.region,
+        baseUrl,
+      });
+      await writeProfileCredential(name, apiKey);
+      config.profiles[name] = { region, baseUrl };
       config.currentProfile = name;
       await saveProfiles(config);
       if (options.output === "json") {
