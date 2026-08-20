@@ -197,7 +197,7 @@ profilesCommand
           baseUrl: global.baseUrl,
         });
       } finally {
-        progress?.stop("Finished testing regions");
+        progress?.stop("Found valid region");
       }
       let name = global.profile ?? region;
       if (!global.profile) {
