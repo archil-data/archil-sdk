@@ -239,6 +239,7 @@ SandboxStatus = Literal[
 SandboxProcessStatus = Literal["running", "completed", "failed", "cancelled", "timed_out"]
 SandboxProcessStream = Literal["stdout", "stderr"]
 SandboxPlatform = Literal["arm64", "amd64"]
+SandboxNetworkAction = Literal["allow", "deny"]
 
 
 def _parse_datetime(value: str) -> datetime:
@@ -256,6 +257,41 @@ class SandboxEndpoint:
 
 
 @dataclass(frozen=True)
+class SandboxEgressPolicy:
+    default: SandboxNetworkAction
+    allow: Optional[list[str]] = None
+    deny: Optional[list[str]] = None
+
+    def to_json(self) -> dict:
+        return {
+            key: value
+            for key, value in {
+                "default": self.default,
+                "allow": self.allow,
+                "deny": self.deny,
+            }.items()
+            if value is not None
+        }
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxEgressPolicy":
+        return cls(default=d["default"], allow=d.get("allow"), deny=d.get("deny"))
+
+
+@dataclass(frozen=True)
+class SandboxNetwork:
+    egress: Optional[SandboxEgressPolicy] = None
+
+    def to_json(self) -> dict:
+        return {"egress": self.egress.to_json()} if self.egress is not None else {}
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxNetwork":
+        egress = d.get("egress")
+        return cls(egress=SandboxEgressPolicy.from_json(egress) if egress is not None else None)
+
+
+@dataclass(frozen=True)
 class SandboxData:
     id: str
     name: str
@@ -269,6 +305,7 @@ class SandboxData:
     last_active_at: datetime
     platform: Optional[SandboxPlatform] = None
     endpoints: list[SandboxEndpoint] = field(default_factory=list)
+    network: Optional[SandboxNetwork] = None
     running_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
@@ -287,6 +324,7 @@ class SandboxData:
             base_image=d["base_image"],
             platform=d.get("platform"),
             endpoints=[SandboxEndpoint.from_json(endpoint) for endpoint in d.get("endpoints") or []],
+            network=SandboxNetwork.from_json(d["network"]) if d.get("network") is not None else None,
             created_at=_parse_datetime(d["created_at"]),
             running_at=_parse_datetime(d["running_at"]) if d.get("running_at") else None,
             finished_at=_parse_datetime(d["finished_at"]) if d.get("finished_at") else None,

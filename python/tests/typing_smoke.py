@@ -18,6 +18,8 @@ from archil import (
     S3CompatibleMount,
     S3Mount,
     Sandbox,
+    SandboxEgressPolicy,
+    SandboxNetwork,
     SandboxProcess,
     SandboxProcessOutput,
     SandboxProcessResult,
@@ -39,7 +41,11 @@ def sync_usage() -> None:
         vcpu_count=2,
         mem_size_mib=4096,
         base_image="docker:29.7.1-dind",
+        network=SandboxNetwork(
+            egress=SandboxEgressPolicy(default="deny", allow=["github.com", "*.github.com"])
+        ),
     )
+    _network: Optional[SandboxNetwork] = sandbox.network
     module_sandbox: Sandbox = archil.create_sandbox(name="trial")
     _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
     module_sandbox = archil.get_sandbox(module_sandbox.id)

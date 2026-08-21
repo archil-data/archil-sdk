@@ -9,6 +9,8 @@ import pytest
 import archil as archil_module
 from archil import (
     Sandbox,
+    SandboxEgressPolicy,
+    SandboxNetwork,
     SandboxProcess,
     SandboxProcessOutput,
     SandboxProcessResult,
@@ -113,9 +115,17 @@ def sandbox_json(status: str = "running", **overrides) -> dict:
 
 
 def test_create_and_list_sandboxes(archil, router):
+    network_json = {
+        "egress": {
+            "default": "deny",
+            "allow": ["github.com", "*.github.com", "140.82.112.0/20"],
+            "deny": ["169.254.0.0/16"],
+        }
+    }
+
     def handler(request):
         if request.method == "POST":
-            return ok_envelope(sandbox_json())
+            return ok_envelope(sandbox_json(network=network_json))
         return ok_envelope({"sandboxes": [sandbox_json()]})
 
     router.set(handler)
@@ -127,12 +137,26 @@ def test_create_and_list_sandboxes(archil, router):
         env={"TRIAL": "1"},
         max_ttl_seconds=3600,
         max_concurrent_execs=4,
+        network=SandboxNetwork(
+            egress=SandboxEgressPolicy(
+                default="deny",
+                allow=["github.com", "*.github.com", "140.82.112.0/20"],
+                deny=["169.254.0.0/16"],
+            )
+        ),
     )
 
     assert isinstance(sandbox, Sandbox)
     assert sandbox.id == "sbx-1"
     assert sandbox.platform == "amd64"
     assert sandbox.endpoints[0].hostname == "8080.sbx.example.com"
+    assert sandbox.network == SandboxNetwork(
+        egress=SandboxEgressPolicy(
+            default="deny",
+            allow=["github.com", "*.github.com", "140.82.112.0/20"],
+            deny=["169.254.0.0/16"],
+        )
+    )
     assert isinstance(sandbox.created_at, datetime)
     assert router.requests[0].query == {"wait": "true"}
     assert router.requests[0].json == {
@@ -143,6 +167,7 @@ def test_create_and_list_sandboxes(archil, router):
         "env": {"TRIAL": "1"},
         "max_ttl_seconds": 3600,
         "max_concurrent_execs": 4,
+        "network": network_json,
     }
 
     listed = archil.sandboxes.list(disk="dsk-1")
@@ -327,7 +352,8 @@ def test_module_level_sandbox_helpers(monkeypatch):
         type("FakeClient", (), {"sandboxes": FakeSandboxes()})(),
     )
 
-    assert archil_module.create_sandbox(name="trial", wait=False) is expected
+    network = SandboxNetwork(egress=SandboxEgressPolicy(default="deny", allow=["github.com"]))
+    assert archil_module.create_sandbox(name="trial", network=network, wait=False) is expected
     assert archil_module.list_sandboxes(disk="dsk-1") == [expected]
     assert archil_module.get_sandbox("sbx-1") is expected
     assert calls == [
@@ -341,6 +367,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "env": None,
                 "max_ttl_seconds": None,
                 "max_concurrent_execs": None,
+                "network": network,
                 "wait": False,
             },
         ),

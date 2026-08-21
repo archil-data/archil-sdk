@@ -4,6 +4,7 @@ import { unwrap } from "./client.js";
 import type { Disk } from "./disk.js";
 import {
   Sandbox,
+  type SandboxNetwork,
   type SandboxWire,
   type SandboxWaitOptions,
   waitForSandboxStart,
@@ -30,6 +31,8 @@ export interface CreateSandboxRequest {
   maxTtlSeconds?: number;
   /** Maximum concurrently attached exec sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs?: number;
+  /** Creation-time network policy. Egress is unrestricted when omitted. */
+  network?: SandboxNetwork;
 }
 
 export interface ListSandboxesOptions {
@@ -81,6 +84,7 @@ export class Sandboxes {
       env: request.env,
       max_ttl_seconds: request.maxTtlSeconds,
       max_concurrent_execs: request.maxConcurrentExecs,
+      network: request.network,
     };
     const data = await unwrap(
       this._client.POST("/api/sandboxes", {

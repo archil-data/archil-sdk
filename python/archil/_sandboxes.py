@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ._http import _Transport
-from ._models import SandboxData
+from ._models import SandboxData, SandboxNetwork
 from ._sandbox import _Sandbox
 
 
@@ -32,6 +32,7 @@ class _Sandboxes:
         env: Optional[dict[str, str]] = None,
         max_ttl_seconds: Optional[int] = None,
         max_concurrent_execs: Optional[int] = None,
+        network: Optional[SandboxNetwork] = None,
         wait: bool = True,
     ) -> _Sandbox:
         body = {
@@ -44,6 +45,7 @@ class _Sandboxes:
                 "env": env,
                 "max_ttl_seconds": max_ttl_seconds,
                 "max_concurrent_execs": max_concurrent_execs,
+                "network": network.to_json() if network is not None else None,
             }.items()
             if value is not None
         }

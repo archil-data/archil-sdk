@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add typed sandbox egress network policies with IPv4, CIDR, exact-domain, and wildcard-domain targets.
 - Remove the deprecated control-plane sandbox exec resources and raw connection API. `sandbox.exec()` now starts
   and waits for a runtime-owned process; use `sandbox.processes` for detachable and resumable processes.
 

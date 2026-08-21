@@ -22,6 +22,9 @@ export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js"
 export { Sandbox } from "./sandbox.js";
 export type {
   SandboxEndpoint,
+  SandboxEgressPolicy,
+  SandboxNetwork,
+  SandboxNetworkAction,
   SandboxResponse,
   SandboxStatus,
   SandboxForkOptions,

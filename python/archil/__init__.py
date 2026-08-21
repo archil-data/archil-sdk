@@ -56,6 +56,9 @@ from ._models import (
     S3Object,
     SandboxData,
     SandboxEndpoint,
+    SandboxEgressPolicy,
+    SandboxNetwork,
+    SandboxNetworkAction,
     SandboxPlatform,
     SandboxProcessOutput,
     SandboxProcessOutputHandler,
@@ -119,6 +122,9 @@ __all__ = [
     "TokenUser",
     "AwsStsUser",
     "SandboxTerminal",
+    "SandboxEgressPolicy",
+    "SandboxNetwork",
+    "SandboxNetworkAction",
     # output models
     "DiskData",
     "DiskStatus",
@@ -245,6 +251,7 @@ def create_sandbox(
     env: Optional[dict[str, str]] = None,
     max_ttl_seconds: Optional[int] = None,
     max_concurrent_execs: Optional[int] = None,
+    network: Optional[SandboxNetwork] = None,
     wait: bool = True,
 ) -> Sandbox:
     return _client().sandboxes.create(
@@ -255,6 +262,7 @@ def create_sandbox(
         env=env,
         max_ttl_seconds=max_ttl_seconds,
         max_concurrent_execs=max_concurrent_execs,
+        network=network,
         wait=wait,
     )
 
