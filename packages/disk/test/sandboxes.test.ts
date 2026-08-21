@@ -140,6 +140,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     maxTtlSeconds: 3600,
     maxConcurrentExecs: 8,
     endpoints: [{ port: 8080, hostname: "8080-sandbox.example.com" }],
+    network: undefined,
     createdAt: nowDate,
     runningAt: undefined,
     finishedAt: undefined,
@@ -156,6 +157,13 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     env: { NODE_ENV: "test" },
     maxTtlSeconds: 600,
     maxConcurrentExecs: 16,
+    network: {
+      egress: {
+        default: "deny",
+        allow: ["github.com", "*.github.com", "140.82.112.0/20"],
+        deny: ["169.254.0.0/16"],
+      },
+    },
   });
   assert.equal(created.status, "running");
   assert.deepEqual(calls, [
@@ -177,6 +185,13 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
           env: { NODE_ENV: "test" },
           max_ttl_seconds: 600,
           max_concurrent_execs: 16,
+          network: {
+            egress: {
+              default: "deny",
+              allow: ["github.com", "*.github.com", "140.82.112.0/20"],
+              deny: ["169.254.0.0/16"],
+            },
+          },
         },
       },
     },
@@ -207,6 +222,23 @@ test("sandbox snapshots expose API timestamps as Date objects", () => {
   assert.ok(sandbox.lastActiveAt instanceof Date);
   assert.ok(sandbox.expiresAt instanceof Date);
   assert.equal(sandbox.createdAt.toISOString(), "2026-07-22T12:00:00.000Z");
+});
+
+test("sandbox snapshots expose the network policy", () => {
+  const network = {
+    egress: {
+      default: "allow" as const,
+      allow: ["api.github.com"],
+      deny: ["169.254.0.0/16", "*.internal.example"],
+    },
+  };
+  const sandbox = new Sandbox(
+    { ...sandboxWire("running"), network } as any,
+    {} as ApiClient,
+  );
+
+  assert.deepEqual(sandbox.network, network);
+  assert.deepEqual(sandbox.toJSON().network, network);
 });
 
 test("sandbox lifecycle methods poll only after the server wait expires", async () => {

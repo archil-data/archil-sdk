@@ -8,8 +8,25 @@ import {
 } from "./sandbox-process.js";
 import { SandboxFiles } from "./sandbox-files.js";
 
+export type SandboxNetworkAction = "allow" | "deny";
+
+export interface SandboxEgressPolicy {
+  default: SandboxNetworkAction;
+  /** IPv4 addresses, CIDR ranges, exact domains, or `*.` wildcard domains to allow. */
+  allow?: string[];
+  /** IPv4 addresses, CIDR ranges, exact domains, or `*.` wildcard domains to deny. */
+  deny?: string[];
+}
+
+export interface SandboxNetwork {
+  /** Egress is unrestricted when omitted. Deny targets take precedence over allow targets. */
+  egress?: SandboxEgressPolicy;
+}
+
 /** @internal */
-export type SandboxWire = components["schemas"]["Sandbox"];
+export type SandboxWire = components["schemas"]["Sandbox"] & {
+  network?: SandboxNetwork;
+};
 
 export type SandboxStatus = components["schemas"]["SandboxState"];
 
@@ -30,6 +47,7 @@ export interface SandboxResponse {
   /** Maximum concurrently attached process sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
+  network?: SandboxNetwork;
   createdAt: Date;
   runningAt?: Date;
   finishedAt?: Date;
@@ -68,6 +86,7 @@ export class Sandbox {
   maxTtlSeconds!: number;
   maxConcurrentExecs!: number;
   endpoints?: SandboxEndpoint[];
+  network?: SandboxNetwork;
   createdAt!: Date;
   runningAt?: Date;
   finishedAt?: Date;
@@ -100,6 +119,7 @@ export class Sandbox {
     this.maxTtlSeconds = data.max_ttl_seconds;
     this.maxConcurrentExecs = data.max_concurrent_execs;
     this.endpoints = data.endpoints?.map((endpoint) => ({ ...endpoint }));
+    this.network = cloneNetwork(data.network);
     this.createdAt = new Date(data.created_at);
     this.runningAt = data.running_at ? new Date(data.running_at) : undefined;
     this.finishedAt = data.finished_at ? new Date(data.finished_at) : undefined;
@@ -121,6 +141,7 @@ export class Sandbox {
       maxTtlSeconds: this.maxTtlSeconds,
       maxConcurrentExecs: this.maxConcurrentExecs,
       endpoints: this.endpoints?.map((endpoint) => ({ ...endpoint })),
+      network: cloneNetwork(this.network),
       createdAt: this.createdAt,
       runningAt: this.runningAt,
       finishedAt: this.finishedAt,
@@ -213,7 +234,19 @@ export class Sandbox {
       }),
     );
   }
+}
 
+function cloneNetwork(network?: SandboxNetwork): SandboxNetwork | undefined {
+  if (!network) return undefined;
+  const { egress } = network;
+  if (!egress) return {};
+  return {
+    egress: {
+      default: egress.default,
+      ...(egress.allow ? { allow: [...egress.allow] } : {}),
+      ...(egress.deny ? { deny: [...egress.deny] } : {}),
+    },
+  };
 }
 
 /** @internal Continue waiting if the server returned before startup completed. */
