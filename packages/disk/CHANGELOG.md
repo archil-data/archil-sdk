@@ -1,5 +1,15 @@
 # disk
 
+## 1.0.0
+
+### Major Changes
+
+- c42a823: Remove the deprecated control-plane sandbox exec resources and raw connection API. `sandbox.exec()` now starts and waits for a runtime-owned process; use `sandbox.processes` to detach, reconnect, stream input, resize, or kill.
+
+### Minor Changes
+
+- 3a499ac: Add shared named CLI profiles with protected credential storage and ship a standalone `sandbox` executable for sandbox inspection, creation, lifecycle operations, waiting, one-shot commands, and interactive shells.
+
 ## 0.11.0
 
 ### Minor Changes

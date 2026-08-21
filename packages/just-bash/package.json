@@ -1,6 +1,6 @@
 {
   "name": "@archildata/just-bash",
-  "version": "0.8.26",
+  "version": "0.8.27",
   "description": "Archil filesystem adapter for just-bash",
   "keywords": [
     "archil",
