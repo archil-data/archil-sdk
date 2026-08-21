@@ -24,6 +24,7 @@ export default defineConfig({
       entry: {
         ...entries,
         cli: "bin/cli.ts",
+        "sandbox-cli": "bin/sandbox-cli.ts",
       },
     },
   },

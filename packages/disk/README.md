@@ -39,6 +39,37 @@ npx disk api-keys delete key-abc123
 
 `list` and `get` pretty-print tables by default; pass `-o json` to pipe into `jq`. Credentials come from `ARCHIL_API_KEY` / `ARCHIL_REGION`, or `--api-key` / `--region` / `--base-url` flags.
 
+### Profiles
+
+`disk` and `sandbox` share named profiles:
+
+```bash
+npx disk profile create --profile test-yellow --region aws-us-east-1
+npx sandbox profile use test-yellow
+npx sandbox list
+```
+
+`profile create` securely prompts for the API key. Flags override environment variables, which override the selected profile. The library API does not read profiles.
+
+### Sandbox CLI
+
+The `sandbox` executable manages persistent sandboxes:
+
+```bash
+npx sandbox list
+npx sandbox create dev --vcpu-count 4 --mem-size-mib 8192 --env NODE_ENV=development
+npx sandbox pause dev
+npx sandbox resume dev --no-wait
+npx sandbox wait dev --status running --timeout 60
+npx sandbox fork dev agent-task
+npx sandbox run dev -- sh -c 'echo "$NODE_ENV"'
+npx sandbox shell dev
+npx sandbox stop dev
+npx sandbox delete dev
+```
+
+Commands accept an exact ID or unique name. Lifecycle commands wait by default; use `--no-wait` to return once accepted. Use `-o json` for structured output. Starting a paused sandbox discards its memory snapshot and prompts unless `--yes` is passed. In a shell, `Ctrl+]` is the emergency escape.
+
 ## Library
 
 Setup:
