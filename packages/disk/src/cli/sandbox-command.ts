@@ -298,6 +298,11 @@ Use -- before the command so its flags are not parsed as sandbox options.
             return (stream === "stdout" ? stdout : stderr).write(data);
           },
         });
+        try {
+          await remote.closeStdin();
+        } catch (error) {
+          if (remote.status === "running") throw error;
+        }
         signals.on("SIGINT", onSigint);
         signals.on("SIGTERM", onSigterm);
         signals.on("SIGHUP", onSighup);
