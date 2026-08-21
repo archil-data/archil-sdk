@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
-import { Command, Option } from "commander";
+import { Command } from "commander";
+import {
+  addGlobalOptions,
+  addProfileCommands,
+  isProfileCommand,
+  resolveProgramCredentials,
+} from "../src/cli/common.js";
+import { renderTable } from "../src/cli/output.js";
 import {
   ArchilApiError,
   configure,
@@ -22,17 +29,13 @@ program
   .name("disk")
   .description("Manage Archil disks from the command line")
   .version(pkg.version)
-  .addOption(new Option("-k, --api-key <key>", "Archil API key").env("ARCHIL_API_KEY"))
-  .addOption(new Option("-r, --region <region>", "Archil region").env("ARCHIL_REGION"))
-  .addOption(new Option("--base-url <url>", "Override control-plane base URL"))
-  .hook("preAction", () => {
-    const opts = program.opts<{ apiKey?: string; region?: string; baseUrl?: string }>();
-    try {
-      configure({ apiKey: opts.apiKey, region: opts.region, baseUrl: opts.baseUrl });
-    } catch (err) {
-      fail(err);
-    }
+  .hook("preAction", async (_thisCommand, actionCommand) => {
+    if (isProfileCommand(actionCommand)) return;
+    const resolved = await resolveProgramCredentials(program);
+    configure({ apiKey: resolved.apiKey, region: resolved.region, baseUrl: resolved.baseUrl });
   });
+addGlobalOptions(program);
+addProfileCommands(program);
 
 function fail(err: unknown): never {
   if (err instanceof ArchilApiError) {
@@ -75,28 +78,6 @@ function formatBytes(n: number | undefined): string | undefined {
     i++;
   }
   return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
-}
-
-function renderTable(rows: string[][], headers?: string[]): string {
-  const all = headers ? [headers, ...rows] : rows;
-  if (all.length === 0) return "";
-  const cols = Math.max(...all.map((r) => r.length));
-  const widths: number[] = [];
-  for (let i = 0; i < cols; i++) {
-    widths[i] = Math.max(...all.map((r) => (r[i] ?? "").length));
-  }
-  const bar = (l: string, m: string, r: string): string =>
-    l + widths.map((w) => "─".repeat(w + 2)).join(m) + r;
-  const line = (r: string[]): string =>
-    "│ " + widths.map((w, i) => (r[i] ?? "").padEnd(w)).join(" │ ") + " │";
-  const out: string[] = [bar("╭", "┬", "╮")];
-  if (headers) {
-    out.push(line(headers));
-    out.push(bar("├", "┼", "┤"));
-  }
-  for (const r of rows) out.push(line(r));
-  out.push(bar("╰", "┴", "╯"));
-  return out.join("\n");
 }
 
 function section(title: string, body: string): void {
@@ -359,7 +340,7 @@ keys
 
 // Support `disk <id> exec <cmd...>` as a sugar form for `disk exec <id> <cmd...>`.
 function rewriteSugar(argv: string[]): string[] {
-  const known = new Set(["list", "get", "create", "delete", "exec", "grep", "api-keys", "help", "--help", "-h", "--version", "-V"]);
+  const known = new Set(["list", "get", "create", "delete", "exec", "grep", "api-keys", "profile", "sandboxes", "help", "--help", "-h", "--version", "-V"]);
   const head = argv[2];
   const next = argv[3];
   if (head && next === "exec" && !known.has(head) && !head.startsWith("-")) {
@@ -368,4 +349,4 @@ function rewriteSugar(argv: string[]): string[] {
   return argv;
 }
 
-program.parseAsync(rewriteSugar(process.argv));
+program.parseAsync(rewriteSugar(process.argv)).catch(fail);
