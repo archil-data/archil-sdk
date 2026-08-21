@@ -1,6 +1,6 @@
 {
   "name": "disk",
-  "version": "0.11.0",
+  "version": "1.0.0",
   "description": "Pure-JS client and CLIs for Archil disks and sandboxes",
   "keywords": [
     "archil",
