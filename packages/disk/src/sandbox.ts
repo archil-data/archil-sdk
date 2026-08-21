@@ -8,25 +8,14 @@ import {
 } from "./sandbox-process.js";
 import { SandboxFiles } from "./sandbox-files.js";
 
-export type SandboxNetworkAction = "allow" | "deny";
+export type SandboxNetworkAction = components["schemas"]["SandboxNetworkAction"];
 
-export interface SandboxEgressPolicy {
-  default: SandboxNetworkAction;
-  /** IPv4 addresses, CIDR ranges, exact domains, or `*.` wildcard domains to allow. */
-  allow?: string[];
-  /** IPv4 addresses, CIDR ranges, exact domains, or `*.` wildcard domains to deny. */
-  deny?: string[];
-}
+export type SandboxEgressPolicy = components["schemas"]["SandboxEgressPolicy"];
 
-export interface SandboxNetwork {
-  /** Egress is unrestricted when omitted. Deny targets take precedence over allow targets. */
-  egress?: SandboxEgressPolicy;
-}
+export type SandboxNetwork = components["schemas"]["SandboxNetwork"];
 
 /** @internal */
-export type SandboxWire = components["schemas"]["Sandbox"] & {
-  network?: SandboxNetwork;
-};
+export type SandboxWire = components["schemas"]["Sandbox"];
 
 export type SandboxStatus = components["schemas"]["SandboxState"];
 
