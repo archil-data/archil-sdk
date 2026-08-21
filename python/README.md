@@ -59,12 +59,6 @@ sandbox = archil.create_sandbox(
     name="prepared-environment",
     vcpu_count=4,
     mem_size_mib=8192,
-    network=archil.SandboxNetwork(
-        egress=archil.SandboxEgressPolicy(
-            default="deny",
-            allow=["github.com", "*.github.com", "140.82.112.0/20"],
-        )
-    ),
 )
 
 result = sandbox.exec("uname -a")
@@ -77,6 +71,19 @@ fork.delete()
 
 all_sandboxes = archil.list_sandboxes()
 using_disk = archil.list_sandboxes(disk="dsk-abc123")
+```
+
+Network egress can optionally be restricted when creating a sandbox:
+
+```python
+restricted = archil.create_sandbox(
+    network=archil.SandboxNetwork(
+        egress=archil.SandboxEgressPolicy(
+            default="deny",
+            allow=["github.com", "*.github.com", "140.82.112.0/20"],
+        )
+    ),
+)
 ```
 
 An egress policy accepts IPv4 addresses, CIDR ranges, exact domains, and `*.`

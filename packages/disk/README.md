@@ -118,12 +118,6 @@ const sandbox = await client.sandboxes.create({
   name: "prepared-environment",
   vcpuCount: 4,
   memSizeMiB: 8192,
-  network: {
-    egress: {
-      default: "deny",
-      allow: ["github.com", "*.github.com", "140.82.112.0/20"],
-    },
-  },
 });
 
 const result = await sandbox.exec("uname -a");
@@ -155,6 +149,19 @@ await fork.delete();
 
 const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
+```
+
+Network egress can optionally be restricted when creating a sandbox:
+
+```ts
+const restricted = await client.sandboxes.create({
+  network: {
+    egress: {
+      default: "deny",
+      allow: ["github.com", "*.github.com", "140.82.112.0/20"],
+    },
+  },
+});
 ```
 
 An egress policy accepts IPv4 addresses, CIDR ranges, exact domains, and `*.`
