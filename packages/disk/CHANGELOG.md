@@ -1,5 +1,11 @@
 # disk
 
+## 1.1.0
+
+### Minor Changes
+
+- eda614b: Add typed sandbox egress network policies with IPv4, CIDR, exact-domain, and wildcard-domain targets.
+
 ## 1.0.0
 
 ### Major Changes
