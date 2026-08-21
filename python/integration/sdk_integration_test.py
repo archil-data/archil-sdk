@@ -23,7 +23,15 @@ import time
 import uuid
 from pathlib import Path
 
-from archil import Archil, ArchilError, ArchilS3Error, SandboxTerminal, TokenUser
+from archil import (
+    Archil,
+    ArchilError,
+    ArchilS3Error,
+    SandboxEgressPolicy,
+    SandboxNetwork,
+    SandboxTerminal,
+    TokenUser,
+)
 
 
 def require_env(name: str) -> str:
@@ -67,24 +75,32 @@ def delete_sandbox(sandbox, timeout_seconds: float = 30.0) -> None:
 def run_sandbox_suite(archil) -> None:
     print("\n--- Persistent sandbox API ---")
     sandbox_ids: list[str] = []
+    network = SandboxNetwork(
+        egress=SandboxEgressPolicy(
+            default="deny",
+            allow=["example.com", "*.example.com", "93.184.216.0/24"],
+            deny=["169.254.0.0/16"],
+        )
+    )
     try:
-        with step("Create sandbox"):
+        with step("Create sandbox with egress policy"):
             sandbox = archil.sandboxes.create(
                 name=f"sdk-py-sandbox-{uuid.uuid4().hex[:12]}",
                 max_ttl_seconds=600,
+                network=network,
             )
             sandbox_ids.append(sandbox.id)
             assert_that(
                 sandbox.status == "running",
                 f"unexpected sandbox status: {sandbox.status}",
             )
+            assert_that(sandbox.network == network, f"unexpected sandbox network policy: {sandbox.network}")
 
         with step("Verify sandbox in list"):
             sandboxes = archil.sandboxes.list()
-            assert_that(
-                any(item.id == sandbox.id for item in sandboxes),
-                f"sandbox {sandbox.id} not found in list",
-            )
+            listed = next((item for item in sandboxes if item.id == sandbox.id), None)
+            assert_that(listed is not None, f"sandbox {sandbox.id} not found in list")
+            assert_that(listed.network == network, f"unexpected listed network policy: {listed.network}")
 
         with step("Execute command in sandbox"):
             result = sandbox.exec("printf sandbox-ready")
@@ -161,6 +177,7 @@ def run_sandbox_suite(archil) -> None:
             sandbox_ids.append(fork.id)
             assert_that(fork.id != sandbox.id, "fork reused the source sandbox ID")
             assert_that(fork.status == "running", f"unexpected fork status: {fork.status}")
+            assert_that(fork.network == network, f"fork did not inherit network policy: {fork.network}")
 
         with step("Verify forked sandbox state"):
             result = fork.exec("cat /tmp/sdk-fork-state")
