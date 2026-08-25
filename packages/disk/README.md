@@ -173,9 +173,10 @@ running sandbox's complete policy can be replaced without restarting it;
 existing connections are not terminated:
 
 ```ts
-await restricted.updateNetwork({
+const effective = await restricted.updateNetwork({
   egress: { default: "deny", allow: ["api.github.com"] },
 });
+console.log(effective, await restricted.getNetwork());
 
 await restricted.updateNetwork({}); // Restore unrestricted egress.
 ```

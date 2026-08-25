@@ -125,7 +125,7 @@ def test_create_and_list_sandboxes(archil, router):
 
     def handler(request):
         if request.method == "POST":
-            return ok_envelope(sandbox_json(network=network_json))
+            return ok_envelope(sandbox_json())
         return ok_envelope({"sandboxes": [sandbox_json()]})
 
     router.set(handler)
@@ -150,13 +150,6 @@ def test_create_and_list_sandboxes(archil, router):
     assert sandbox.id == "sbx-1"
     assert sandbox.platform == "amd64"
     assert sandbox.endpoints[0].hostname == "8080.sbx.example.com"
-    assert sandbox.network == SandboxNetwork(
-        egress=SandboxEgressPolicy(
-            default="deny",
-            allow=["github.com", "*.github.com", "140.82.112.0/20"],
-            deny=["169.254.0.0/16"],
-        )
-    )
     assert isinstance(sandbox.created_at, datetime)
     assert router.requests[0].query == {"wait": "true"}
     assert router.requests[0].json == {
@@ -279,8 +272,12 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
     assert stop_request.query == {}
 
 
-def test_update_network_replaces_live_policy_and_local_snapshot(archil, router):
-    router.set(lambda request: httpx.Response(204) if request.method == "PUT" else ok_envelope(sandbox_json()))
+def test_get_and_update_network_use_active_runtime_policy(archil, router):
+    router.set(
+        lambda request: (
+            ok_envelope(network.to_json()) if request.url.path.endswith("/network") else ok_envelope(sandbox_json())
+        )
+    )
     sandbox = archil.sandboxes.get("sbx-1")
     network = SandboxNetwork(
         egress=SandboxEgressPolicy(
@@ -290,15 +287,18 @@ def test_update_network_replaces_live_policy_and_local_snapshot(archil, router):
         )
     )
 
-    assert sandbox.update_network(network) is None
-    assert sandbox.network == network
+    assert sandbox.get_network() == network
+    assert router.requests[-1].method == "GET"
+    assert router.requests[-1].path == "/api/sandboxes/sbx-1/network"
+
+    assert sandbox.update_network(network) == network
     assert router.requests[-1].method == "PUT"
     assert router.requests[-1].path == "/api/sandboxes/sbx-1/network"
     assert router.requests[-1].json == network.to_json()
 
     unrestricted = SandboxNetwork()
-    sandbox.update_network(unrestricted)
-    assert sandbox.network == unrestricted
+    router.set(lambda request: ok_envelope(unrestricted.to_json()))
+    assert sandbox.update_network(unrestricted) == unrestricted
     assert router.requests[-1].json == {}
 
 

@@ -140,7 +140,6 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     maxTtlSeconds: 3600,
     maxConcurrentExecs: 8,
     endpoints: [{ port: 8080, hostname: "8080-sandbox.example.com" }],
-    network: undefined,
     createdAt: nowDate,
     runningAt: undefined,
     finishedAt: undefined,
@@ -224,32 +223,8 @@ test("sandbox snapshots expose API timestamps as Date objects", () => {
   assert.equal(sandbox.createdAt.toISOString(), "2026-07-22T12:00:00.000Z");
 });
 
-test("sandbox snapshots expose the network policy", () => {
-  const network = {
-    egress: {
-      default: "allow" as const,
-      allow: ["api.github.com"],
-      deny: ["169.254.0.0/16", "*.internal.example"],
-    },
-  };
-  const sandbox = new Sandbox(
-    { ...sandboxWire("running"), network } as any,
-    {} as ApiClient,
-  );
-
-  assert.deepEqual(sandbox.network, network);
-  assert.deepEqual(sandbox.toJSON().network, network);
-});
-
-test("sandbox updateNetwork replaces the live policy and local snapshot", async () => {
-  const calls: Array<{ path: string; options: any }> = [];
-  const client = {
-    PUT: async (path: string, options: unknown) => {
-      calls.push({ path, options });
-      return { response: new Response(null, { status: 204 }) };
-    },
-  } as unknown as ApiClient;
-  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+test("sandbox getNetwork and updateNetwork use the active runtime policy", async () => {
+  const calls: Array<{ method: string; path: string; options: any }> = [];
   const network = {
     egress: {
       default: "deny" as const,
@@ -257,11 +232,28 @@ test("sandbox updateNetwork replaces the live policy and local snapshot", async 
       deny: ["169.254.0.0/16"],
     },
   };
+  const client = {
+    GET: async (path: string, options: unknown) => {
+      calls.push({ method: "GET", path, options });
+      return ok(network);
+    },
+    PUT: async (path: string, options: unknown) => {
+      calls.push({ method: "PUT", path, options });
+      return ok(network);
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  await sandbox.updateNetwork(network);
-  assert.deepEqual(sandbox.network, network);
+  assert.deepEqual(await sandbox.getNetwork(), network);
+  assert.deepEqual(await sandbox.updateNetwork(network), network);
   assert.deepEqual(calls, [
     {
+      method: "GET",
+      path: "/api/sandboxes/{sid}/network",
+      options: { params: { path: { sid: "0198-sandbox" } } },
+    },
+    {
+      method: "PUT",
       path: "/api/sandboxes/{sid}/network",
       options: { params: { path: { sid: "0198-sandbox" } }, body: network },
     },

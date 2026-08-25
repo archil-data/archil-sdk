@@ -95,7 +95,7 @@ running sandbox's complete policy can be replaced without restarting it;
 existing connections are not terminated:
 
 ```python
-restricted.update_network(
+effective = restricted.update_network(
     archil.SandboxNetwork(
         egress=archil.SandboxEgressPolicy(
             default="deny",
@@ -103,6 +103,7 @@ restricted.update_network(
         )
     )
 )
+print(effective, restricted.get_network())
 
 # Restore unrestricted egress.
 restricted.update_network(archil.SandboxNetwork())

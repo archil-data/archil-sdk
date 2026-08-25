@@ -41,12 +41,10 @@ def sync_usage() -> None:
         vcpu_count=2,
         mem_size_mib=4096,
         base_image="docker:29.7.1-dind",
-        network=SandboxNetwork(
-            egress=SandboxEgressPolicy(default="deny", allow=["github.com", "*.github.com"])
-        ),
+        network=SandboxNetwork(egress=SandboxEgressPolicy(default="deny", allow=["github.com", "*.github.com"])),
     )
-    _network: Optional[SandboxNetwork] = sandbox.network
-    sandbox.update_network(SandboxNetwork())
+    _network: SandboxNetwork = sandbox.get_network()
+    _network = sandbox.update_network(SandboxNetwork())
     module_sandbox: Sandbox = archil.create_sandbox(name="trial")
     _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
     module_sandbox = archil.get_sandbox(module_sandbox.id)
@@ -104,7 +102,8 @@ def sync_usage() -> None:
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
         sandbox = await client.sandboxes.create.aio(name="trial")
-        await sandbox.update_network.aio(SandboxNetwork())
+        _network: SandboxNetwork = await sandbox.get_network.aio()
+        _network = await sandbox.update_network.aio(SandboxNetwork())
         result: SandboxProcessResult = await sandbox.exec.aio("echo ready")
         _sandbox_exit: Optional[int] = result.exit_code
         await sandbox.files.upload_file.aio("local.txt", "/workspace/remote.txt")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 from typing import Optional, Union
 
 from ._http import _Transport
@@ -72,10 +71,6 @@ class _Sandbox:
     @property
     def endpoints(self) -> list[SandboxEndpoint]:
         return list(self._data.endpoints)
-
-    @property
-    def network(self) -> Optional[SandboxNetwork]:
-        return self._data.network
 
     @property
     def created_at(self):
@@ -180,13 +175,17 @@ class _Sandbox:
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
 
-    async def update_network(self, network: SandboxNetwork) -> None:
-        await self._transport.request_empty(
+    async def get_network(self) -> SandboxNetwork:
+        data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/network")
+        return SandboxNetwork.from_json(data)
+
+    async def update_network(self, network: SandboxNetwork) -> SandboxNetwork:
+        data = await self._transport.request_json(
             "PUT",
             f"/api/sandboxes/{self.id}/network",
             json=network.to_json(),
         )
-        self._data = replace(self._data, network=network)
+        return SandboxNetwork.from_json(data)
 
     async def delete(self) -> None:
         await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}")
