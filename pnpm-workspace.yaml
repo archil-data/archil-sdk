@@ -11,6 +11,7 @@ minimumReleaseAgeExclude:
   - eve@0.17.1
   - eve@0.20.0
   - '@archildata/api-types@0.0.23'
+  - '@archildata/api-types@0.0.24'
 
 catalog:
   typescript: ^6.0.3

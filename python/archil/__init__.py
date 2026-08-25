@@ -57,6 +57,8 @@ from ._models import (
     SandboxData,
     SandboxEndpoint,
     SandboxEgressPolicy,
+    SandboxEgressRule,
+    SandboxEgressTransform,
     SandboxNetwork,
     SandboxNetworkAction,
     SandboxPlatform,
@@ -123,6 +125,8 @@ __all__ = [
     "AwsStsUser",
     "SandboxTerminal",
     "SandboxEgressPolicy",
+    "SandboxEgressRule",
+    "SandboxEgressTransform",
     "SandboxNetwork",
     "SandboxNetworkAction",
     # output models

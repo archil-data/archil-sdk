@@ -19,6 +19,8 @@ from archil import (
     S3Mount,
     Sandbox,
     SandboxEgressPolicy,
+    SandboxEgressRule,
+    SandboxEgressTransform,
     SandboxNetwork,
     SandboxProcess,
     SandboxProcessOutput,
@@ -42,7 +44,17 @@ def sync_usage() -> None:
         mem_size_mib=4096,
         base_image="docker:29.7.1-dind",
         network=SandboxNetwork(
-            egress=SandboxEgressPolicy(default="deny", allow=["github.com", "*.github.com"])
+            egress=SandboxEgressPolicy(
+                default="deny",
+                allow=[
+                    "github.com",
+                    "*.github.com",
+                    SandboxEgressRule(
+                        target="api.openai.com",
+                        transform=SandboxEgressTransform(headers={"Authorization": "Bearer brokered-token"}),
+                    ),
+                ],
+            )
         ),
     )
     _network: Optional[SandboxNetwork] = sandbox.network

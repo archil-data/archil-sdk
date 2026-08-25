@@ -12,6 +12,10 @@ export type SandboxNetworkAction = components["schemas"]["SandboxNetworkAction"]
 
 export type SandboxEgressPolicy = components["schemas"]["SandboxEgressPolicy"];
 
+export type SandboxEgressRule = components["schemas"]["SandboxEgressRule"];
+
+export type SandboxEgressTransform = components["schemas"]["SandboxEgressTransform"];
+
 export type SandboxNetwork = components["schemas"]["SandboxNetwork"];
 
 /** @internal */
@@ -232,7 +236,26 @@ function cloneNetwork(network?: SandboxNetwork): SandboxNetwork | undefined {
   return {
     egress: {
       default: egress.default,
-      ...(egress.allow ? { allow: [...egress.allow] } : {}),
+      ...(egress.allow
+        ? {
+            allow: egress.allow.map((rule) =>
+              typeof rule === "string"
+                ? rule
+                : {
+                    target: rule.target,
+                    ...(rule.transform
+                      ? {
+                          transform: {
+                            ...(rule.transform.headers
+                              ? { headers: { ...rule.transform.headers } }
+                              : {}),
+                          },
+                        }
+                      : {}),
+                  },
+            ),
+          }
+        : {}),
       ...(egress.deny ? { deny: [...egress.deny] } : {}),
     },
   };

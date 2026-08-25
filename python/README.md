@@ -76,11 +76,23 @@ using_disk = archil.list_sandboxes(disk="dsk-abc123")
 Network egress can optionally be restricted when creating a sandbox:
 
 ```python
+import os
+
 restricted = archil.create_sandbox(
     network=archil.SandboxNetwork(
         egress=archil.SandboxEgressPolicy(
             default="deny",
-            allow=["github.com", "*.github.com", "140.82.112.0/20"],
+            allow=[
+                "github.com",
+                "*.github.com",
+                "140.82.112.0/20",
+                archil.SandboxEgressRule(
+                    target="api.openai.com",
+                    transform=archil.SandboxEgressTransform(
+                        headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"}
+                    ),
+                ),
+            ],
         )
     ),
 )
@@ -89,8 +101,11 @@ restricted = archil.create_sandbox(
 An egress policy accepts IPv4 addresses, CIDR ranges, exact domains, and `*.`
 wildcard domains. The `default` action applies when no target matches. `allow`
 and `deny` can both be specified; deny matches take precedence. Domain matching
-applies to HTTPS traffic and a wildcard such as `*.github.com` matches
-subdomains, not `github.com` itself. Omit `network` for unrestricted egress.
+applies to plaintext HTTP and HTTPS traffic, and a wildcard such as
+`*.github.com` matches subdomains, not `github.com` itself. An object-form allow
+rule can transform outbound HTTPS requests to its exact lowercase domain.
+Header transformations overwrite values supplied by the sandbox; matching
+plaintext HTTP requests are rejected. Omit `network` for unrestricted egress.
 
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB.
