@@ -241,6 +241,33 @@ test("sandbox snapshots expose the network policy", () => {
   assert.deepEqual(sandbox.toJSON().network, network);
 });
 
+test("sandbox updateNetwork replaces the live policy and local snapshot", async () => {
+  const calls: Array<{ path: string; options: any }> = [];
+  const client = {
+    PUT: async (path: string, options: unknown) => {
+      calls.push({ path, options });
+      return { response: new Response(null, { status: 204 }) };
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+  const network = {
+    egress: {
+      default: "deny" as const,
+      allow: ["github.com", "140.82.112.0/20"],
+      deny: ["169.254.0.0/16"],
+    },
+  };
+
+  await sandbox.updateNetwork(network);
+  assert.deepEqual(sandbox.network, network);
+  assert.deepEqual(calls, [
+    {
+      path: "/api/sandboxes/{sid}/network",
+      options: { params: { path: { sid: "0198-sandbox" } }, body: network },
+    },
+  ]);
+});
+
 test("sandbox lifecycle methods poll only after the server wait expires", async () => {
   vi.useFakeTimers();
   const calls: Array<{ path: string; options: any }> = [];

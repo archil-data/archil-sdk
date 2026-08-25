@@ -58,6 +58,13 @@ export interface SandboxForkOptions extends SandboxWaitOptions {
   name?: string;
 }
 
+type NetworkUpdateClient = {
+  PUT(
+    path: "/api/sandboxes/{sid}/network",
+    options: { params: { path: { sid: string } }; body: SandboxNetwork },
+  ): Promise<{ data?: { success: boolean; error?: string }; error?: unknown; response: Response }>;
+};
+
 const POLL_INTERVAL_MS = 500;
 
 function sleep(): Promise<void> {
@@ -213,6 +220,19 @@ export class Sandbox {
     );
     const fork = new Sandbox(data, this._client);
     return options.wait === false ? fork : waitForSandboxStart(fork);
+  }
+
+  /** Replace this running sandbox's complete network policy. */
+  async updateNetwork(network: SandboxNetwork): Promise<void> {
+    // The endpoint is newer than the minimum @archildata/api-types version.
+    const client = this._client as unknown as NetworkUpdateClient;
+    await unwrapEmpty(
+      client.PUT("/api/sandboxes/{sid}/network", {
+        params: { path: { sid: this.id } },
+        body: network,
+      }),
+    );
+    this.network = cloneNetwork(network);
   }
 
   /** Delete this sandbox and its backing disk. */

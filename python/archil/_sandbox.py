@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import Optional, Union
 
 from ._http import _Transport
@@ -178,6 +179,14 @@ class _Sandbox:
         )
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
+
+    async def update_network(self, network: SandboxNetwork) -> None:
+        await self._transport.request_empty(
+            "PUT",
+            f"/api/sandboxes/{self.id}/network",
+            json=network.to_json(),
+        )
+        self._data = replace(self._data, network=network)
 
     async def delete(self) -> None:
         await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}")

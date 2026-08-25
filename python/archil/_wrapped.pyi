@@ -1306,6 +1306,15 @@ class Sandbox:
 
     fork: __fork_spec
 
+    class __update_network_spec(typing_extensions.Protocol):
+        def __call__(self, /, network: archil._models.SandboxNetwork) -> None:
+            ...
+
+        async def aio(self, /, network: archil._models.SandboxNetwork) -> None:
+            ...
+
+    update_network: __update_network_spec
+
     class __delete_spec(typing_extensions.Protocol):
         def __call__(self, /) -> None:
             ...

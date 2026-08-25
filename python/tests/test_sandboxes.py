@@ -279,6 +279,29 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
     assert stop_request.query == {}
 
 
+def test_update_network_replaces_live_policy_and_local_snapshot(archil, router):
+    router.set(lambda request: httpx.Response(204) if request.method == "PUT" else ok_envelope(sandbox_json()))
+    sandbox = archil.sandboxes.get("sbx-1")
+    network = SandboxNetwork(
+        egress=SandboxEgressPolicy(
+            default="deny",
+            allow=["github.com", "140.82.112.0/20"],
+            deny=["169.254.0.0/16"],
+        )
+    )
+
+    assert sandbox.update_network(network) is None
+    assert sandbox.network == network
+    assert router.requests[-1].method == "PUT"
+    assert router.requests[-1].path == "/api/sandboxes/sbx-1/network"
+    assert router.requests[-1].json == network.to_json()
+
+    unrestricted = SandboxNetwork()
+    sandbox.update_network(unrestricted)
+    assert sandbox.network == unrestricted
+    assert router.requests[-1].json == {}
+
+
 def test_empty_sandbox_list(archil, router):
     responses = iter([ok_envelope(None)])
     router.set(lambda request: next(responses))
