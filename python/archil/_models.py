@@ -257,9 +257,41 @@ class SandboxEndpoint:
 
 
 @dataclass(frozen=True)
+class SandboxEgressTransform:
+    headers: Optional[dict[str, str]] = None
+
+    def to_json(self) -> dict:
+        return {"headers": self.headers} if self.headers is not None else {}
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxEgressTransform":
+        return cls(headers=d.get("headers"))
+
+
+@dataclass(frozen=True)
+class SandboxEgressRule:
+    target: str
+    transform: Optional[SandboxEgressTransform] = None
+
+    def to_json(self) -> dict:
+        result: dict[str, Any] = {"target": self.target}
+        if self.transform is not None:
+            result["transform"] = self.transform.to_json()
+        return result
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxEgressRule":
+        transform = d.get("transform")
+        return cls(
+            target=d["target"],
+            transform=SandboxEgressTransform.from_json(transform) if transform is not None else None,
+        )
+
+
+@dataclass(frozen=True)
 class SandboxEgressPolicy:
     default: SandboxNetworkAction
-    allow: Optional[list[str]] = None
+    allow: Optional[list[Union[str, SandboxEgressRule]]] = None
     deny: Optional[list[str]] = None
 
     def to_json(self) -> dict:
@@ -267,7 +299,11 @@ class SandboxEgressPolicy:
             key: value
             for key, value in {
                 "default": self.default,
-                "allow": self.allow,
+                "allow": (
+                    [rule if isinstance(rule, str) else rule.to_json() for rule in self.allow]
+                    if self.allow is not None
+                    else None
+                ),
                 "deny": self.deny,
             }.items()
             if value is not None
@@ -275,7 +311,16 @@ class SandboxEgressPolicy:
 
     @classmethod
     def from_json(cls, d: dict) -> "SandboxEgressPolicy":
-        return cls(default=d["default"], allow=d.get("allow"), deny=d.get("deny"))
+        allow = d.get("allow")
+        return cls(
+            default=d["default"],
+            allow=(
+                [rule if isinstance(rule, str) else SandboxEgressRule.from_json(rule) for rule in allow]
+                if allow is not None
+                else None
+            ),
+            deny=d.get("deny"),
+        )
 
 
 @dataclass(frozen=True)

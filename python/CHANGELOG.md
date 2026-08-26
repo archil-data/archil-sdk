@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add typed outbound HTTPS header transformations for sandbox credential brokering.
+
 ## 0.12.0
 
 - Add typed sandbox egress network policies with IPv4, CIDR, exact-domain, and wildcard-domain targets, including live policy reads and replacement on running sandboxes.

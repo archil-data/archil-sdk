@@ -12,6 +12,10 @@ export type SandboxNetworkAction = components["schemas"]["SandboxNetworkAction"]
 
 export type SandboxEgressPolicy = components["schemas"]["SandboxEgressPolicy"];
 
+export type SandboxEgressRule = components["schemas"]["SandboxEgressRule"];
+
+export type SandboxEgressTransform = components["schemas"]["SandboxEgressTransform"];
+
 export type SandboxNetwork = components["schemas"]["SandboxNetwork"];
 
 /** @internal */

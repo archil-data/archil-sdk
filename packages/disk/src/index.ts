@@ -23,6 +23,8 @@ export { Sandbox } from "./sandbox.js";
 export type {
   SandboxEndpoint,
   SandboxEgressPolicy,
+  SandboxEgressRule,
+  SandboxEgressTransform,
   SandboxNetwork,
   SandboxNetworkAction,
   SandboxResponse,

@@ -159,7 +159,15 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     network: {
       egress: {
         default: "deny",
-        allow: ["github.com", "*.github.com", "140.82.112.0/20"],
+        allow: [
+          "github.com",
+          "*.github.com",
+          "140.82.112.0/20",
+          {
+            target: "api.openai.com",
+            transform: { headers: { Authorization: "Bearer brokered-token" } },
+          },
+        ],
         deny: ["169.254.0.0/16"],
       },
     },
@@ -187,7 +195,15 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
           network: {
             egress: {
               default: "deny",
-              allow: ["github.com", "*.github.com", "140.82.112.0/20"],
+              allow: [
+                "github.com",
+                "*.github.com",
+                "140.82.112.0/20",
+                {
+                  target: "api.openai.com",
+                  transform: { headers: { Authorization: "Bearer brokered-token" } },
+                },
+              ],
               deny: ["169.254.0.0/16"],
             },
           },
@@ -227,9 +243,15 @@ test("sandbox getNetwork and updateNetwork use the active runtime policy", async
   const calls: Array<{ method: string; path: string; options: any }> = [];
   const network = {
     egress: {
-      default: "deny" as const,
-      allow: ["github.com", "140.82.112.0/20"],
-      deny: ["169.254.0.0/16"],
+      default: "allow" as const,
+      allow: [
+        "api.github.com",
+        {
+          target: "api.openai.com",
+          transform: { headers: { Authorization: "Bearer brokered-token" } },
+        },
+      ],
+      deny: ["169.254.0.0/16", "*.internal.example"],
     },
   };
   const client = {

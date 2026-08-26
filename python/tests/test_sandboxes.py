@@ -10,6 +10,8 @@ import archil as archil_module
 from archil import (
     Sandbox,
     SandboxEgressPolicy,
+    SandboxEgressRule,
+    SandboxEgressTransform,
     SandboxNetwork,
     SandboxProcess,
     SandboxProcessOutput,
@@ -118,7 +120,15 @@ def test_create_and_list_sandboxes(archil, router):
     network_json = {
         "egress": {
             "default": "deny",
-            "allow": ["github.com", "*.github.com", "140.82.112.0/20"],
+            "allow": [
+                "github.com",
+                "*.github.com",
+                "140.82.112.0/20",
+                {
+                    "target": "api.openai.com",
+                    "transform": {"headers": {"Authorization": "Bearer brokered-token"}},
+                },
+            ],
             "deny": ["169.254.0.0/16"],
         }
     }
@@ -140,7 +150,17 @@ def test_create_and_list_sandboxes(archil, router):
         network=SandboxNetwork(
             egress=SandboxEgressPolicy(
                 default="deny",
-                allow=["github.com", "*.github.com", "140.82.112.0/20"],
+                allow=[
+                    "github.com",
+                    "*.github.com",
+                    "140.82.112.0/20",
+                    SandboxEgressRule(
+                        target="api.openai.com",
+                        transform=SandboxEgressTransform(
+                            headers={"Authorization": "Bearer brokered-token"}
+                        ),
+                    ),
+                ],
                 deny=["169.254.0.0/16"],
             )
         ),
