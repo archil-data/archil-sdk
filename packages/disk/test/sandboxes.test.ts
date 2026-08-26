@@ -140,7 +140,6 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     maxTtlSeconds: 3600,
     maxConcurrentExecs: 8,
     endpoints: [{ port: 8080, hostname: "8080-sandbox.example.com" }],
-    network: undefined,
     createdAt: nowDate,
     runningAt: undefined,
     finishedAt: undefined,
@@ -224,21 +223,41 @@ test("sandbox snapshots expose API timestamps as Date objects", () => {
   assert.equal(sandbox.createdAt.toISOString(), "2026-07-22T12:00:00.000Z");
 });
 
-test("sandbox snapshots expose the network policy", () => {
+test("sandbox getNetwork and updateNetwork use the active runtime policy", async () => {
+  const calls: Array<{ method: string; path: string; options: any }> = [];
   const network = {
     egress: {
-      default: "allow" as const,
-      allow: ["api.github.com"],
-      deny: ["169.254.0.0/16", "*.internal.example"],
+      default: "deny" as const,
+      allow: ["github.com", "140.82.112.0/20"],
+      deny: ["169.254.0.0/16"],
     },
   };
-  const sandbox = new Sandbox(
-    { ...sandboxWire("running"), network } as any,
-    {} as ApiClient,
-  );
+  const client = {
+    GET: async (path: string, options: unknown) => {
+      calls.push({ method: "GET", path, options });
+      return ok(network);
+    },
+    PUT: async (path: string, options: unknown) => {
+      calls.push({ method: "PUT", path, options });
+      return ok(network);
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  assert.deepEqual(sandbox.network, network);
-  assert.deepEqual(sandbox.toJSON().network, network);
+  assert.deepEqual(await sandbox.getNetwork(), network);
+  assert.deepEqual(await sandbox.updateNetwork(network), network);
+  assert.deepEqual(calls, [
+    {
+      method: "GET",
+      path: "/api/sandboxes/{sid}/network",
+      options: { params: { path: { sid: "0198-sandbox" } } },
+    },
+    {
+      method: "PUT",
+      path: "/api/sandboxes/{sid}/network",
+      options: { params: { path: { sid: "0198-sandbox" } }, body: network },
+    },
+  ]);
 });
 
 test("sandbox lifecycle methods poll only after the server wait expires", async () => {

@@ -36,7 +36,6 @@ export interface SandboxResponse {
   /** Maximum concurrently attached process sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
-  network?: SandboxNetwork;
   createdAt: Date;
   runningAt?: Date;
   finishedAt?: Date;
@@ -58,6 +57,25 @@ export interface SandboxForkOptions extends SandboxWaitOptions {
   name?: string;
 }
 
+type NetworkClient = {
+  GET(
+    path: "/api/sandboxes/{sid}/network",
+    options: { params: { path: { sid: string } } },
+  ): Promise<{
+    data?: { success: boolean; data?: SandboxNetwork; error?: string };
+    error?: unknown;
+    response: Response;
+  }>;
+  PUT(
+    path: "/api/sandboxes/{sid}/network",
+    options: { params: { path: { sid: string } }; body: SandboxNetwork },
+  ): Promise<{
+    data?: { success: boolean; data?: SandboxNetwork; error?: string };
+    error?: unknown;
+    response: Response;
+  }>;
+};
+
 const POLL_INTERVAL_MS = 500;
 
 function sleep(): Promise<void> {
@@ -75,7 +93,6 @@ export class Sandbox {
   maxTtlSeconds!: number;
   maxConcurrentExecs!: number;
   endpoints?: SandboxEndpoint[];
-  network?: SandboxNetwork;
   createdAt!: Date;
   runningAt?: Date;
   finishedAt?: Date;
@@ -108,7 +125,6 @@ export class Sandbox {
     this.maxTtlSeconds = data.max_ttl_seconds;
     this.maxConcurrentExecs = data.max_concurrent_execs;
     this.endpoints = data.endpoints?.map((endpoint) => ({ ...endpoint }));
-    this.network = cloneNetwork(data.network);
     this.createdAt = new Date(data.created_at);
     this.runningAt = data.running_at ? new Date(data.running_at) : undefined;
     this.finishedAt = data.finished_at ? new Date(data.finished_at) : undefined;
@@ -130,7 +146,6 @@ export class Sandbox {
       maxTtlSeconds: this.maxTtlSeconds,
       maxConcurrentExecs: this.maxConcurrentExecs,
       endpoints: this.endpoints?.map((endpoint) => ({ ...endpoint })),
-      network: cloneNetwork(this.network),
       createdAt: this.createdAt,
       runningAt: this.runningAt,
       finishedAt: this.finishedAt,
@@ -215,6 +230,29 @@ export class Sandbox {
     return options.wait === false ? fork : waitForSandboxStart(fork);
   }
 
+  /** Get this running sandbox's effective network policy. */
+  async getNetwork(): Promise<SandboxNetwork> {
+    // The endpoint is newer than the minimum @archildata/api-types version.
+    const client = this._client as unknown as NetworkClient;
+    return unwrap(
+      client.GET("/api/sandboxes/{sid}/network", {
+        params: { path: { sid: this.id } },
+      }),
+    );
+  }
+
+  /** Replace this running sandbox's complete network policy and return the effective policy. */
+  async updateNetwork(network: SandboxNetwork): Promise<SandboxNetwork> {
+    // The endpoint is newer than the minimum @archildata/api-types version.
+    const client = this._client as unknown as NetworkClient;
+    return unwrap(
+      client.PUT("/api/sandboxes/{sid}/network", {
+        params: { path: { sid: this.id } },
+        body: network,
+      }),
+    );
+  }
+
   /** Delete this sandbox and its backing disk. */
   async delete(): Promise<void> {
     await unwrapEmpty(
@@ -223,19 +261,6 @@ export class Sandbox {
       }),
     );
   }
-}
-
-function cloneNetwork(network?: SandboxNetwork): SandboxNetwork | undefined {
-  if (!network) return undefined;
-  const { egress } = network;
-  if (!egress) return {};
-  return {
-    egress: {
-      default: egress.default,
-      ...(egress.allow ? { allow: [...egress.allow] } : {}),
-      ...(egress.deny ? { deny: [...egress.deny] } : {}),
-    },
-  };
 }
 
 /** @internal Continue waiting if the server returned before startup completed. */

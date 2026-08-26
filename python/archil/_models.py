@@ -305,7 +305,6 @@ class SandboxData:
     last_active_at: datetime
     platform: Optional[SandboxPlatform] = None
     endpoints: list[SandboxEndpoint] = field(default_factory=list)
-    network: Optional[SandboxNetwork] = None
     running_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
@@ -324,7 +323,6 @@ class SandboxData:
             base_image=d["base_image"],
             platform=d.get("platform"),
             endpoints=[SandboxEndpoint.from_json(endpoint) for endpoint in d.get("endpoints") or []],
-            network=SandboxNetwork.from_json(d["network"]) if d.get("network") is not None else None,
             created_at=_parse_datetime(d["created_at"]),
             running_at=_parse_datetime(d["running_at"]) if d.get("running_at") else None,
             finished_at=_parse_datetime(d["finished_at"]) if d.get("finished_at") else None,

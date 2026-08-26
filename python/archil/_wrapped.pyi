@@ -1190,10 +1190,6 @@ class Sandbox:
         ...
 
     @property
-    def network(self) -> archil._models.SandboxNetwork | None:
-        ...
-
-    @property
     def created_at(self):
         ...
 
@@ -1305,6 +1301,24 @@ class Sandbox:
             ...
 
     fork: __fork_spec
+
+    class __get_network_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> archil._models.SandboxNetwork:
+            ...
+
+        async def aio(self, /) -> archil._models.SandboxNetwork:
+            ...
+
+    get_network: __get_network_spec
+
+    class __update_network_spec(typing_extensions.Protocol):
+        def __call__(self, /, network: archil._models.SandboxNetwork) -> archil._models.SandboxNetwork:
+            ...
+
+        async def aio(self, /, network: archil._models.SandboxNetwork) -> archil._models.SandboxNetwork:
+            ...
+
+    update_network: __update_network_spec
 
     class __delete_spec(typing_extensions.Protocol):
         def __call__(self, /) -> None:

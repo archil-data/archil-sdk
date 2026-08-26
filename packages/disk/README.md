@@ -168,7 +168,18 @@ An egress policy accepts IPv4 addresses, CIDR ranges, exact domains, and `*.`
 wildcard domains. The `default` action applies when no target matches. `allow`
 and `deny` can both be specified; deny matches take precedence. Domain matching
 applies to HTTPS traffic and a wildcard such as `*.github.com` matches
-subdomains, not `github.com` itself. Omit `network` for unrestricted egress.
+subdomains, not `github.com` itself. Omit `network` for unrestricted egress. A
+running sandbox's complete policy can be replaced without restarting it;
+existing connections are not terminated:
+
+```ts
+const effective = await restricted.updateNetwork({
+  egress: { default: "deny", allow: ["api.github.com"] },
+});
+console.log(effective, await restricted.getNetwork());
+
+await restricted.updateNetwork({}); // Restore unrestricted egress.
+```
 
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB.

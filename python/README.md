@@ -90,7 +90,24 @@ An egress policy accepts IPv4 addresses, CIDR ranges, exact domains, and `*.`
 wildcard domains. The `default` action applies when no target matches. `allow`
 and `deny` can both be specified; deny matches take precedence. Domain matching
 applies to HTTPS traffic and a wildcard such as `*.github.com` matches
-subdomains, not `github.com` itself. Omit `network` for unrestricted egress.
+subdomains, not `github.com` itself. Omit `network` for unrestricted egress. A
+running sandbox's complete policy can be replaced without restarting it;
+existing connections are not terminated:
+
+```python
+effective = restricted.update_network(
+    archil.SandboxNetwork(
+        egress=archil.SandboxEgressPolicy(
+            default="deny",
+            allow=["api.github.com"],
+        )
+    )
+)
+print(effective, restricted.get_network())
+
+# Restore unrestricted egress.
+restricted.update_network(archil.SandboxNetwork())
+```
 
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB.
