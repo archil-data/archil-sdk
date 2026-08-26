@@ -109,8 +109,17 @@ print(effective, restricted.get_network())
 restricted.update_network(archil.SandboxNetwork())
 ```
 
+Reset a running sandbox's expiration, or change the lifetime budget used by
+its next start while it is inactive:
+
+```python
+sandbox.set_timeout(24 * 60 * 60)
+print(sandbox.max_ttl_seconds, sandbox.expires_at)
+```
+
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
-`vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB.
+`vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB. Sandbox
+timeouts default to 24 hours and can be reset up to 24 hours from now.
 
 Runtime-owned processes return immediately and can be disconnected without
 stopping the command. Reconnect by process ID and output cursor to continue

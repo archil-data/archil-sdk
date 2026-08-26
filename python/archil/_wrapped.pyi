@@ -1320,6 +1320,15 @@ class Sandbox:
 
     update_network: __update_network_spec
 
+    class __set_timeout_spec(typing_extensions.Protocol):
+        def __call__(self, /, timeout: int) -> Sandbox:
+            ...
+
+        async def aio(self, /, timeout: int) -> Sandbox:
+            ...
+
+    set_timeout: __set_timeout_spec
+
     class __delete_spec(typing_extensions.Protocol):
         def __call__(self, /) -> None:
             ...

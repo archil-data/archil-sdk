@@ -260,6 +260,35 @@ test("sandbox getNetwork and updateNetwork use the active runtime policy", async
   ]);
 });
 
+test("sandbox setTimeout sends seconds and refreshes its fields", async () => {
+  const calls: Array<{ path: string; options: any }> = [];
+  const expiresAt = "2026-07-23T12:00:00Z";
+  const client = {
+    POST: async (path: string, options: unknown) => {
+      calls.push({ path, options });
+      return ok({
+        ...sandboxWire("running"),
+        max_ttl_seconds: 86400,
+        expires_at: expiresAt,
+      });
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  assert.equal(await sandbox.setTimeout(86_400), sandbox);
+  assert.equal(sandbox.maxTtlSeconds, 86400);
+  assert.equal(sandbox.expiresAt?.toISOString(), "2026-07-23T12:00:00.000Z");
+  assert.deepEqual(calls, [
+    {
+      path: "/api/sandboxes/{sid}/timeout",
+      options: {
+        params: { path: { sid: "0198-sandbox" } },
+        body: { timeout: 86400 },
+      },
+    },
+  ]);
+});
+
 test("sandbox lifecycle methods poll only after the server wait expires", async () => {
   vi.useFakeTimers();
   const calls: Array<{ path: string; options: any }> = [];

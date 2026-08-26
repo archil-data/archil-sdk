@@ -181,8 +181,18 @@ console.log(effective, await restricted.getNetwork());
 await restricted.updateNetwork({}); // Restore unrestricted egress.
 ```
 
+Reset a running sandbox's expiration, or change the lifetime budget used by
+its next start while it is inactive. The timeout is in seconds, matching
+`maxTtlSeconds` and the Python SDK:
+
+```ts
+await sandbox.setTimeout(24 * 60 * 60);
+console.log(sandbox.maxTtlSeconds, sandbox.expiresAt);
+```
+
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
-`vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB.
+`vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB. Sandbox
+timeouts default to 24 hours and can be reset up to 24 hours from now.
 
 `sandbox.processes.start()` always returns a runtime-owned process immediately.
 Pass `terminal: true` when the command needs terminal behavior, or provide

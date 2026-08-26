@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add typed sandbox egress network policies with IPv4, CIDR, exact-domain, and wildcard-domain targets, including live policy reads and replacement on running sandboxes.
+- Add `sandbox.set_timeout()` for resetting a live sandbox deadline or changing the lifetime budget used by its next start. New sandboxes default to the 24-hour ceiling.
 - Remove the deprecated control-plane sandbox exec resources and raw connection API. `sandbox.exec()` now starts
   and waits for a runtime-owned process; use `sandbox.processes` for detachable and resumable processes.
 

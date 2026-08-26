@@ -187,5 +187,14 @@ class _Sandbox:
         )
         return SandboxNetwork.from_json(data)
 
+    async def set_timeout(self, timeout: int) -> "_Sandbox":
+        data = await self._transport.request_json(
+            "POST",
+            f"/api/sandboxes/{self.id}/timeout",
+            json={"timeout": timeout},
+        )
+        self._data = SandboxData.from_json(data)
+        return self
+
     async def delete(self) -> None:
         await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}")
