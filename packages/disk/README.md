@@ -181,7 +181,18 @@ applies to plaintext HTTP and HTTPS traffic, and a wildcard such as
 `*.github.com` matches subdomains, not `github.com` itself. An object-form allow
 rule can transform outbound HTTPS requests to its exact lowercase domain.
 Header transformations overwrite values supplied by the sandbox; matching
-plaintext HTTP requests are rejected. Omit `network` for unrestricted egress.
+plaintext HTTP requests are rejected. Omit `network` for unrestricted egress. A
+running sandbox's complete policy can be replaced without restarting it;
+existing connections are not terminated:
+
+```ts
+const effective = await restricted.updateNetwork({
+  egress: { default: "deny", allow: ["api.github.com"] },
+});
+console.log(effective, await restricted.getNetwork());
+
+await restricted.updateNetwork({}); // Restore unrestricted egress.
+```
 
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB.

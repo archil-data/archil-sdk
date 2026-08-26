@@ -3,8 +3,11 @@
 ## Unreleased
 
 - Add typed outbound HTTPS header transformations for sandbox credential brokering.
-- Add typed sandbox egress network policies with IPv4, CIDR, exact-domain, and wildcard-domain targets.
-- Remove the deprecated control-plane sandbox exec resources and raw connection API. `sandbox.exec()` now starts
+
+## 0.12.0
+
+- Add typed sandbox egress network policies with IPv4, CIDR, exact-domain, and wildcard-domain targets, including live policy reads and replacement on running sandboxes.
+- Remove the deprecated exec resources and raw connection API. `sandbox.exec()` now starts
   and waits for a runtime-owned process; use `sandbox.processes` for detachable and resumable processes.
 
 ## 0.11.0

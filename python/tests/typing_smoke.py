@@ -57,7 +57,8 @@ def sync_usage() -> None:
             )
         ),
     )
-    _network: Optional[SandboxNetwork] = sandbox.network
+    _network: SandboxNetwork = sandbox.get_network()
+    _network = sandbox.update_network(SandboxNetwork())
     module_sandbox: Sandbox = archil.create_sandbox(name="trial")
     _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
     module_sandbox = archil.get_sandbox(module_sandbox.id)
@@ -115,6 +116,8 @@ def sync_usage() -> None:
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
         sandbox = await client.sandboxes.create.aio(name="trial")
+        _network: SandboxNetwork = await sandbox.get_network.aio()
+        _network = await sandbox.update_network.aio(SandboxNetwork())
         result: SandboxProcessResult = await sandbox.exec.aio("echo ready")
         _sandbox_exit: Optional[int] = result.exit_code
         await sandbox.files.upload_file.aio("local.txt", "/workspace/remote.txt")
