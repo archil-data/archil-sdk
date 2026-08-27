@@ -20,16 +20,15 @@ import archil
 # Configure once per process — falls back to ARCHIL_API_KEY / ARCHIL_REGION env vars.
 archil.configure(api_key="key-...", region="aws-us-east-1")
 
-# Create a disk. `token` here is the disk token — the one-time credential for mounting.
+# Create a disk. The returned disk is available for use immediately. `token`
+# here is the disk token — the one-time credential for mounting.
 result = archil.create_disk(name="my-disk")
-print(f"Created {result.disk.id}, disk token: {result.token}")
-
-# A freshly-created disk starts in "creating"; block until it's usable.
-disk = result.disk.wait_until_ready()  # raises on terminal failure / timeout
+disk = result.disk
+print(f"Created {disk.id}, disk token: {result.token}")
 
 # List and look up disks
 all_disks = archil.list_disks()
-d = archil.get_disk(result.disk.id)
+d = archil.get_disk(disk.id)
 ```
 
 Per-disk operations are methods on the `Disk` object itself, not top-level functions:
