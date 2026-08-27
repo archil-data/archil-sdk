@@ -322,6 +322,25 @@ def test_get_and_update_network_use_active_runtime_policy(archil, router):
     assert router.requests[-1].json == {}
 
 
+def test_set_timeout_refreshes_sandbox_fields(archil, router):
+    expires_at = "2026-08-15T12:00:00Z"
+
+    def handler(request):
+        if request.url.path.endswith("/timeout"):
+            return ok_envelope(sandbox_json(max_ttl_seconds=86400, expires_at=expires_at))
+        return ok_envelope(sandbox_json())
+
+    router.set(handler)
+    sandbox = archil.sandboxes.get("sbx-1")
+
+    assert sandbox.set_timeout(86400) is sandbox
+    assert sandbox.max_ttl_seconds == 86400
+    assert sandbox.expires_at == datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    assert router.requests[-1].method == "POST"
+    assert router.requests[-1].path == "/api/sandboxes/sbx-1/timeout"
+    assert router.requests[-1].json == {"timeout": 86400}
+
+
 def test_empty_sandbox_list(archil, router):
     responses = iter([ok_envelope(None)])
     router.set(lambda request: next(responses))

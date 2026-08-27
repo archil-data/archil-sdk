@@ -61,7 +61,7 @@ export interface SandboxForkOptions extends SandboxWaitOptions {
   name?: string;
 }
 
-type NetworkClient = {
+type SandboxExtensionClient = {
   GET(
     path: "/api/sandboxes/{sid}/network",
     options: { params: { path: { sid: string } } },
@@ -75,6 +75,14 @@ type NetworkClient = {
     options: { params: { path: { sid: string } }; body: SandboxNetwork },
   ): Promise<{
     data?: { success: boolean; data?: SandboxNetwork; error?: string };
+    error?: unknown;
+    response: Response;
+  }>;
+  POST(
+    path: "/api/sandboxes/{sid}/timeout",
+    options: { params: { path: { sid: string } }; body: { timeout: number } },
+  ): Promise<{
+    data?: { success: boolean; data?: SandboxWire; error?: string };
     error?: unknown;
     response: Response;
   }>;
@@ -237,7 +245,7 @@ export class Sandbox {
   /** Get this running sandbox's effective network policy. */
   async getNetwork(): Promise<SandboxNetwork> {
     // The endpoint is newer than the minimum @archildata/api-types version.
-    const client = this._client as unknown as NetworkClient;
+    const client = this._client as unknown as SandboxExtensionClient;
     return unwrap(
       client.GET("/api/sandboxes/{sid}/network", {
         params: { path: { sid: this.id } },
@@ -248,13 +256,26 @@ export class Sandbox {
   /** Replace this running sandbox's complete network policy and return the effective policy. */
   async updateNetwork(network: SandboxNetwork): Promise<SandboxNetwork> {
     // The endpoint is newer than the minimum @archildata/api-types version.
-    const client = this._client as unknown as NetworkClient;
+    const client = this._client as unknown as SandboxExtensionClient;
     return unwrap(
       client.PUT("/api/sandboxes/{sid}/network", {
         params: { path: { sid: this.id } },
         body: network,
       }),
     );
+  }
+
+  /** Reset this sandbox's expiration to the given number of seconds from now. */
+  async setTimeout(timeoutSeconds: number): Promise<this> {
+    // The endpoint is newer than the minimum @archildata/api-types version.
+    const client = this._client as unknown as SandboxExtensionClient;
+    const data = await unwrap(
+      client.POST("/api/sandboxes/{sid}/timeout", {
+        params: { path: { sid: this.id } },
+        body: { timeout: timeoutSeconds },
+      }),
+    );
+    return this._apply(data);
   }
 
   /** Delete this sandbox and its backing disk. */

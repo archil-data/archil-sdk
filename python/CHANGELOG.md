@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add typed outbound HTTPS header transformations for sandbox credential brokering.
+- Add `sandbox.set_timeout()` for resetting a live sandbox deadline or changing the lifetime budget used by its next start. New sandboxes default to the 24-hour ceiling.
 
 ## 0.12.0
 
