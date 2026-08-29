@@ -8,6 +8,7 @@ import pytest
 
 import archil as archil_module
 from archil import (
+    ArchilApiError,
     Sandbox,
     SandboxEgressPolicy,
     SandboxEgressRule,
@@ -19,7 +20,7 @@ from archil import (
     SandboxStartError,
     SandboxTerminal,
 )
-from conftest import ok_envelope
+from conftest import error_envelope, ok_envelope
 
 
 NOW = "2026-08-14T12:00:00Z"
@@ -80,6 +81,120 @@ class FakeProcessWebSocket(FakeWebSocket):
             await self.push(json.dumps({"type": "resized"}))
 
 
+@pytest.mark.asyncio
+async def test_process_connection_retries_transient_control_plane_failures(archil, router, monkeypatch):
+    import archil._sandbox_process as process_module
+    import archil._http as http_module
+
+    connection_attempts = 0
+
+    def handler(request):
+        nonlocal connection_attempts
+        if not request.url.path.endswith("/connections"):
+            return ok_envelope(sandbox_json())
+        connection_attempts += 1
+        if connection_attempts == 1:
+            raise httpx.ConnectError("TLS handshake failed", request=request)
+        if connection_attempts == 2:
+            return error_envelope(503, "temporarily unavailable")
+        return ok_envelope({"url": "wss://sandbox.example/ws", "expires_at": NOW})
+
+    async def connect(_url: str):
+        return FakeProcessWebSocket()
+
+    router.set(handler)
+    monkeypatch.setattr(process_module, "_websocket_connect", connect)
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+
+    process = await sandbox.processes.start.aio("true")
+
+    assert connection_attempts == 3
+    await process.disconnect.aio()
+
+
+@pytest.mark.asyncio
+async def test_process_connection_does_not_retry_non_transient_api_errors(archil, router, monkeypatch):
+    connection_attempts = 0
+
+    def handler(request):
+        nonlocal connection_attempts
+        if not request.url.path.endswith("/connections"):
+            return ok_envelope(sandbox_json())
+        connection_attempts += 1
+        return error_envelope(409, "sandbox is not running")
+
+    router.set(handler)
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+
+    with pytest.raises(ArchilApiError) as exc_info:
+        await sandbox.processes.start.aio("true")
+
+    assert exc_info.value.status == 409
+    assert connection_attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_process_connection_retries_websocket_handshake_failures(archil, router, monkeypatch):
+    import archil._sandbox_process as process_module
+
+    connection_urls = []
+
+    def handler(request):
+        if not request.url.path.endswith("/connections"):
+            return ok_envelope(sandbox_json())
+        connection_number = len(connection_urls) + 1
+        return ok_envelope(
+            {
+                "url": f"wss://sandbox.example/ws?token={connection_number}",
+                "expires_at": NOW,
+            }
+        )
+
+    async def connect(url: str):
+        connection_urls.append(url)
+        if len(connection_urls) == 1:
+            raise OSError("TLS handshake failed")
+        return FakeProcessWebSocket()
+
+    router.set(handler)
+    monkeypatch.setattr(process_module, "_websocket_connect", connect)
+    monkeypatch.setattr(process_module, "_retry_delay", lambda _attempt: 0)
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+
+    process = await sandbox.processes.start.aio("true")
+
+    assert connection_urls == [
+        "wss://sandbox.example/ws?token=1",
+        "wss://sandbox.example/ws?token=2",
+    ]
+    await process.disconnect.aio()
+
+
+@pytest.mark.asyncio
+async def test_process_connection_gives_up_after_retry_budget(archil, router, monkeypatch):
+    import archil._http as http_module
+
+    connection_attempts = 0
+
+    def handler(request):
+        nonlocal connection_attempts
+        if not request.url.path.endswith("/connections"):
+            return ok_envelope(sandbox_json())
+        connection_attempts += 1
+        raise httpx.ConnectError("TLS handshake failed", request=request)
+
+    router.set(handler)
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+
+    with pytest.raises(ConnectionError, match="Process connection failed") as exc_info:
+        await sandbox.processes.start.aio("true")
+
+    assert isinstance(exc_info.value.__cause__, httpx.ConnectError)
+    assert connection_attempts == 4
+
+
 class BlockingInputWebSocket(FakeProcessWebSocket):
     def __init__(self) -> None:
         super().__init__()
@@ -114,6 +229,120 @@ def sandbox_json(status: str = "running", **overrides) -> dict:
         "last_active_at": NOW,
         **overrides,
     }
+
+
+@pytest.mark.asyncio
+async def test_sandbox_control_plane_calls_select_safe_retry_modes():
+    from archil._models import SandboxData
+    from archil._sandbox import _Sandbox
+    from archil._sandboxes import _Sandboxes
+
+    calls = []
+
+    class RecordingTransport:
+        async def request_json(self, method, path, *, retry="none", **_kwargs):
+            calls.append((method, path, retry))
+            if method == "GET" and path == "/api/sandboxes":
+                return {"sandboxes": []}
+            if path.endswith("/network"):
+                return {}
+            return sandbox_json()
+
+        async def request_empty(self, method, path, *, retry="none", **_kwargs):
+            calls.append((method, path, retry))
+
+    transport = RecordingTransport()
+    sandboxes = _Sandboxes(transport)
+    sandbox = _Sandbox(transport, SandboxData.from_json(sandbox_json()))
+
+    await sandboxes.list()
+    await sandboxes.get("sbx-1")
+    await sandboxes.create(wait=False)
+    await sandbox.refresh()
+    await sandbox.start(wait=False)
+    await sandbox.stop(wait=False)
+    await sandbox.pause(wait=False)
+    await sandbox.resume(wait=False)
+    await sandbox.fork(wait=False)
+    await sandbox.get_network()
+    await sandbox.update_network(SandboxNetwork())
+    await sandbox.delete()
+
+    assert calls == [
+        ("GET", "/api/sandboxes", "transient"),
+        ("GET", "/api/sandboxes/sbx-1", "transient"),
+        ("POST", "/api/sandboxes", "connect"),
+        ("GET", "/api/sandboxes/sbx-1", "transient"),
+        ("POST", "/api/sandboxes/sbx-1/start", "transient"),
+        ("POST", "/api/sandboxes/sbx-1/stop", "transient"),
+        ("POST", "/api/sandboxes/sbx-1/pause", "transient"),
+        ("POST", "/api/sandboxes/sbx-1/resume", "transient"),
+        ("POST", "/api/sandboxes/sbx-1/fork", "connect"),
+        ("GET", "/api/sandboxes/sbx-1/network", "transient"),
+        ("PUT", "/api/sandboxes/sbx-1/network", "transient"),
+        ("DELETE", "/api/sandboxes/sbx-1", "transient"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_create_retries_only_connection_establishment_failures(archil, router, monkeypatch):
+    import archil._http as http_module
+
+    attempts = 0
+
+    def connection_failure_then_success(request):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("TLS handshake failed", request=request)
+        return ok_envelope(sandbox_json())
+
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    router.set(connection_failure_then_success)
+
+    await archil.sandboxes.create.aio(wait=False)
+
+    assert attempts == 2
+
+    attempts = 0
+
+    def ambiguous_failure(_request):
+        nonlocal attempts
+        attempts += 1
+        return error_envelope(503, "temporarily unavailable")
+
+    router.set(ambiguous_failure)
+
+    with pytest.raises(ArchilApiError) as exc_info:
+        await archil.sandboxes.create.aio(wait=False)
+
+    assert exc_info.value.status == 503
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_sandbox_lifecycle_retries_transient_failures(archil, router, monkeypatch):
+    import archil._http as http_module
+
+    stop_attempts = 0
+
+    def handler(request):
+        nonlocal stop_attempts
+        if not request.url.path.endswith("/stop"):
+            return ok_envelope(sandbox_json())
+        stop_attempts += 1
+        if stop_attempts == 1:
+            return error_envelope(503, "temporarily unavailable")
+        return ok_envelope(sandbox_json(status="stopped"))
+
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    router.set(handler)
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+
+    stopped = await sandbox.stop.aio(wait=False)
+
+    assert stopped.status == "stopped"
+    assert stop_attempts == 2
 
 
 def test_create_and_list_sandboxes(archil, router):

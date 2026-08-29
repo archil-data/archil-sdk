@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 from urllib.parse import quote
 
 import httpx
@@ -11,6 +11,7 @@ from ._version import USER_AGENT
 from .errors import ArchilApiError
 
 BodyType = Union[str, bytes, bytearray, memoryview]
+_RetryMode = Literal["none", "connect", "transient"]
 
 
 # Default request timeout (seconds) applied to every control-plane and S3 call.
@@ -19,20 +20,15 @@ BodyType = Union[str, bytes, bytearray, memoryview]
 # blocking interface runs the work on a background loop thread.
 DEFAULT_TIMEOUT = 30.0
 
-# Automatic retries for a transient S3 failure (5xx / 429 / network error).
-_MAX_S3_RETRIES = 3
-# Base backoff (seconds); grows exponentially, then full-jittered.
-_S3_RETRY_BASE_SECONDS = 0.1
-# Ceiling for a single retry backoff (seconds).
-_S3_RETRY_CAP_SECONDS = 2.0
-# Throttling (429) and the gateway's transient 5xx (e.g. a journal-commit
-# timeout surfaced as 500). 4xx other than 429 are caller errors, never retried.
-_TRANSIENT_S3_STATUSES = frozenset({429, 500, 502, 503, 504})
+_MAX_RETRIES = 3
+_RETRY_BASE_SECONDS = 0.1
+_RETRY_CAP_SECONDS = 2.0
+_TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504})
+_CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
-def _s3_retry_delay(attempt: int) -> float:
-    """Full-jittered exponential backoff for retry ``attempt`` (0-based)."""
-    ceiling = min(_S3_RETRY_CAP_SECONDS, _S3_RETRY_BASE_SECONDS * (2**attempt))
+def _retry_delay(attempt: int) -> float:
+    ceiling = min(_RETRY_CAP_SECONDS, _RETRY_BASE_SECONDS * (2**attempt))
     return random.random() * ceiling
 
 
@@ -102,11 +98,10 @@ class _Transport:
         *,
         params: Optional[dict] = None,
         json: Optional[Any] = None,
+        retry: _RetryMode = "none",
     ) -> Any:
-        """Send a control-plane request and unwrap the ``{success, data}``
-        envelope, returning ``data``. Raises ArchilApiError on transport failure
-        or a ``success: false`` body."""
-        body = await self._request_envelope(method, path, params=params, json=json)
+        """Send a control-plane request and unwrap the ``{success, data}`` envelope."""
+        body = await self._request_envelope(method, path, params=params, json=json, retry=retry)
         return body.get("data")
 
     async def request_json_page(
@@ -115,11 +110,12 @@ class _Transport:
         path: str,
         *,
         params: Optional[dict] = None,
+        retry: _RetryMode = "none",
     ) -> tuple[Any, Optional[str]]:
         """Like :meth:`request_json`, but also return the envelope's
         ``nextCursor`` (``None`` on the last page or from a server that doesn't
         paginate)."""
-        body = await self._request_envelope(method, path, params=params, json=None)
+        body = await self._request_envelope(method, path, params=params, json=None, retry=retry)
         return body.get("data"), body.get("nextCursor")
 
     async def request_empty(
@@ -129,13 +125,37 @@ class _Transport:
         *,
         params: Optional[dict] = None,
         json: Optional[Any] = None,
+        retry: _RetryMode = "none",
     ) -> None:
-        await self._request_envelope(method, path, params=params, json=json, allow_empty=True)
+        await self._request_envelope(method, path, params=params, json=json, allow_empty=True, retry=retry)
 
-    async def _request_envelope(self, method, path, *, params, json, allow_empty: bool = False) -> dict:
+    async def _request_envelope(
+        self,
+        method,
+        path,
+        *,
+        params,
+        json,
+        allow_empty: bool = False,
+        retry: _RetryMode = "none",
+    ) -> dict:
         # Drop None-valued query params so optional args don't serialize as "None".
         clean_params = {k: v for k, v in (params or {}).items() if v is not None} or None
-        resp = await self._cp_client().request(method, path, params=clean_params, json=json)
+        attempt = 0
+        while True:
+            try:
+                resp = await self._cp_client().request(method, path, params=clean_params, json=json)
+            except _CONNECT_ERRORS:
+                if retry == "none" or attempt >= _MAX_RETRIES:
+                    raise
+            except httpx.TransportError:
+                if retry != "transient" or attempt >= _MAX_RETRIES:
+                    raise
+            else:
+                if retry != "transient" or resp.status_code not in _TRANSIENT_STATUSES or attempt >= _MAX_RETRIES:
+                    break
+            await asyncio.sleep(_retry_delay(attempt))
+            attempt += 1
         body: Optional[dict]
         try:
             body = resp.json()
@@ -195,7 +215,7 @@ class _Transport:
         # jittered exponential backoff. Bodies are buffered, so re-sending is
         # safe. Every op is safe to retry EXCEPT CompleteMultipartUpload, which
         # passes retry=False (see the docstring).
-        max_retries = _MAX_S3_RETRIES if retry else 0
+        max_retries = _MAX_RETRIES if retry else 0
         last_error: Optional[httpx.TransportError] = None
         for attempt in range(max_retries + 1):
             try:
@@ -206,14 +226,14 @@ class _Transport:
                 last_error = exc
                 if attempt >= max_retries:
                     raise
-                await asyncio.sleep(_s3_retry_delay(attempt))
+                await asyncio.sleep(_retry_delay(attempt))
                 continue
-            if resp.status_code in _TRANSIENT_S3_STATUSES and attempt < max_retries:
+            if resp.status_code in _TRANSIENT_STATUSES and attempt < max_retries:
                 # `client.request` is non-streaming: it has already read the body
                 # in full and closed the response (resp.is_closed), so the
                 # connection is back in the pool before we sleep — no explicit
                 # aclose needed.
-                await asyncio.sleep(_s3_retry_delay(attempt))
+                await asyncio.sleep(_retry_delay(attempt))
                 continue
             return resp
         # Unreachable: the final attempt either returns a response or re-raises.

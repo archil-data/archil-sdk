@@ -125,7 +125,7 @@ class _Sandbox:
         return await process.wait()
 
     async def refresh(self) -> "_Sandbox":
-        data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}")
+        data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}", retry="transient")
         return _Sandbox(self._transport, SandboxData.from_json(data))
 
     async def _wait_for_start(self) -> "_Sandbox":
@@ -146,22 +146,26 @@ class _Sandbox:
         return sandbox
 
     async def start(self, *, wait: bool = True) -> "_Sandbox":
-        data = await self._transport.request_json("POST", f"/api/sandboxes/{self.id}/start", params={"wait": wait})
+        data = await self._transport.request_json(
+            "POST", f"/api/sandboxes/{self.id}/start", params={"wait": wait}, retry="transient"
+        )
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
 
     async def stop(self, *, wait: bool = True) -> "_Sandbox":
-        data = await self._transport.request_json("POST", f"/api/sandboxes/{self.id}/stop")
+        data = await self._transport.request_json("POST", f"/api/sandboxes/{self.id}/stop", retry="transient")
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_while("stopping") if wait else sandbox
 
     async def pause(self, *, wait: bool = True) -> "_Sandbox":
-        data = await self._transport.request_json("POST", f"/api/sandboxes/{self.id}/pause")
+        data = await self._transport.request_json("POST", f"/api/sandboxes/{self.id}/pause", retry="transient")
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_while("pausing") if wait else sandbox
 
     async def resume(self, *, wait: bool = True) -> "_Sandbox":
-        data = await self._transport.request_json("POST", f"/api/sandboxes/{self.id}/resume", params={"wait": wait})
+        data = await self._transport.request_json(
+            "POST", f"/api/sandboxes/{self.id}/resume", params={"wait": wait}, retry="transient"
+        )
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
 
@@ -171,12 +175,13 @@ class _Sandbox:
             f"/api/sandboxes/{self.id}/fork",
             params={"wait": wait},
             json=None if name is None else {"name": name},
+            retry="connect",
         )
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
 
     async def get_network(self) -> SandboxNetwork:
-        data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/network")
+        data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/network", retry="transient")
         return SandboxNetwork.from_json(data)
 
     async def update_network(self, network: SandboxNetwork) -> SandboxNetwork:
@@ -184,8 +189,9 @@ class _Sandbox:
             "PUT",
             f"/api/sandboxes/{self.id}/network",
             json=network.to_json(),
+            retry="transient",
         )
         return SandboxNetwork.from_json(data)
 
     async def delete(self) -> None:
-        await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}")
+        await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}", retry="transient")

@@ -7,6 +7,7 @@ import {
   type SandboxProcessStartOptions,
 } from "./sandbox-process.js";
 import { SandboxFiles } from "./sandbox-files.js";
+import { retryApiRequest } from "./retry.js";
 
 export type SandboxNetworkAction = components["schemas"]["SandboxNetworkAction"];
 
@@ -171,9 +172,13 @@ export class Sandbox {
   /** Re-fetch this sandbox. */
   async refresh() {
     const data = await unwrap(
-      this._client.GET("/api/sandboxes/{sid}", {
-        params: { path: { sid: this.id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/sandboxes/{sid}", {
+            params: { path: { sid: this.id } },
+          }),
+        "transient",
+      ),
     );
     return this._apply(data);
   }
@@ -181,9 +186,13 @@ export class Sandbox {
   /** Start this sandbox. */
   async start(options: SandboxWaitOptions = {}) {
     const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/start", {
-        params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes/{sid}/start", {
+            params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
+          }),
+        "transient",
+      ),
     );
     this._apply(data);
     return options.wait === false ? this : waitForSandboxStart(this);
@@ -192,9 +201,13 @@ export class Sandbox {
   /** Stop this sandbox. */
   async stop(options: SandboxWaitOptions = {}) {
     const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/stop", {
-        params: { path: { sid: this.id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes/{sid}/stop", {
+            params: { path: { sid: this.id } },
+          }),
+        "transient",
+      ),
     );
     this._apply(data);
     return options.wait === false ? this : waitWhileSandboxStatus(this, "stopping");
@@ -203,9 +216,13 @@ export class Sandbox {
   /** Pause this sandbox, preserving its CPU and memory state. */
   async pause(options: SandboxWaitOptions = {}) {
     const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/pause", {
-        params: { path: { sid: this.id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes/{sid}/pause", {
+            params: { path: { sid: this.id } },
+          }),
+        "transient",
+      ),
     );
     this._apply(data);
     return options.wait === false ? this : waitWhileSandboxStatus(this, "pausing");
@@ -214,9 +231,13 @@ export class Sandbox {
   /** Resume this sandbox from its preserved CPU and memory state. */
   async resume(options: SandboxWaitOptions = {}) {
     const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/resume", {
-        params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes/{sid}/resume", {
+            params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
+          }),
+        "transient",
+      ),
     );
     this._apply(data);
     return options.wait === false ? this : waitForSandboxStart(this);
@@ -225,10 +246,14 @@ export class Sandbox {
   /** Create an isolated writable branch from this sandbox's current state. */
   async fork(options: SandboxForkOptions = {}): Promise<Sandbox> {
     const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/fork", {
-        params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
-        body: options.name === undefined ? undefined : { name: options.name },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes/{sid}/fork", {
+            params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
+            body: options.name === undefined ? undefined : { name: options.name },
+          }),
+        "connect",
+      ),
     );
     const fork = new Sandbox(data, this._client);
     return options.wait === false ? fork : waitForSandboxStart(fork);
@@ -239,9 +264,13 @@ export class Sandbox {
     // The endpoint is newer than the minimum @archildata/api-types version.
     const client = this._client as unknown as NetworkClient;
     return unwrap(
-      client.GET("/api/sandboxes/{sid}/network", {
-        params: { path: { sid: this.id } },
-      }),
+      retryApiRequest(
+        () =>
+          client.GET("/api/sandboxes/{sid}/network", {
+            params: { path: { sid: this.id } },
+          }),
+        "transient",
+      ),
     );
   }
 
@@ -250,19 +279,27 @@ export class Sandbox {
     // The endpoint is newer than the minimum @archildata/api-types version.
     const client = this._client as unknown as NetworkClient;
     return unwrap(
-      client.PUT("/api/sandboxes/{sid}/network", {
-        params: { path: { sid: this.id } },
-        body: network,
-      }),
+      retryApiRequest(
+        () =>
+          client.PUT("/api/sandboxes/{sid}/network", {
+            params: { path: { sid: this.id } },
+            body: network,
+          }),
+        "transient",
+      ),
     );
   }
 
   /** Delete this sandbox and its backing disk. */
   async delete(): Promise<void> {
     await unwrapEmpty(
-      this._client.DELETE("/api/sandboxes/{sid}", {
-        params: { path: { sid: this.id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.DELETE("/api/sandboxes/{sid}", {
+            params: { path: { sid: this.id } },
+          }),
+        "transient",
+      ),
     );
   }
 }
