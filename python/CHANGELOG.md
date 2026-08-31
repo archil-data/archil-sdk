@@ -2,7 +2,10 @@
 
 ## Unreleased
 
+## 0.12.1
+
 - Add typed outbound HTTPS header transformations for sandbox credential brokering.
+- Retry transient sandbox control-plane and process WebSocket connection failures.
 
 ## 0.12.0
 

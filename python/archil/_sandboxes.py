@@ -15,11 +15,13 @@ class _Sandboxes:
 
     async def list(self, *, disk: object | str | None = None) -> list[_Sandbox]:
         filesystem = disk if isinstance(disk, str) else getattr(disk, "id", None)
-        data = await self._transport.request_json("GET", "/api/sandboxes", params={"filesystem": filesystem})
+        data = await self._transport.request_json(
+            "GET", "/api/sandboxes", params={"filesystem": filesystem}, retry="transient"
+        )
         return [_Sandbox(self._transport, SandboxData.from_json(item)) for item in (data or {}).get("sandboxes") or []]
 
     async def get(self, id: str) -> _Sandbox:
-        data = await self._transport.request_json("GET", f"/api/sandboxes/{id}")
+        data = await self._transport.request_json("GET", f"/api/sandboxes/{id}", retry="transient")
         return _Sandbox(self._transport, SandboxData.from_json(data))
 
     async def create(
@@ -49,6 +51,8 @@ class _Sandboxes:
             }.items()
             if value is not None
         }
-        data = await self._transport.request_json("POST", "/api/sandboxes", params={"wait": wait}, json=body)
+        data = await self._transport.request_json(
+            "POST", "/api/sandboxes", params={"wait": wait}, json=body, retry="connect"
+        )
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox

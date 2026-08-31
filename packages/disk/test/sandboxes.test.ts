@@ -48,6 +48,7 @@ function ok(data: unknown) {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   TestWebSocket.autoOpen = true;
 });
@@ -482,6 +483,55 @@ test("exec starts a process and waits for its result", async () => {
     env: { HELLO: "world" },
     timeout_seconds: 10,
   });
+});
+
+test("process connections retry API and WebSocket handshake failures", async () => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  let connectionAttempts = 0;
+  const client = {
+    POST: async () => {
+      connectionAttempts++;
+      if (connectionAttempts === 1) throw new TypeError("fetch failed");
+      if (connectionAttempts === 2) {
+        return {
+          error: { error: "temporarily unavailable" },
+          response: new Response(null, { status: 503 }),
+        };
+      }
+      return ok({
+        url: `wss://sandbox.example/connect?token=${connectionAttempts}`,
+        expires_at: now,
+      });
+    },
+  } as unknown as ApiClient;
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
+  TestWebSocket.autoOpen = false;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const starting = sandbox.processes.start("true");
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances.length, 1));
+  assert.equal(connectionAttempts, 3);
+  const first = TestWebSocket.instances[0];
+  first.emit("error", {});
+
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances.length, 2));
+  const second = TestWebSocket.instances[1];
+  assert.equal(connectionAttempts, 4);
+  assert.equal(first.sent.length, 0);
+  second.emit("open", {});
+  await vi.waitFor(() => assert.equal(second.sent.length, 1));
+  second.emit("message", {
+    data: JSON.stringify({ type: "started", process_id: "0198-process" }),
+  });
+
+  const process = await starting;
+  assert.deepEqual(JSON.parse(second.sent[0] as string), {
+    type: "start",
+    command: "true",
+    env: {},
+  });
+  await process.disconnect();
 });
 
 test("processes start directly, disconnect, and resume from their output cursor", async () => {

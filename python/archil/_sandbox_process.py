@@ -5,10 +5,11 @@ import codecs
 import json
 from typing import Awaitable, Callable, Optional, Union
 
+import httpx
 from websockets.asyncio.client import ClientConnection, connect as _websocket_connect
 from websockets.exceptions import WebSocketException
 
-from ._http import _Transport
+from ._http import _MAX_RETRIES, _Transport, _retry_delay
 from ._models import (
     SandboxProcessOutput,
     SandboxProcessOutputHandler,
@@ -76,11 +77,22 @@ class _SandboxProcesses:
         return process
 
     async def _new_connection(self) -> ClientConnection:
-        data = await self._transport.request_json("POST", f"/api/sandboxes/{self._sandbox_id}/connections")
-        try:
-            return await _websocket_connect(data["url"])
-        except (OSError, TimeoutError, WebSocketException) as exc:
-            raise ConnectionError("Process connection failed") from exc
+        attempt = 0
+        while True:
+            try:
+                data = await self._transport.request_json(
+                    "POST",
+                    f"/api/sandboxes/{self._sandbox_id}/connections",
+                    retry="transient",
+                )
+                return await _websocket_connect(data["url"])
+            except httpx.TransportError as exc:
+                raise ConnectionError("Process connection failed") from exc
+            except (OSError, WebSocketException) as exc:
+                if attempt >= _MAX_RETRIES:
+                    raise ConnectionError(f"Process connection failed after {attempt + 1} attempts") from exc
+            await asyncio.sleep(_retry_delay(attempt))
+            attempt += 1
 
     async def _control(self, request: dict[str, object]) -> None:
         socket = await self._new_connection()

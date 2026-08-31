@@ -1,6 +1,7 @@
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap } from "./client.js";
+import { retryApiRequest } from "./retry.js";
 import type { Disk } from "./disk.js";
 import {
   Sandbox,
@@ -54,9 +55,13 @@ export class Sandboxes {
     const filesystem =
       typeof options.disk === "string" ? options.disk : options.disk?.id;
     const data = await unwrap(
-      this._client.GET("/api/sandboxes", {
-        params: { query: { filesystem } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/sandboxes", {
+            params: { query: { filesystem } },
+          }),
+        "transient",
+      ),
     );
     return ((data as { sandboxes?: SandboxWire[] } | null)?.sandboxes ?? []).map(
       (sandbox) => new Sandbox(sandbox, this._client),
@@ -65,9 +70,13 @@ export class Sandboxes {
 
   async get(id: string): Promise<Sandbox> {
     const data = await unwrap(
-      this._client.GET("/api/sandboxes/{sid}", {
-        params: { path: { sid: id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/sandboxes/{sid}", {
+            params: { path: { sid: id } },
+          }),
+        "transient",
+      ),
     );
     return new Sandbox(data as SandboxWire, this._client);
   }
@@ -87,10 +96,14 @@ export class Sandboxes {
       network: request.network,
     };
     const data = await unwrap(
-      this._client.POST("/api/sandboxes", {
-        params: { query: { wait: options.wait ?? true } },
-        body: body as components["schemas"]["CreateSandboxRequest"],
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes", {
+            params: { query: { wait: options.wait ?? true } },
+            body: body as components["schemas"]["CreateSandboxRequest"],
+          }),
+        "connect",
+      ),
     );
     const sandbox = new Sandbox(data as SandboxWire, this._client);
     return options.wait === false ? sandbox : waitForSandboxStart(sandbox);

@@ -1,5 +1,6 @@
 import type { ApiClient } from "./client.js";
 import { unwrap } from "./client.js";
+import { MAX_RETRIES, retryApiRequest, retrySleep } from "./retry.js";
 
 export type SandboxProcessStatus =
   | "running"
@@ -80,6 +81,57 @@ type ProcessControlEvent =
 
 const PROCESS_STDIN_CHUNK_BYTES = 1024 * 1024;
 
+async function waitForSocketOpen(socket: WebSocket): Promise<void> {
+  if (socket.readyState === WebSocket.OPEN) return;
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      socket.removeEventListener("open", opened);
+      socket.removeEventListener("error", failed);
+      socket.removeEventListener("close", closed);
+    };
+    const opened = () => {
+      cleanup();
+      resolve();
+    };
+    const failed = () => {
+      cleanup();
+      reject(new Error("Process connection failed"));
+    };
+    const closed = () => {
+      cleanup();
+      reject(new Error("Process connection closed before opening"));
+    };
+    socket.addEventListener("open", opened, { once: true });
+    socket.addEventListener("error", failed, { once: true });
+    socket.addEventListener("close", closed, { once: true });
+  });
+}
+
+async function openProcessSocket(
+  connectionUrl: () => Promise<string>,
+): Promise<WebSocket> {
+  for (let attempt = 0; ; attempt++) {
+    const url = await connectionUrl();
+    let socket: WebSocket | undefined;
+    try {
+      socket = new WebSocket(url);
+      await waitForSocketOpen(socket);
+      return socket;
+    } catch (error) {
+      try {
+        socket?.close();
+      } catch {}
+      if (attempt >= MAX_RETRIES) {
+        throw new Error(
+          `Process connection failed after ${attempt + 1} attempts`,
+          { cause: error },
+        );
+      }
+    }
+    await retrySleep(attempt);
+  }
+}
+
 export class SandboxProcesses {
   private readonly _sandboxId: string;
   private readonly _client: ApiClient;
@@ -138,22 +190,21 @@ export class SandboxProcesses {
 
   private async _connectionUrl(): Promise<string> {
     const data = await unwrap(
-      this._client.POST("/api/sandboxes/{sid}/connections", {
-        params: { path: { sid: this._sandboxId } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes/{sid}/connections", {
+            params: { path: { sid: this._sandboxId } },
+          }),
+        "transient",
+      ),
     );
     return data.url;
   }
 
   private async _control(request: ProcessControlRequest): Promise<void> {
-    const socket = new WebSocket(await this._connectionUrl());
+    const socket = await openProcessSocket(() => this._connectionUrl());
     const expected = request.type === "kill" ? "killed" : "resized";
     await new Promise<void>((resolve, reject) => {
-      socket.addEventListener(
-        "open",
-        () => socket.send(JSON.stringify(request)),
-        { once: true },
-      );
       socket.addEventListener("message", (message) => {
         try {
           const event = JSON.parse(message.data as string) as
@@ -182,6 +233,7 @@ export class SandboxProcesses {
           ),
         ),
       );
+      socket.send(JSON.stringify(request));
     });
   }
 }
@@ -296,8 +348,7 @@ export class SandboxProcess {
 
   /** @internal */
   async _connect(request: ProcessConnectionRequest): Promise<void> {
-    const url = await this._connectionUrl();
-    const socket = new WebSocket(url);
+    const socket = await openProcessSocket(this._connectionUrl);
     socket.binaryType = "arraybuffer";
     this._socket = socket;
 
@@ -340,11 +391,6 @@ export class SandboxProcess {
       }
       if (output) this._onOutput?.(output);
     });
-    socket.addEventListener(
-      "open",
-      () => socket.send(JSON.stringify(request)),
-      { once: true },
-    );
     socket.addEventListener("error", () => {
       const error = new Error("Process connection failed");
       this._connectionError = error;
@@ -362,6 +408,7 @@ export class SandboxProcess {
       { once: true },
     );
 
+    socket.send(JSON.stringify(request));
     await ready;
   }
 

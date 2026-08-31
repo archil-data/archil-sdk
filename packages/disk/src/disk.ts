@@ -2,6 +2,11 @@ import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty } from "./client.js";
 import { ArchilS3Error, parseS3Error } from "./errors.js";
 import { parseXml } from "./s3xml.js";
+import {
+  isTransientStatus,
+  MAX_RETRIES,
+  retrySleep,
+} from "./retry.js";
 import type { FileSystem } from "./filesystem.js";
 import type {
   DiskResponse,
@@ -1030,7 +1035,7 @@ export class Disk implements FileSystem {
     // `retry: false`: CompleteMultipartUpload (a retry after a
     // successful-but-unacknowledged complete returns a spurious NoSuchUpload)
     // and appendObject (a retry would duplicate the appended bytes).
-    const maxRetries = opts.retry === false ? 0 : MAX_S3_RETRIES;
+    const maxRetries = opts.retry === false ? 0 : MAX_RETRIES;
     for (let attempt = 0; ; attempt++) {
       let error: unknown;
       let response: Response;
@@ -1038,19 +1043,19 @@ export class Disk implements FileSystem {
         ({ error, response } = await call(path, init));
       } catch (transportError) {
         if (attempt < maxRetries) {
-          await sleep(s3RetryDelayMs(attempt));
+          await retrySleep(attempt);
           continue;
         }
         throw transportError;
       }
 
       if (!response.ok) {
-        if (isTransientS3Status(response.status) && attempt < maxRetries) {
+        if (isTransientStatus(response.status) && attempt < maxRetries) {
           // Release the response before retrying so the underlying connection
           // returns to the pool now rather than at GC. (openapi-fetch already
           // reads error bodies, but cancel here is the safe, explicit guard.)
           await response.body?.cancel().catch(() => {});
-          await sleep(s3RetryDelayMs(attempt));
+          await retrySleep(attempt);
           continue;
         }
         // openapi-fetch consumes a non-2xx body into `error` (the raw text, or
@@ -1308,31 +1313,6 @@ function posixCreateHeaders(attrs: PosixCreateAttrs): Record<string, string> | u
 
 /** S3's per-request cap on DeleteObjects keys; larger inputs are batched. */
 const MAX_DELETE_OBJECTS_PER_REQUEST = 1000;
-/** Automatic retries for a transient S3 failure (5xx / 429 / network error). */
-const MAX_S3_RETRIES = 3;
-/** Base backoff for S3 retries (ms); grows exponentially, then full-jittered. */
-const S3_RETRY_BASE_MS = 100;
-/** Ceiling for a single retry backoff (ms). */
-const S3_RETRY_CAP_MS = 2000;
-
-/**
- * Statuses worth retrying: throttling (429) and the gateway's transient 5xx
- * (e.g. a journal-commit timeout surfaced as 500). 4xx other than 429 are
- * caller errors and never retried.
- */
-function isTransientS3Status(status: number): boolean {
-  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
-}
-
-/** Full-jittered exponential backoff for retry `attempt` (0-based). */
-function s3RetryDelayMs(attempt: number): number {
-  const ceiling = Math.min(S3_RETRY_CAP_MS, S3_RETRY_BASE_MS * 2 ** attempt);
-  return Math.random() * ceiling;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 /** S3's minimum size for every multipart part but the last (5 MiB). */
 const MIN_PART_SIZE = 5 * 1024 * 1024;
 /** Default part size {@link Disk.putObject} uses on the multipart path (16 MiB). */
