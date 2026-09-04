@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import random
+import threading
+import weakref
+from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -26,6 +29,29 @@ _RETRY_CAP_SECONDS = 2.0
 _TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504})
 _CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
+_CONTROL_PLANE_LIMITS = httpx.Limits(
+    max_connections=100,
+    max_keepalive_connections=100,
+    keepalive_expiry=600.0,
+)
+
+
+@dataclass
+class _SharedClientEntry:
+    client: httpx.AsyncClient
+    references: int = 0
+
+
+# Async HTTP clients are bound to the event loop on which they are used. Share
+# one HTTP/2-capable control-plane client across Archil instances on the same
+# loop, while keeping different credentials and origins isolated. Sync callers
+# naturally converge on synchronicity's package-wide background loop.
+_shared_cp_clients: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop,
+    dict[tuple[str, str], _SharedClientEntry],
+] = weakref.WeakKeyDictionary()
+_shared_cp_clients_lock = threading.Lock()
+
 
 def _retry_delay(attempt: int) -> float:
     ceiling = min(_RETRY_CAP_SECONDS, _RETRY_BASE_SECONDS * (2**attempt))
@@ -38,11 +64,62 @@ def _auth_header(api_key: str) -> str:
     return f"key-{stripped}"
 
 
+def _origin(url: str) -> str:
+    parsed = urlsplit(url)
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+
+
+def _acquire_shared_cp_client(
+    base_url: str,
+    headers: dict[str, str],
+) -> tuple[httpx.AsyncClient, tuple[asyncio.AbstractEventLoop, tuple[str, str], _SharedClientEntry]]:
+    loop = asyncio.get_running_loop()
+    key = (_origin(base_url), headers["Authorization"])
+
+    with _shared_cp_clients_lock:
+        clients = _shared_cp_clients.setdefault(loop, {})
+        entry = clients.get(key)
+        if entry is None:
+            entry = _SharedClientEntry(
+                httpx.AsyncClient(
+                    headers=headers,
+                    http2=True,
+                    limits=_CONTROL_PLANE_LIMITS,
+                    timeout=None,
+                )
+            )
+            clients[key] = entry
+        entry.references += 1
+
+    return entry.client, (loop, key, entry)
+
+
+async def _release_shared_cp_client(
+    handle: tuple[asyncio.AbstractEventLoop, tuple[str, str], _SharedClientEntry],
+) -> None:
+    loop, key, entry = handle
+    should_close = False
+
+    with _shared_cp_clients_lock:
+        clients = _shared_cp_clients.get(loop)
+        if clients is not None and clients.get(key) is entry:
+            entry.references -= 1
+            if entry.references == 0:
+                del clients[key]
+                if not clients:
+                    del _shared_cp_clients[loop]
+                should_close = True
+
+    if should_close:
+        await entry.client.aclose()
+
+
 class _Transport:
-    """Owns the HTTP clients for one ``Archil`` instance: the control-plane REST
-    client and the S3-compatible gateway client. Both authenticate with the same
-    API key (bearer), so the S3 object API needs no separate credentials or SigV4
-    signing on the caller's part.
+    """Provides the HTTP clients for one ``Archil`` instance. Live control-plane
+    clients share an HTTP/2 connection pool with matching clients on the same
+    event loop; injected transports and S3 clients remain instance-local. Both
+    APIs authenticate with the same API key (bearer), so the S3 object API needs
+    no separate credentials or SigV4 signing on the caller's part.
 
     httpx clients are created lazily on first use so they bind to the
     synchronizer's event loop rather than whatever loop happened to exist at
@@ -64,16 +141,25 @@ class _Transport:
         self._transport = transport
         self._timeout = timeout
         self._cp: Optional[httpx.AsyncClient] = None
+        self._cp_pool_handle: Optional[
+            tuple[asyncio.AbstractEventLoop, tuple[str, str], _SharedClientEntry]
+        ] = None
         self._s3: Optional[httpx.AsyncClient] = None
 
     def _cp_client(self) -> httpx.AsyncClient:
         if self._cp is None:
-            self._cp = httpx.AsyncClient(
-                base_url=self._base_url,
-                headers=self._headers,
-                transport=self._transport,
-                timeout=self._timeout,
-            )
+            if self._transport is None:
+                self._cp, self._cp_pool_handle = _acquire_shared_cp_client(
+                    self._base_url,
+                    self._headers,
+                )
+            else:
+                self._cp = httpx.AsyncClient(
+                    base_url=self._base_url,
+                    headers=self._headers,
+                    transport=self._transport,
+                    timeout=self._timeout,
+                )
         return self._cp
 
     def _s3_client(self) -> httpx.AsyncClient:
@@ -144,7 +230,15 @@ class _Transport:
         attempt = 0
         while True:
             try:
-                resp = await self._cp_client().request(method, path, params=clean_params, json=json)
+                client = self._cp_client()
+                url = f"{self._base_url}{path}" if self._cp_pool_handle is not None else path
+                resp = await client.request(
+                    method,
+                    url,
+                    params=clean_params,
+                    json=json,
+                    timeout=self._timeout,
+                )
             except _CONNECT_ERRORS:
                 if retry == "none" or attempt >= _MAX_RETRIES:
                     raise
@@ -242,8 +336,12 @@ class _Transport:
 
     async def aclose(self) -> None:
         if self._cp is not None:
-            await self._cp.aclose()
+            if self._cp_pool_handle is None:
+                await self._cp.aclose()
+            else:
+                await _release_shared_cp_client(self._cp_pool_handle)
             self._cp = None
+            self._cp_pool_handle = None
         if self._s3 is not None:
             await self._s3.aclose()
             self._s3 = None

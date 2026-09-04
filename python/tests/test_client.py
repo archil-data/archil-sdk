@@ -109,3 +109,28 @@ def test_control_plane_request_sends_python_user_agent(router, archil):
     ua = router.requests[0].headers["user-agent"]
     assert ua.startswith("archil-python/")
     assert "httpx" not in ua  # our UA replaced httpx's default
+
+
+@pytest.mark.asyncio
+async def test_control_plane_clients_share_http2_pool_by_origin_and_api_key():
+    from archil._http import _Transport
+
+    first = _Transport("https://control.example.test/api", "key-shared", None)
+    second = _Transport("https://control.example.test/other-path", "shared", None)
+    different_credential = _Transport("https://control.example.test", "key-other", None)
+    different_origin = _Transport("https://other-control.example.test", "key-shared", None)
+
+    shared_client = first._cp_client()
+    assert second._cp_client() is shared_client
+    assert different_credential._cp_client() is not shared_client
+    assert different_origin._cp_client() is not shared_client
+
+    # Releasing one owner must not close a pool that another Archil instance is
+    # still using; the final owner closes it.
+    await first.aclose()
+    assert not shared_client.is_closed
+    await second.aclose()
+    assert shared_client.is_closed
+
+    await different_credential.aclose()
+    await different_origin.aclose()
