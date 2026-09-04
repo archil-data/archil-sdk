@@ -1,5 +1,6 @@
 import createClientDefault, { type Client } from "openapi-fetch";
 import type { paths } from "@archildata/api-types";
+import type { Dispatcher } from "undici";
 import { ArchilApiError } from "./errors.js";
 import { resolveBaseUrl } from "./regions.js";
 import { USER_AGENT } from "./version.js";
@@ -23,12 +24,73 @@ export interface ApiClientOptions {
   baseUrl?: string;
 }
 
+function isNodeRuntime(): boolean {
+  return typeof process !== "undefined" && typeof process.versions?.node === "string";
+}
+
+// Begin resolving the Node transport as soon as the SDK module loads, just as
+// a static Node import would. Keeping the specifier non-literal preserves the
+// browser build, while eager resolution keeps module-loading work out of the
+// first API request's latency.
+const undiciSpecifier = "undici";
+const undiciModule = isNodeRuntime()
+  ? import(undiciSpecifier) as Promise<typeof import("undici")>
+  : undefined;
+
+// Every Archil instance used to delegate to Node's default global fetch
+// dispatcher. That dispatcher currently negotiates HTTP/1.1, even when the
+// control plane advertises HTTP/2, and a burst of independently constructed
+// clients therefore creates substantial connection pressure. Keep one
+// HTTP/2-capable dispatcher per control-plane origin and credential, shared by
+// every client in this JavaScript process.
+const sharedDispatchers = new Map<string, Promise<Dispatcher>>();
+
+function dispatcherKey(baseUrl: string, apiKey: string): string {
+  return `${new URL(baseUrl).origin}\0${apiKey}`;
+}
+
+function getSharedDispatcher(baseUrl: string, apiKey: string): Promise<Dispatcher> {
+  const key = dispatcherKey(baseUrl, apiKey);
+  const existing = sharedDispatchers.get(key);
+  if (existing) return existing;
+
+  const dispatcher = (async () => {
+    if (!undiciModule) throw new Error("The pooled control-plane transport requires Node.js");
+    const { Agent } = await undiciModule;
+    return new Agent({
+      allowH2: true,
+      connections: 100,
+      keepAliveTimeout: 60_000,
+      keepAliveMaxTimeout: 600_000,
+    });
+  })();
+
+  sharedDispatchers.set(key, dispatcher);
+  void dispatcher.catch(() => {
+    // A transient module/initialization failure should not poison this pool
+    // key permanently; let the next request retry initialization.
+    if (sharedDispatchers.get(key) === dispatcher) sharedDispatchers.delete(key);
+  });
+  return dispatcher;
+}
+
+function createPooledFetch(baseUrl: string, apiKey: string): ((request: Request) => Promise<Response>) | undefined {
+  if (!isNodeRuntime()) return undefined;
+
+  return async (request: Request): Promise<Response> => {
+    const dispatcher = await getSharedDispatcher(baseUrl, apiKey);
+    return globalThis.fetch(request, { dispatcher } as RequestInit);
+  };
+}
+
 export function createApiClient(opts: ApiClientOptions): ApiClient {
   const baseUrl = opts.baseUrl ?? resolveBaseUrl(opts.region);
+  const apiKey = `key-${opts.apiKey.replace(/^key-/, '')}`;
   return createClient<paths>({
     baseUrl,
+    fetch: createPooledFetch(baseUrl, apiKey),
     headers: {
-      Authorization: `key-${opts.apiKey.replace(/^key-/, '')}`,
+      Authorization: apiKey,
       // Identifies the JS SDK (and its version) to the control plane. Honored
       // by Node's fetch; browsers treat User-Agent as a forbidden header and
       // drop it, which is fine — the SDK's primary use is server-side.

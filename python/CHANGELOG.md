@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Share HTTP/2 control-plane connections across clients with matching origins and credentials, with up to 100 connections per shared pool.
+
 ## 0.12.1
 
 - Add typed outbound HTTPS header transformations for sandbox credential brokering.
