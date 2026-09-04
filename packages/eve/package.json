@@ -1,6 +1,6 @@
 {
   "name": "@archildata/eve",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "description": "Archil filesystem adapter for eve",
   "keywords": [
     "archil",

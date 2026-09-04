@@ -1,5 +1,14 @@
 # @archildata/sqlite
 
+## 0.0.11
+
+### Patch Changes
+
+- Updated dependencies [763c659]
+- Updated dependencies [dc930d0]
+- Updated dependencies [aa5728c]
+  - disk@1.1.1
+
 ## 0.0.10
 
 ### Patch Changes
