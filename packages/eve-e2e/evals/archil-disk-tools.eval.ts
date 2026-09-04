@@ -1,8 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { Archil, type Disk } from "disk";
+import type { Disk } from "disk";
 import { defineEval } from "eve/evals";
 import type { EveEvalContext, EveEvalTurn } from "eve/evals";
 import { includes, satisfies } from "eve/evals/expect";
+
+// Keep the workspace package external; a literal import makes Eve bundle
+// disk and split the authored module on its runtime Undici import.
+function importPackage<T>(specifier: string): Promise<T> {
+  return import(specifier) as Promise<T>;
+}
+
+const { Archil } = await importPackage<typeof import("disk")>("disk");
 
 const seedText = "archil account review seed\n";
 const inventoryCsv = `item,quantity,unit_price
