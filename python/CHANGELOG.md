@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.2
 
 - Share HTTP/2 control-plane connections across clients with matching origins and credentials, with up to 100 connections per shared pool.
 
