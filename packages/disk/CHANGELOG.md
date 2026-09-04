@@ -1,5 +1,13 @@
 # disk
 
+## 1.1.1
+
+### Patch Changes
+
+- 763c659: Add typed outbound HTTPS header transformations for sandbox credential brokering.
+- dc930d0: Retry transient sandbox control-plane and process WebSocket connection failures.
+- aa5728c: Share HTTP/2 control-plane connections across SDK clients with matching origins and credentials, with up to 100 connections per shared pool.
+
 ## 1.1.0
 
 ### Minor Changes
