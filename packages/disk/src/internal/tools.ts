@@ -5,8 +5,9 @@ import { toSegments } from "../paths.js";
 
 /** What the bound tools operate on: a {@link FileSystem} plus the presentation
  * bits the agent layer adds on top — a layout hint appended to each tool's
- * description, and the container path the disks mount at (so `run_bash`'s working
- * directory lines up with the paths the file tools use). */
+ * description, and the container path tool-facing paths are resolved against.
+ * `execRoot` is not `run_bash`'s mount root: the disks sit *under* it, so the
+ * layout hint has to spell out the /mnt/archil paths a shell actually sees. */
 export interface ToolContext {
   fs: FileSystem;
   layoutHint: string;
@@ -30,20 +31,24 @@ export function buildContext(fs: FileSystem): ToolContext {
   const withNames = fs as { diskNames?: () => string[] };
   if (typeof withNames.diskNames === "function") {
     const names = withNames.diskNames();
-    const dirs = names.map((n) => `/${n}/…`).join(", ");
+    const dirs = names.map((n) => `/mnt/archil/${n}`).join(", ");
     const example = names[0] ?? "data";
     return {
       fs,
       execRoot: "/mnt/archil",
       layoutHint:
-        `Files live on these disks, each a top-level directory: ${dirs}. ` +
-        `Use absolute paths like /${example}/reports/q1.csv.`,
+        `Your disks are mounted at /mnt/archil, one directory each: ${dirs}. ` +
+        `Use those absolute paths in every tool, run_bash included — e.g. /mnt/archil/${example}/reports/q1.csv. ` +
+        `Nothing written outside /mnt/archil is kept once a run_bash command returns.`,
     };
   }
   return {
     fs,
     execRoot: "/mnt",
-    layoutHint: "Files live under / (the disk root). Use absolute paths like /reports/q1.csv.",
+    layoutHint:
+      "Your disk is mounted at /mnt/archil in the sandbox. These file tools address it from its root, " +
+      "so /reports/q1.csv here is /mnt/archil/reports/q1.csv in run_bash — write the /mnt/archil form in " +
+      "bash commands. Nothing written outside /mnt/archil is kept once a run_bash command returns.",
   };
 }
 
@@ -325,12 +330,16 @@ const SPECS = [
     name: "run_bash",
     description:
       "Run a bash command in an ephemeral sandbox with the filesystem mounted. " +
-      "The working directory is the filesystem root, so paths match the other " +
-      "tools. Returns the exit code, stdout, and stderr.",
+      "Address files by the absolute /mnt/archil paths described below; the " +
+      "working directory is the directory the mounts sit in, not the filesystem " +
+      "root. The container is discarded when the command returns, so install a " +
+      "tool and use it in the same command unless you install it under " +
+      "/mnt/archil. Returns the exit code, stdout, and stderr.",
     schema: z.object({ command: z.string().describe("The bash command to run.") }),
     async handler(ctx, args) {
-      // Run from the mount root so a shell-relative path matches what the file
-      // tools see (the disks live under execRoot in the exec container).
+      // Start the shell at execRoot. The disks are mounted one level below it,
+      // so a bare relative path here is *not* on a disk — the layout hint tells
+      // the model to use absolute /mnt/archil paths instead.
       const result = await ctx.fs.exec(`cd ${ctx.execRoot} && ${args.command}`);
       return {
         exitCode: result.exitCode,
