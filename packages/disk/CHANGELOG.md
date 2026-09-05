@@ -1,5 +1,11 @@
 # disk
 
+## 1.1.2
+
+### Patch Changes
+
+- 3a8b100: Add `client.disks.exec(diskId, command)` for callers that already know the disk exists and do not need to fetch its metadata before execution.
+
 ## 1.1.1
 
 ### Patch Changes
