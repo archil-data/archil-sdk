@@ -1,6 +1,6 @@
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapPage } from "./client.js";
-import { Disk } from "./disk.js";
+import { Disk, type ExecResult } from "./disk.js";
 import type { AuthorizedUser, CreateDiskRequest, DiskResponse } from "./types.js";
 
 export interface ListDisksOptions {
@@ -136,5 +136,19 @@ export class Disks {
       tokenIdentifier: tokenUser?.identifier ?? null,
       authorizedUsers,
     };
+  }
+
+  /**
+   * Execute a command on a disk that is already known to exist. Accepts the
+   * disk ID directly so callers that do not need its metadata can execute
+   * without fetching the disk first.
+   */
+  async exec(id: string, command: string): Promise<ExecResult> {
+    return unwrap<ExecResult>(
+      this._client.POST("/api/disks/{id}/exec", {
+        params: { path: { id } },
+        body: { command },
+      }),
+    );
   }
 }
