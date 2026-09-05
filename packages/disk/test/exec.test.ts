@@ -60,6 +60,50 @@ test("exec forwards multi-disk mount options", async () => {
   }
 });
 
+test("disks.exec runs against an id without fetching the disk", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ method: string; pathname: string; body: unknown }> = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const req = input instanceof Request ? input : new Request(input, init);
+    requests.push({
+      method: req.method,
+      pathname: new URL(req.url).pathname,
+      body: req.method === "POST" ? JSON.parse(await req.text()) : undefined,
+    });
+    return json({
+      success: true,
+      data: {
+        exitCode: 0,
+        stdout: "hello\n",
+        stderr: "",
+        timing: { totalMs: 12, queueMs: 3, executeMs: 9 },
+      },
+    });
+  };
+
+  try {
+    const archil = new Archil({
+      apiKey: "key-test",
+      region: "aws-us-east-1",
+      baseUrl: "http://cp.test",
+      s3BaseUrl: "http://s3.test",
+    });
+
+    const result = await archil.disks.exec("dsk-existing", "printf hello");
+
+    assert.equal(result.stdout, "hello\n");
+    assert.deepEqual(requests, [
+      {
+        method: "POST",
+        pathname: "/api/disks/dsk-existing/exec",
+        body: { command: "printf hello" },
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
