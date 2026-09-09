@@ -337,6 +337,62 @@ class SandboxNetwork:
 
 
 @dataclass(frozen=True)
+class SandboxMountSpec:
+    """One disk to mount inside a sandbox on every boot. ``path`` is the absolute
+    guest directory; omit it only for a sole mount, which lands at ``/mnt/archil``.
+    The remaining options match ``ExecMountSpec``."""
+
+    disk: object  # a Disk or a disk-id string
+    path: Optional[str] = None
+    subdirectory: Optional[str] = None
+    read_only: bool = False
+    conditional: bool = False
+    queue_ms: Optional[int] = None
+    checkout_paths: Optional[list[str]] = None
+
+    def to_json(self) -> dict:
+        disk_id = self.disk if isinstance(self.disk, str) else self.disk.id  # type: ignore[attr-defined]
+        return {
+            key: value
+            for key, value in {
+                "disk_id": disk_id,
+                "path": self.path,
+                "subdirectory": self.subdirectory,
+                "read_only": self.read_only,
+                "conditional": self.conditional,
+                "queue_ms": self.queue_ms,
+                "checkout_paths": self.checkout_paths,
+            }.items()
+            if value is not None
+        }
+
+
+@dataclass(frozen=True)
+class SandboxMount:
+    """An Archil disk mounted inside a sandbox, as persisted at creation."""
+
+    disk_id: str
+    path: str
+    read_only: bool = False
+    conditional: bool = False
+    subdirectory: Optional[str] = None
+    queue_ms: Optional[int] = None
+    checkout_paths: Optional[list[str]] = None
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxMount":
+        return cls(
+            disk_id=d["disk_id"],
+            path=d.get("path") or "/mnt/archil",
+            read_only=d.get("read_only", False),
+            conditional=d.get("conditional", False),
+            subdirectory=d.get("subdirectory"),
+            queue_ms=d.get("queue_ms"),
+            checkout_paths=d.get("checkout_paths"),
+        )
+
+
+@dataclass(frozen=True)
 class SandboxData:
     id: str
     name: str
@@ -350,6 +406,7 @@ class SandboxData:
     last_active_at: datetime
     platform: Optional[SandboxPlatform] = None
     endpoints: list[SandboxEndpoint] = field(default_factory=list)
+    mounts: list[SandboxMount] = field(default_factory=list)
     running_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
@@ -368,6 +425,7 @@ class SandboxData:
             base_image=d["base_image"],
             platform=d.get("platform"),
             endpoints=[SandboxEndpoint.from_json(endpoint) for endpoint in d.get("endpoints") or []],
+            mounts=[SandboxMount.from_json(mount) for mount in d.get("mounts") or []],
             created_at=_parse_datetime(d["created_at"]),
             running_at=_parse_datetime(d["running_at"]) if d.get("running_at") else None,
             finished_at=_parse_datetime(d["finished_at"]) if d.get("finished_at") else None,

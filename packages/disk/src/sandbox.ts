@@ -19,8 +19,46 @@ export type SandboxEgressTransform = components["schemas"]["SandboxEgressTransfo
 
 export type SandboxNetwork = components["schemas"]["SandboxNetwork"];
 
+/** @internal Local until @archildata/api-types ships the SandboxMount schema. */
+export interface SandboxMountWire {
+  disk_id: string;
+  path?: string;
+  subdirectory?: string;
+  read_only?: boolean;
+  conditional?: boolean;
+  queue_ms?: number;
+  checkout_paths?: string[];
+}
+
 /** @internal */
-export type SandboxWire = components["schemas"]["Sandbox"];
+export type SandboxWire = components["schemas"]["Sandbox"] & {
+  mounts?: SandboxMountWire[];
+};
+
+/** An Archil disk mounted inside the sandbox, as persisted at creation. */
+export interface SandboxMount {
+  diskId: string;
+  /** Absolute guest directory the disk is mounted at. */
+  path: string;
+  subdirectory?: string;
+  readOnly: boolean;
+  conditional: boolean;
+  queueMs?: number;
+  checkoutPaths?: string[];
+}
+
+function sandboxMountFromWire(mount: SandboxMountWire): SandboxMount {
+  const out: SandboxMount = {
+    diskId: mount.disk_id,
+    path: mount.path ?? "/mnt/archil",
+    readOnly: mount.read_only ?? false,
+    conditional: mount.conditional ?? false,
+  };
+  if (mount.subdirectory !== undefined) out.subdirectory = mount.subdirectory;
+  if (mount.queue_ms !== undefined) out.queueMs = mount.queue_ms;
+  if (mount.checkout_paths !== undefined) out.checkoutPaths = [...mount.checkout_paths];
+  return out;
+}
 
 export type SandboxStatus = components["schemas"]["SandboxState"];
 
@@ -41,6 +79,8 @@ export interface SandboxResponse {
   /** Maximum concurrently attached process sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
+  /** Disks mounted inside the guest on every boot. */
+  mounts: SandboxMount[];
   createdAt: Date;
   runningAt?: Date;
   finishedAt?: Date;
@@ -98,6 +138,7 @@ export class Sandbox {
   maxTtlSeconds!: number;
   maxConcurrentExecs!: number;
   endpoints?: SandboxEndpoint[];
+  mounts!: SandboxMount[];
   createdAt!: Date;
   runningAt?: Date;
   finishedAt?: Date;
@@ -130,6 +171,7 @@ export class Sandbox {
     this.maxTtlSeconds = data.max_ttl_seconds;
     this.maxConcurrentExecs = data.max_concurrent_execs;
     this.endpoints = data.endpoints?.map((endpoint) => ({ ...endpoint }));
+    this.mounts = (data.mounts ?? []).map(sandboxMountFromWire);
     this.createdAt = new Date(data.created_at);
     this.runningAt = data.running_at ? new Date(data.running_at) : undefined;
     this.finishedAt = data.finished_at ? new Date(data.finished_at) : undefined;
@@ -151,6 +193,7 @@ export class Sandbox {
       maxTtlSeconds: this.maxTtlSeconds,
       maxConcurrentExecs: this.maxConcurrentExecs,
       endpoints: this.endpoints?.map((endpoint) => ({ ...endpoint })),
+      mounts: this.mounts.map((mount) => ({ ...mount })),
       createdAt: this.createdAt,
       runningAt: this.runningAt,
       finishedAt: this.finishedAt,

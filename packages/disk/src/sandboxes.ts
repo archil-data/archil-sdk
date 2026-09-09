@@ -3,13 +3,24 @@ import type { ApiClient } from "./client.js";
 import { unwrap } from "./client.js";
 import { retryApiRequest } from "./retry.js";
 import type { Disk } from "./disk.js";
+import type { ExecMountSpec } from "./archil.js";
 import {
   Sandbox,
+  type SandboxMountWire,
   type SandboxNetwork,
   type SandboxWire,
   type SandboxWaitOptions,
   waitForSandboxStart,
 } from "./sandbox.js";
+
+/**
+ * One Archil disk to mount inside a sandbox. `path` is the absolute guest
+ * directory; it may be omitted only for a sole mount, which then lands at
+ * `/mnt/archil`. The remaining options match `ExecMountSpec`.
+ */
+export interface SandboxMountSpec extends ExecMountSpec {
+  path?: string;
+}
 
 export interface CreateSandboxRequest {
   /** Name for the sandbox. The server generates one when omitted. */
@@ -34,6 +45,24 @@ export interface CreateSandboxRequest {
   maxConcurrentExecs?: number;
   /** Creation-time network policy. Egress is unrestricted when omitted. */
   network?: SandboxNetwork;
+  /**
+   * Disks mounted inside the guest on every boot. Fixed for the sandbox's
+   * lifetime and inherited by forks.
+   */
+  mounts?: SandboxMountSpec[];
+}
+
+function sandboxMountWire(mount: SandboxMountSpec): SandboxMountWire {
+  const entry: SandboxMountWire = {
+    disk_id: typeof mount.disk === "string" ? mount.disk : mount.disk.id,
+    read_only: mount.readOnly ?? false,
+    conditional: mount.conditional ?? false,
+  };
+  if (mount.path !== undefined) entry.path = mount.path;
+  if (mount.subdirectory !== undefined) entry.subdirectory = mount.subdirectory;
+  if (mount.queueMs !== undefined) entry.queue_ms = mount.queueMs;
+  if (mount.checkoutPaths !== undefined) entry.checkout_paths = mount.checkoutPaths;
+  return entry;
 }
 
 export interface ListSandboxesOptions {
@@ -94,6 +123,7 @@ export class Sandboxes {
       max_ttl_seconds: request.maxTtlSeconds,
       max_concurrent_execs: request.maxConcurrentExecs,
       network: request.network,
+      ...(request.mounts && { mounts: request.mounts.map(sandboxMountWire) }),
     };
     const data = await unwrap(
       retryApiRequest(

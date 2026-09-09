@@ -13,6 +13,8 @@ from archil import (
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
+    SandboxMount,
+    SandboxMountSpec,
     SandboxNetwork,
     SandboxProcess,
     SandboxProcessOutput,
@@ -417,6 +419,67 @@ def test_create_and_list_sandboxes(archil, router):
     assert router.requests[1].query == {"filesystem": "dsk-1"}
 
 
+def test_create_sandbox_with_mounts(archil, router):
+    mounts_json = [
+        {"disk_id": "dsk-1", "path": "/mnt/archil"},
+        {
+            "disk_id": "dsk-2",
+            "path": "/workspace",
+            "subdirectory": "repo",
+            "read_only": False,
+            "conditional": True,
+            "queue_ms": 5000,
+            "checkout_paths": ["src"],
+        },
+    ]
+    router.set(lambda request: ok_envelope(sandbox_json(mounts=mounts_json)))
+
+    class FakeDisk:
+        id = "dsk-2"
+
+    sandbox = archil.sandboxes.create(
+        mounts=[
+            SandboxMountSpec(disk="dsk-1"),
+            SandboxMountSpec(
+                disk=FakeDisk(),
+                path="/workspace",
+                subdirectory="repo",
+                conditional=True,
+                queue_ms=5000,
+                checkout_paths=["src"],
+            ),
+            SandboxMountSpec(disk="dsk-3", path="/mnt/models", read_only=True),
+        ],
+    )
+
+    assert router.requests[0].json == {
+        "mounts": [
+            {"disk_id": "dsk-1", "read_only": False, "conditional": False},
+            {
+                "disk_id": "dsk-2",
+                "path": "/workspace",
+                "subdirectory": "repo",
+                "read_only": False,
+                "conditional": True,
+                "queue_ms": 5000,
+                "checkout_paths": ["src"],
+            },
+            {"disk_id": "dsk-3", "path": "/mnt/models", "read_only": True, "conditional": False},
+        ]
+    }
+    assert sandbox.mounts == [
+        SandboxMount(disk_id="dsk-1", path="/mnt/archil"),
+        SandboxMount(
+            disk_id="dsk-2",
+            path="/workspace",
+            conditional=True,
+            subdirectory="repo",
+            queue_ms=5000,
+            checkout_paths=["src"],
+        ),
+    ]
+
+
 def test_create_surfaces_terminal_start_failure(archil, router, monkeypatch):
     import archil._sandbox as sandbox_module
 
@@ -640,6 +703,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "max_ttl_seconds": None,
                 "max_concurrent_execs": None,
                 "network": network,
+                "mounts": None,
                 "wait": False,
             },
         ),

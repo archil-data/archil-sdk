@@ -17,11 +17,12 @@ export { Tokens } from "./tokens.js";
 export type { ListTokensOptions } from "./tokens.js";
 
 export { Sandboxes } from "./sandboxes.js";
-export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
+export type { CreateSandboxRequest, ListSandboxesOptions, SandboxMountSpec } from "./sandboxes.js";
 
 export { Sandbox } from "./sandbox.js";
 export type {
   SandboxEndpoint,
+  SandboxMount,
   SandboxEgressPolicy,
   SandboxEgressRule,
   SandboxEgressTransform,
