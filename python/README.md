@@ -72,6 +72,26 @@ all_sandboxes = archil.list_sandboxes()
 using_disk = archil.list_sandboxes(disk="dsk-abc123")
 ```
 
+Archil disks can be mounted inside the sandbox at creation. They are mounted on every
+boot, persist across stop/start and pause/resume, and are inherited by forks:
+
+```python
+workspace = archil.create_sandbox(
+    mounts=[
+        archil.SandboxMountSpec(disk="dsk-abc123"),  # mounted at /mnt/archil
+        archil.SandboxMountSpec(disk=models, path="/mnt/models", subdirectory="llama", read_only=True),
+        archil.SandboxMountSpec(disk=shared, path="/workspace", conditional=True),
+    ],
+)
+print([mount.path for mount in workspace.mounts])
+```
+
+`path` is required when more than one disk is mounted. Options: `read_only`, `conditional`
+(concurrent writers without delegation checkouts), `subdirectory`, and `queue_ms` (how long a
+plain mount waits for the disk's exclusive root delegation). A plain read-write mount holds
+that delegation for as long as the sandbox does, including while paused, so use `read_only`
+or `conditional` for disks that other clients or forks also write.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```python
