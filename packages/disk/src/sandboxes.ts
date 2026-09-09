@@ -5,9 +5,11 @@ import { retryApiRequest } from "./retry.js";
 import type { Disk } from "./disk.js";
 import {
   Sandbox,
+  type SandboxMountSpec,
   type SandboxNetwork,
   type SandboxWire,
   type SandboxWaitOptions,
+  sandboxMountWire,
   waitForSandboxStart,
 } from "./sandbox.js";
 
@@ -34,6 +36,12 @@ export interface CreateSandboxRequest {
   maxConcurrentExecs?: number;
   /** Creation-time network policy. Egress is unrestricted when omitted. */
   network?: SandboxNetwork;
+  /**
+   * Disks mounted inside the guest for the first session; `sandbox.start()`
+   * can replace them later. A sandbox with mounts must be stopped before it
+   * is forked.
+   */
+  mounts?: SandboxMountSpec[];
 }
 
 export interface ListSandboxesOptions {
@@ -94,6 +102,7 @@ export class Sandboxes {
       max_ttl_seconds: request.maxTtlSeconds,
       max_concurrent_execs: request.maxConcurrentExecs,
       network: request.network,
+      ...(request.mounts && { mounts: request.mounts.map(sandboxMountWire) }),
     };
     const data = await unwrap(
       retryApiRequest(
