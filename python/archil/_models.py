@@ -354,6 +354,7 @@ class SandboxData:
     finished_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     exit_reason: Optional[str] = None
+    checkpoint: Optional[str] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "SandboxData":
@@ -374,6 +375,7 @@ class SandboxData:
             last_active_at=_parse_datetime(d["last_active_at"]),
             expires_at=_parse_datetime(d["expires_at"]) if d.get("expires_at") else None,
             exit_reason=d.get("exit_reason"),
+            checkpoint=d.get("checkpoint"),
         )
 
 

@@ -184,6 +184,10 @@ default. The server handles the initial wait; if its wait budget expires first,
 the SDK continues polling. Pass `wait=False` to return as soon as the lifecycle
 operation is accepted. `sandbox.exec()` always waits for process exit.
 
+`fork` pauses a running sandbox while the snapshot is taken and resumes it once
+the fork is accepted. A paused or stopped sandbox is forked in place and left as
+it is.
+
 ### Delegations
 
 A delegation grants a client exclusive write access to an inode on a shared
