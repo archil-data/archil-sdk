@@ -57,6 +57,10 @@ class _Sandbox:
         return self._data.max_ttl_seconds
 
     @property
+    def idle_ttl_seconds(self) -> int:
+        return self._data.idle_ttl_seconds
+
+    @property
     def max_concurrent_execs(self) -> int:
         return self._data.max_concurrent_execs
 
@@ -87,10 +91,6 @@ class _Sandbox:
     @property
     def last_active_at(self):
         return self._data.last_active_at
-
-    @property
-    def expires_at(self):
-        return self._data.expires_at
 
     @property
     def exit_reason(self) -> Optional[str]:
@@ -192,6 +192,21 @@ class _Sandbox:
             retry="transient",
         )
         return SandboxNetwork.from_json(data)
+
+    async def set_timeout(self, timeout: Optional[int] = None, *, idle_ttl_seconds: Optional[int] = None) -> "_Sandbox":
+        body = {
+            key: value
+            for key, value in {"timeout": timeout, "idle_ttl_seconds": idle_ttl_seconds}.items()
+            if value is not None
+        }
+        data = await self._transport.request_json(
+            "POST",
+            f"/api/sandboxes/{self.id}/timeout",
+            json=body,
+            retry="transient",
+        )
+        self._data = SandboxData.from_json(data)
+        return self
 
     async def delete(self) -> None:
         await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}", retry="transient")

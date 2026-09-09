@@ -1174,6 +1174,10 @@ class Sandbox:
         ...
 
     @property
+    def idle_ttl_seconds(self) -> int:
+        ...
+
+    @property
     def max_concurrent_execs(self) -> int:
         ...
 
@@ -1203,10 +1207,6 @@ class Sandbox:
 
     @property
     def last_active_at(self):
-        ...
-
-    @property
-    def expires_at(self):
         ...
 
     @property
@@ -1320,6 +1320,15 @@ class Sandbox:
 
     update_network: __update_network_spec
 
+    class __set_timeout_spec(typing_extensions.Protocol):
+        def __call__(self, /, timeout: int | None = None, *, idle_ttl_seconds: int | None = None) -> Sandbox:
+            ...
+
+        async def aio(self, /, timeout: int | None = None, *, idle_ttl_seconds: int | None = None) -> Sandbox:
+            ...
+
+    set_timeout: __set_timeout_spec
+
     class __delete_spec(typing_extensions.Protocol):
         def __call__(self, /) -> None:
             ...
@@ -1354,10 +1363,10 @@ class Sandboxes:
     get: __get_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, wait: bool = True) -> Sandbox:
+        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, wait: bool = True) -> Sandbox:
             ...
 
-        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, wait: bool = True) -> Sandbox:
+        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, wait: bool = True) -> Sandbox:
             ...
 
     create: __create_spec

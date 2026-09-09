@@ -352,8 +352,8 @@ class SandboxData:
     endpoints: list[SandboxEndpoint] = field(default_factory=list)
     running_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
     exit_reason: Optional[str] = None
+    idle_ttl_seconds: int = 0
 
     @classmethod
     def from_json(cls, d: dict) -> "SandboxData":
@@ -364,6 +364,7 @@ class SandboxData:
             vcpu_count=d["vcpu_count"],
             mem_size_mib=d["mem_size_mib"],
             max_ttl_seconds=d["max_ttl_seconds"],
+            idle_ttl_seconds=d.get("idle_ttl_seconds", 0),
             max_concurrent_execs=d["max_concurrent_execs"],
             base_image=d["base_image"],
             platform=d.get("platform"),
@@ -372,7 +373,6 @@ class SandboxData:
             running_at=_parse_datetime(d["running_at"]) if d.get("running_at") else None,
             finished_at=_parse_datetime(d["finished_at"]) if d.get("finished_at") else None,
             last_active_at=_parse_datetime(d["last_active_at"]),
-            expires_at=_parse_datetime(d["expires_at"]) if d.get("expires_at") else None,
             exit_reason=d.get("exit_reason"),
         )
 

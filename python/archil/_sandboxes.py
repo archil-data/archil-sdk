@@ -33,6 +33,7 @@ class _Sandboxes:
         base_image: Optional[str] = None,
         env: Optional[dict[str, str]] = None,
         max_ttl_seconds: Optional[int] = None,
+        idle_ttl_seconds: Optional[int] = None,
         max_concurrent_execs: Optional[int] = None,
         network: Optional[SandboxNetwork] = None,
         wait: bool = True,
@@ -46,6 +47,7 @@ class _Sandboxes:
                 "base_image": base_image,
                 "env": env,
                 "max_ttl_seconds": max_ttl_seconds,
+                "idle_ttl_seconds": idle_ttl_seconds,
                 "max_concurrent_execs": max_concurrent_execs,
                 "network": network.to_json() if network is not None else None,
             }.items()

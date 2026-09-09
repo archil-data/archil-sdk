@@ -20,7 +20,9 @@ export type SandboxEgressTransform = components["schemas"]["SandboxEgressTransfo
 export type SandboxNetwork = components["schemas"]["SandboxNetwork"];
 
 /** @internal */
-export type SandboxWire = components["schemas"]["Sandbox"];
+export type SandboxWire = components["schemas"]["Sandbox"] & {
+  idle_ttl_seconds?: number;
+};
 
 export type SandboxStatus = components["schemas"]["SandboxState"];
 
@@ -38,6 +40,7 @@ export interface SandboxResponse {
   baseImage: string;
   platform?: "arm64" | "amd64";
   maxTtlSeconds: number;
+  idleTtlSeconds: number;
   /** Maximum concurrently attached process sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
@@ -45,7 +48,6 @@ export interface SandboxResponse {
   runningAt?: Date;
   finishedAt?: Date;
   lastActiveAt: Date;
-  expiresAt?: Date;
   exitReason?: string;
 }
 
@@ -62,7 +64,14 @@ export interface SandboxForkOptions extends SandboxWaitOptions {
   name?: string;
 }
 
-type NetworkClient = {
+export interface SandboxTimeoutOptions {
+  /** Hard lifetime in seconds. Omit to leave its deadline unchanged. */
+  timeoutSeconds?: number;
+  /** Seconds without a direct process connection. Zero disables idle expiry; omit to leave unchanged. */
+  idleTtlSeconds?: number;
+}
+
+type SandboxExtensionClient = {
   GET(
     path: "/api/sandboxes/{sid}/network",
     options: { params: { path: { sid: string } } },
@@ -76,6 +85,17 @@ type NetworkClient = {
     options: { params: { path: { sid: string } }; body: SandboxNetwork },
   ): Promise<{
     data?: { success: boolean; data?: SandboxNetwork; error?: string };
+    error?: unknown;
+    response: Response;
+  }>;
+  POST(
+    path: "/api/sandboxes/{sid}/timeout",
+    options: {
+      params: { path: { sid: string } };
+      body: { timeout?: number; idle_ttl_seconds?: number };
+    },
+  ): Promise<{
+    data?: { success: boolean; data?: SandboxWire; error?: string };
     error?: unknown;
     response: Response;
   }>;
@@ -96,13 +116,13 @@ export class Sandbox {
   baseImage!: string;
   platform?: "arm64" | "amd64";
   maxTtlSeconds!: number;
+  idleTtlSeconds!: number;
   maxConcurrentExecs!: number;
   endpoints?: SandboxEndpoint[];
   createdAt!: Date;
   runningAt?: Date;
   finishedAt?: Date;
   lastActiveAt!: Date;
-  expiresAt?: Date;
   exitReason?: string;
   readonly processes: SandboxProcesses;
   readonly files: SandboxFiles;
@@ -128,13 +148,13 @@ export class Sandbox {
     this.baseImage = data.base_image;
     this.platform = data.platform;
     this.maxTtlSeconds = data.max_ttl_seconds;
+    this.idleTtlSeconds = data.idle_ttl_seconds ?? 0;
     this.maxConcurrentExecs = data.max_concurrent_execs;
     this.endpoints = data.endpoints?.map((endpoint) => ({ ...endpoint }));
     this.createdAt = new Date(data.created_at);
     this.runningAt = data.running_at ? new Date(data.running_at) : undefined;
     this.finishedAt = data.finished_at ? new Date(data.finished_at) : undefined;
     this.lastActiveAt = new Date(data.last_active_at);
-    this.expiresAt = data.expires_at ? new Date(data.expires_at) : undefined;
     this.exitReason = data.exit_reason;
     return this;
   }
@@ -149,13 +169,13 @@ export class Sandbox {
       baseImage: this.baseImage,
       platform: this.platform,
       maxTtlSeconds: this.maxTtlSeconds,
+      idleTtlSeconds: this.idleTtlSeconds,
       maxConcurrentExecs: this.maxConcurrentExecs,
       endpoints: this.endpoints?.map((endpoint) => ({ ...endpoint })),
       createdAt: this.createdAt,
       runningAt: this.runningAt,
       finishedAt: this.finishedAt,
       lastActiveAt: this.lastActiveAt,
-      expiresAt: this.expiresAt,
       exitReason: this.exitReason,
     };
   }
@@ -262,7 +282,7 @@ export class Sandbox {
   /** Get this running sandbox's effective network policy. */
   async getNetwork(): Promise<SandboxNetwork> {
     // The endpoint is newer than the minimum @archildata/api-types version.
-    const client = this._client as unknown as NetworkClient;
+    const client = this._client as unknown as SandboxExtensionClient;
     return unwrap(
       retryApiRequest(
         () =>
@@ -277,7 +297,7 @@ export class Sandbox {
   /** Replace this running sandbox's complete network policy and return the effective policy. */
   async updateNetwork(network: SandboxNetwork): Promise<SandboxNetwork> {
     // The endpoint is newer than the minimum @archildata/api-types version.
-    const client = this._client as unknown as NetworkClient;
+    const client = this._client as unknown as SandboxExtensionClient;
     return unwrap(
       retryApiRequest(
         () =>
@@ -288,6 +308,27 @@ export class Sandbox {
         "transient",
       ),
     );
+  }
+
+  /** Update either or both TTLs in seconds. Omitted settings remain unchanged. */
+  async setTimeout(timeout: number | SandboxTimeoutOptions): Promise<this> {
+    const options = typeof timeout === "number" ? { timeoutSeconds: timeout } : timeout;
+    // The endpoint is newer than the minimum @archildata/api-types version.
+    const client = this._client as unknown as SandboxExtensionClient;
+    const data = await unwrap(
+      retryApiRequest(
+        () =>
+          client.POST("/api/sandboxes/{sid}/timeout", {
+            params: { path: { sid: this.id } },
+            body: {
+              timeout: options.timeoutSeconds,
+              idle_ttl_seconds: options.idleTtlSeconds,
+            },
+          }),
+        "transient",
+      ),
+    );
+    return this._apply(data);
   }
 
   /** Delete this sandbox and its backing disk. */

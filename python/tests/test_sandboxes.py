@@ -222,6 +222,7 @@ def sandbox_json(status: str = "running", **overrides) -> dict:
         "base_image": "docker:29.7.1-dind",
         "platform": "amd64",
         "max_ttl_seconds": 3600,
+        "idle_ttl_seconds": 30,
         "max_concurrent_execs": 4,
         "endpoints": [{"port": 8080, "hostname": "8080.sbx.example.com"}],
         "created_at": NOW,
@@ -266,6 +267,7 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
     await sandbox.fork(wait=False)
     await sandbox.get_network()
     await sandbox.update_network(SandboxNetwork())
+    await sandbox.set_timeout(3600)
     await sandbox.delete()
 
     assert calls == [
@@ -280,6 +282,7 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
         ("POST", "/api/sandboxes/sbx-1/fork", "connect"),
         ("GET", "/api/sandboxes/sbx-1/network", "transient"),
         ("PUT", "/api/sandboxes/sbx-1/network", "transient"),
+        ("POST", "/api/sandboxes/sbx-1/timeout", "transient"),
         ("DELETE", "/api/sandboxes/sbx-1", "transient"),
     ]
 
@@ -375,6 +378,7 @@ def test_create_and_list_sandboxes(archil, router):
         base_image="docker:29.7.1-dind",
         env={"TRIAL": "1"},
         max_ttl_seconds=3600,
+        idle_ttl_seconds=30,
         max_concurrent_execs=4,
         network=SandboxNetwork(
             egress=SandboxEgressPolicy(
@@ -398,6 +402,7 @@ def test_create_and_list_sandboxes(archil, router):
     assert isinstance(sandbox, Sandbox)
     assert sandbox.id == "sbx-1"
     assert sandbox.platform == "amd64"
+    assert sandbox.idle_ttl_seconds == 30
     assert sandbox.endpoints[0].hostname == "8080.sbx.example.com"
     assert isinstance(sandbox.created_at, datetime)
     assert router.requests[0].query == {"wait": "true"}
@@ -408,6 +413,7 @@ def test_create_and_list_sandboxes(archil, router):
         "base_image": "docker:29.7.1-dind",
         "env": {"TRIAL": "1"},
         "max_ttl_seconds": 3600,
+        "idle_ttl_seconds": 30,
         "max_concurrent_execs": 4,
         "network": network_json,
     }
@@ -551,6 +557,81 @@ def test_get_and_update_network_use_active_runtime_policy(archil, router):
     assert router.requests[-1].json == {}
 
 
+@pytest.mark.parametrize("idle_ttl_seconds", [None, 0, 30])
+def test_create_serializes_idle_ttl(archil, router, idle_ttl_seconds):
+    router.set(lambda request: ok_envelope(sandbox_json()))
+    archil.sandboxes.create(idle_ttl_seconds=idle_ttl_seconds)
+    assert router.requests[-1].json == ({} if idle_ttl_seconds is None else {"idle_ttl_seconds": idle_ttl_seconds})
+
+
+def test_older_sandbox_response_defaults_idle_ttl_to_disabled(archil, router):
+    data = sandbox_json()
+    del data["idle_ttl_seconds"]
+    router.set(lambda request: ok_envelope(data))
+    assert archil.sandboxes.get("sbx-1").idle_ttl_seconds == 0
+
+
+@pytest.mark.parametrize("use_async", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize("body", [
+    {"timeout": 86400},
+    {"idle_ttl_seconds": 45},
+    {"idle_ttl_seconds": 0},
+    {"timeout": 86400, "idle_ttl_seconds": 45},
+])
+@pytest.mark.asyncio
+async def test_set_timeout_retries_and_refreshes_sandbox_fields(archil, router, body, use_async, monkeypatch):
+    import archil._http as http_module
+
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    attempts = 0
+    expires_at = "2026-08-15T12:00:00Z"
+    updated = sandbox_json(
+        max_ttl_seconds=body.get("timeout", 3600),
+        idle_ttl_seconds=body.get("idle_ttl_seconds", 30),
+        expires_at=expires_at,
+    )
+
+    def handler(request):
+        nonlocal attempts
+        if request.url.path.endswith("/timeout"):
+            attempts += 1
+            if attempts == 1:
+                raise httpx.ReadError("connection lost", request=request)
+            if attempts < 4:
+                return error_envelope(429 if attempts == 2 else 503, "unavailable")
+            return ok_envelope(updated)
+        return ok_envelope(sandbox_json())
+
+    router.set(handler)
+    sandbox = archil.sandboxes.get("sbx-1")
+
+    args = (body["timeout"],) if "timeout" in body else ()
+    kwargs = {"idle_ttl_seconds": body["idle_ttl_seconds"]} if "idle_ttl_seconds" in body else {}
+    result = await sandbox.set_timeout.aio(*args, **kwargs) if use_async else sandbox.set_timeout(*args, **kwargs)
+    assert result is sandbox
+    assert attempts == 4
+    assert sandbox.max_ttl_seconds == updated["max_ttl_seconds"]
+    assert sandbox.idle_ttl_seconds == updated["idle_ttl_seconds"]
+    assert not hasattr(sandbox, "expires_at")
+    assert router.requests[-1].method == "POST"
+    assert router.requests[-1].path == "/api/sandboxes/sbx-1/timeout"
+    assert router.requests[-1].json == body
+
+
+@pytest.mark.parametrize("status", [400, 409])
+def test_set_timeout_surfaces_errors_without_retrying_or_changing_fields(archil, router, status):
+    router.set(lambda request: ok_envelope(sandbox_json()))
+    sandbox = archil.sandboxes.get("sbx-1")
+    router.set(lambda request: error_envelope(status, "invalid TTL"))
+    request_count = len(router.requests)
+    with pytest.raises(ArchilApiError, match="invalid TTL") as caught:
+        sandbox.set_timeout(idle_ttl_seconds=-1)
+    assert caught.value.status == status
+    assert len(router.requests) == request_count + 1
+    assert sandbox.max_ttl_seconds == 3600
+    assert sandbox.idle_ttl_seconds == 30
+
+
 def test_empty_sandbox_list(archil, router):
     responses = iter([ok_envelope(None)])
     router.set(lambda request: next(responses))
@@ -625,7 +706,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
     )
 
     network = SandboxNetwork(egress=SandboxEgressPolicy(default="deny", allow=["github.com"]))
-    assert archil_module.create_sandbox(name="trial", network=network, wait=False) is expected
+    assert archil_module.create_sandbox(name="trial", idle_ttl_seconds=0, network=network, wait=False) is expected
     assert archil_module.list_sandboxes(disk="dsk-1") == [expected]
     assert archil_module.get_sandbox("sbx-1") is expected
     assert calls == [
@@ -638,6 +719,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "base_image": None,
                 "env": None,
                 "max_ttl_seconds": None,
+                "idle_ttl_seconds": 0,
                 "max_concurrent_execs": None,
                 "network": network,
                 "wait": False,

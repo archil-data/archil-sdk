@@ -34,9 +34,8 @@ export function formatSandboxList(sandboxes: Sandbox[], format: OutputFormat): s
       `${sandbox.memSizeMiB} MiB`,
       sandbox.baseImage,
       date(sandbox.lastActiveAt),
-      date(sandbox.expiresAt),
     ]),
-    ["id", "name", "status", "cpu", "memory", "image", "last active", "expires"],
+    ["id", "name", "status", "cpu", "memory", "image", "last active"],
   );
 }
 
@@ -51,12 +50,12 @@ export function formatSandbox(sandbox: Sandbox, format: OutputFormat): string {
     ["image", sandbox.baseImage],
     ["platform", sandbox.platform ?? ""],
     ["max TTL", `${sandbox.maxTtlSeconds} seconds`],
+    ["idle TTL", sandbox.idleTtlSeconds === 0 ? "disabled" : `${sandbox.idleTtlSeconds} seconds`],
     ["max concurrent processes", String(sandbox.maxConcurrentExecs)],
     ["created", date(sandbox.createdAt)],
     ["running", date(sandbox.runningAt)],
     ["finished", date(sandbox.finishedAt)],
     ["last active", date(sandbox.lastActiveAt)],
-    ["expires", date(sandbox.expiresAt)],
     ["exit reason", sandbox.exitReason ?? ""],
   ];
   for (const endpoint of sandbox.endpoints ?? []) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
-import type { ApiClient } from "../src/client.js";
+import { createApiClient, type ApiClient } from "../src/client.js";
+import { ArchilApiError } from "../src/errors.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess } from "../src/sandbox-process.js";
 import { Sandbox } from "../src/sandbox.js";
@@ -19,6 +20,7 @@ function sandboxWire(status: string = "pending", id: string = "0198-sandbox") {
     base_image: "ubuntu:26.04",
     platform: "arm64",
     max_ttl_seconds: 3600,
+    idle_ttl_seconds: 30,
     max_concurrent_execs: 8,
     endpoints: [{ port: 8080, hostname: "8080-sandbox.example.com" }],
     created_at: now,
@@ -139,13 +141,13 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     baseImage: "ubuntu:26.04",
     platform: "arm64",
     maxTtlSeconds: 3600,
+    idleTtlSeconds: 30,
     maxConcurrentExecs: 8,
     endpoints: [{ port: 8080, hostname: "8080-sandbox.example.com" }],
     createdAt: nowDate,
     runningAt: undefined,
     finishedAt: undefined,
     lastActiveAt: nowDate,
-    expiresAt: undefined,
     exitReason: undefined,
   });
 
@@ -156,6 +158,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     baseImage: "ubuntu:26.04",
     env: { NODE_ENV: "test" },
     maxTtlSeconds: 600,
+    idleTtlSeconds: 30,
     maxConcurrentExecs: 16,
     network: {
       egress: {
@@ -192,6 +195,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
           base_image: "ubuntu:26.04",
           env: { NODE_ENV: "test" },
           max_ttl_seconds: 600,
+          idle_ttl_seconds: 30,
           max_concurrent_execs: 16,
           network: {
             egress: {
@@ -236,7 +240,8 @@ test("sandbox snapshots expose API timestamps as Date objects", () => {
   assert.ok(sandbox.runningAt instanceof Date);
   assert.ok(sandbox.finishedAt instanceof Date);
   assert.ok(sandbox.lastActiveAt instanceof Date);
-  assert.ok(sandbox.expiresAt instanceof Date);
+  assert.equal("expiresAt" in sandbox, false);
+  assert.equal("expiresAt" in sandbox.toJSON(), false);
   assert.equal(sandbox.createdAt.toISOString(), "2026-07-22T12:00:00.000Z");
 });
 
@@ -281,6 +286,75 @@ test("sandbox getNetwork and updateNetwork use the active runtime policy", async
       options: { params: { path: { sid: "0198-sandbox" } }, body: network },
     },
   ]);
+});
+
+test.each([undefined, 0, 30])("sandbox creation serializes idle TTL %s", async (idleTtlSeconds) => {
+  vi.stubGlobal("fetch", async (request: Request) => {
+    assert.equal(request.method, "POST");
+    assert.equal(new URL(request.url).pathname, "/api/sandboxes");
+    assert.deepEqual(await request.json(), idleTtlSeconds === undefined ? {} : { idle_ttl_seconds: idleTtlSeconds });
+    return Response.json({ success: true, data: sandboxWire("running") });
+  });
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  await new Sandboxes(client).create({ idleTtlSeconds });
+});
+
+test("sandbox snapshots from older servers default idle TTL to disabled", () => {
+  const { idle_ttl_seconds: _, ...data } = sandboxWire("running");
+  const sandbox = new Sandbox(data as any, {} as ApiClient);
+  assert.equal(sandbox.idleTtlSeconds, 0);
+  assert.equal(sandbox.toJSON().idleTtlSeconds, 0);
+});
+
+test.each([
+  { input: 86_400, body: { timeout: 86400 } },
+  { input: { timeoutSeconds: 86400 }, body: { timeout: 86400 } },
+  { input: { idleTtlSeconds: 45 }, body: { idle_ttl_seconds: 45 } },
+  { input: { idleTtlSeconds: 0 }, body: { idle_ttl_seconds: 0 } },
+  { input: { timeoutSeconds: 86400, idleTtlSeconds: 45 }, body: { timeout: 86400, idle_ttl_seconds: 45 } },
+])("sandbox setTimeout retries $input and refreshes its fields", async ({ input, body }) => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  let attempts = 0;
+  const updated = {
+    ...sandboxWire("running"),
+    max_ttl_seconds: body.timeout ?? 3600,
+    idle_ttl_seconds: body.idle_ttl_seconds ?? 30,
+  };
+  vi.stubGlobal("fetch", async (request: Request) => {
+    assert.equal(request.method, "POST");
+    assert.equal(new URL(request.url).pathname, "/api/sandboxes/0198-sandbox/timeout");
+    assert.deepEqual(await request.json(), body);
+    attempts++;
+    if (attempts === 1) throw new TypeError("fetch failed");
+    if (attempts < 4) {
+      return Response.json({ success: false, error: "unavailable" }, { status: attempts === 2 ? 429 : 503 });
+    }
+    return Response.json({ success: true, data: updated });
+  });
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  assert.equal(await sandbox.setTimeout(input), sandbox);
+  assert.equal(attempts, 4);
+  assert.equal(sandbox.maxTtlSeconds, updated.max_ttl_seconds);
+  assert.equal(sandbox.idleTtlSeconds, updated.idle_ttl_seconds);
+  assert.equal(sandbox.toJSON().idleTtlSeconds, updated.idle_ttl_seconds);
+});
+
+test.each([400, 409])("sandbox setTimeout surfaces %s without retrying or changing its fields", async (status) => {
+  const fetch = vi.fn(async () => Response.json({ success: false, error: "invalid TTL" }, { status }));
+  vi.stubGlobal("fetch", fetch);
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+  const before = sandbox.toJSON();
+  await assert.rejects(sandbox.setTimeout({ idleTtlSeconds: -1 }), (error: unknown) => {
+    assert.ok(error instanceof ArchilApiError);
+    assert.equal(error.status, status);
+    assert.equal(error.message, "invalid TTL");
+    return true;
+  });
+  assert.equal(fetch.mock.calls.length, 1);
+  assert.deepEqual(sandbox.toJSON(), before);
 });
 
 test("sandbox lifecycle methods poll only after the server wait expires", async () => {

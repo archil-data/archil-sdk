@@ -29,6 +29,7 @@ export type {
   SandboxNetworkAction,
   SandboxResponse,
   SandboxStatus,
+  SandboxTimeoutOptions,
   SandboxForkOptions,
   SandboxWaitOptions,
 } from "./sandbox.js";

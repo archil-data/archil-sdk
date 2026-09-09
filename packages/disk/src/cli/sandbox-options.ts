@@ -6,6 +6,7 @@ export interface CreateSandboxCliOptions {
   memSizeMib?: string;
   baseImage?: string;
   maxTtlSeconds?: string;
+  idleTtlSeconds?: string;
   maxConcurrentProcesses?: string;
   env: string[];
 }
@@ -50,6 +51,7 @@ export function parseCreateSandboxOptions(name: string | undefined, options: Cre
     memSizeMiB: optionalInteger(options.memSizeMib, "Memory", 256, 65_536),
     baseImage: options.baseImage,
     maxTtlSeconds: optionalInteger(options.maxTtlSeconds, "Max TTL", 1, 2_147_483_647),
+    idleTtlSeconds: optionalInteger(options.idleTtlSeconds, "Idle TTL", 0, 86_400),
     maxConcurrentExecs: optionalInteger(options.maxConcurrentProcesses, "Max concurrent processes", 1, 1024),
     env: parseEnvironment(options.env),
   };

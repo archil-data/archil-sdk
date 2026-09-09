@@ -30,6 +30,8 @@ export interface CreateSandboxRequest {
   baseImage?: string;
   env?: Record<string, string>;
   maxTtlSeconds?: number;
+  /** Seconds without a direct process connection before pausing. Omitted or zero disables idle expiry. */
+  idleTtlSeconds?: number;
   /** Maximum concurrently attached exec sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs?: number;
   /** Creation-time network policy. Egress is unrestricted when omitted. */
@@ -92,6 +94,7 @@ export class Sandboxes {
       base_image: request.baseImage,
       env: request.env,
       max_ttl_seconds: request.maxTtlSeconds,
+      idle_ttl_seconds: request.idleTtlSeconds,
       max_concurrent_execs: request.maxConcurrentExecs,
       network: request.network,
     };
