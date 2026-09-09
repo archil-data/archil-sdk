@@ -1190,6 +1190,10 @@ class Sandbox:
         ...
 
     @property
+    def mounts(self) -> list[archil._models.SandboxMount]:
+        ...
+
+    @property
     def created_at(self):
         ...
 
@@ -1354,10 +1358,10 @@ class Sandboxes:
     get: __get_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, wait: bool = True) -> Sandbox:
+        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, mounts: list[archil._models.SandboxMountSpec] | None = None, wait: bool = True) -> Sandbox:
             ...
 
-        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, wait: bool = True) -> Sandbox:
+        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, mounts: list[archil._models.SandboxMountSpec] | None = None, wait: bool = True) -> Sandbox:
             ...
 
     create: __create_spec

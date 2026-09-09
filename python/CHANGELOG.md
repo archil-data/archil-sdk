@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add `mounts` to sandbox creation so Archil disks are mounted inside the guest at chosen paths, with read-only, conditional, subdirectory, and delegation-queue options.
+
 ## 0.12.2
 
 - Share HTTP/2 control-plane connections across clients with matching origins and credentials, with up to 100 connections per shared pool.

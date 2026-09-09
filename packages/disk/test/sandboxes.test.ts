@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import type { ApiClient } from "../src/client.js";
+import type { Disk } from "../src/disk.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess } from "../src/sandbox-process.js";
 import { Sandbox } from "../src/sandbox.js";
@@ -141,6 +142,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     maxTtlSeconds: 3600,
     maxConcurrentExecs: 8,
     endpoints: [{ port: 8080, hostname: "8080-sandbox.example.com" }],
+    mounts: [],
     createdAt: nowDate,
     runningAt: undefined,
     finishedAt: undefined,
@@ -347,6 +349,67 @@ test("create polls when the server returns a pending sandbox", async () => {
 
   assert.equal(sandbox.status, "running");
   assert.equal(gets, 1);
+});
+
+test("Sandboxes serializes mounts and wraps them on the snapshot", async () => {
+  let body: unknown;
+  const client = {
+    POST: async (_path: string, options: { body: unknown }) => {
+      body = options.body;
+      return ok({
+        ...sandboxWire("running"),
+        mounts: [
+          { disk_id: "dsk-0123456789abcdef", path: "/mnt/archil" },
+          {
+            disk_id: "dsk-fedcba9876543210",
+            path: "/workspace",
+            subdirectory: "repo",
+            read_only: false,
+            conditional: true,
+            queue_ms: 5000,
+          },
+        ],
+      });
+    },
+  } as unknown as ApiClient;
+
+  const created = await new Sandboxes(client).create({
+    mounts: [
+      { disk: "dsk-0123456789abcdef" },
+      {
+        disk: { id: "dsk-fedcba9876543210" } as Disk,
+        path: "/workspace",
+        subdirectory: "repo",
+        conditional: true,
+        queueMs: 5000,
+      },
+      { disk: "dsk-0000000000000000", path: "/mnt/models", readOnly: true },
+    ],
+  });
+
+  assert.deepEqual((body as { mounts: unknown }).mounts, [
+    { disk_id: "dsk-0123456789abcdef", read_only: false, conditional: false },
+    {
+      disk_id: "dsk-fedcba9876543210",
+      read_only: false,
+      conditional: true,
+      path: "/workspace",
+      subdirectory: "repo",
+      queue_ms: 5000,
+    },
+    { disk_id: "dsk-0000000000000000", read_only: true, conditional: false, path: "/mnt/models" },
+  ]);
+  assert.deepEqual(created.mounts, [
+    { diskId: "dsk-0123456789abcdef", path: "/mnt/archil", readOnly: false, conditional: false },
+    {
+      diskId: "dsk-fedcba9876543210",
+      path: "/workspace",
+      readOnly: false,
+      conditional: true,
+      subdirectory: "repo",
+      queueMs: 5000,
+    },
+  ]);
 });
 
 test("sandbox lifecycle methods can opt out of waiting", async () => {
