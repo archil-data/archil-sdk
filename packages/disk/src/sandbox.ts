@@ -8,6 +8,7 @@ import {
 } from "./sandbox-process.js";
 import { SandboxFiles } from "./sandbox-files.js";
 import { retryApiRequest } from "./retry.js";
+import type { ExecMountSpec } from "./archil.js";
 
 export type SandboxNetworkAction = components["schemas"]["SandboxNetworkAction"];
 
@@ -19,8 +20,71 @@ export type SandboxEgressTransform = components["schemas"]["SandboxEgressTransfo
 
 export type SandboxNetwork = components["schemas"]["SandboxNetwork"];
 
+/** @internal Local until @archildata/api-types ships the SandboxMount schema. */
+export interface SandboxMountWire {
+  disk_id: string;
+  path?: string;
+  subdirectory?: string;
+  read_only?: boolean;
+  conditional?: boolean;
+  queue_ms?: number;
+}
+
 /** @internal */
-export type SandboxWire = components["schemas"]["Sandbox"];
+export type SandboxWire = components["schemas"]["Sandbox"] & {
+  mounts?: SandboxMountWire[];
+};
+
+/**
+ * One Archil disk to mount inside a sandbox. `path` is the absolute guest
+ * directory; it may be omitted only for a sole mount, which then lands at
+ * `/mnt/archil`. A plain mount is exclusive and `queueMs` bounds the wait for
+ * its root delegation; `readOnly` and `conditional` mounts never take it.
+ */
+export interface SandboxMountSpec extends Omit<ExecMountSpec, "checkoutPaths" | "queueMs"> {
+  path?: string;
+  /**
+   * Milliseconds a plain mount waits for the disk's exclusive root delegation
+   * before the boot fails. Cannot be combined with `readOnly` or `conditional`.
+   */
+  queueMs?: number;
+}
+
+/** @internal */
+export function sandboxMountWire(mount: SandboxMountSpec): SandboxMountWire {
+  const entry: SandboxMountWire = {
+    disk_id: typeof mount.disk === "string" ? mount.disk : mount.disk.id,
+    read_only: mount.readOnly ?? false,
+    conditional: mount.conditional ?? false,
+  };
+  if (mount.path !== undefined) entry.path = mount.path;
+  if (mount.subdirectory !== undefined) entry.subdirectory = mount.subdirectory;
+  if (mount.queueMs !== undefined) entry.queue_ms = mount.queueMs;
+  return entry;
+}
+
+/** An Archil disk mounted inside the sandbox, as currently configured. */
+export interface SandboxMount {
+  diskId: string;
+  /** Absolute guest directory the disk is mounted at. */
+  path: string;
+  subdirectory?: string;
+  readOnly: boolean;
+  conditional: boolean;
+  queueMs?: number;
+}
+
+function sandboxMountFromWire(mount: SandboxMountWire): SandboxMount {
+  const out: SandboxMount = {
+    diskId: mount.disk_id,
+    path: mount.path ?? "/mnt/archil",
+    readOnly: mount.read_only ?? false,
+    conditional: mount.conditional ?? false,
+  };
+  if (mount.subdirectory !== undefined) out.subdirectory = mount.subdirectory;
+  if (mount.queue_ms !== undefined) out.queueMs = mount.queue_ms;
+  return out;
+}
 
 export type SandboxStatus = components["schemas"]["SandboxState"];
 
@@ -41,6 +105,8 @@ export interface SandboxResponse {
   /** Maximum concurrently attached process sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
+  /** Disks mounted inside the guest on every boot. */
+  mounts: SandboxMount[];
   createdAt: Date;
   runningAt?: Date;
   finishedAt?: Date;
@@ -55,6 +121,15 @@ export interface SandboxWaitOptions {
    * The SDK polls if the server's wait budget expires first.
    */
   wait?: boolean;
+}
+
+export interface SandboxStartOptions extends SandboxWaitOptions {
+  /**
+   * Replace the sandbox's disk mounts for this and later sessions. Omit to
+   * keep the current ones. A cold start only: resume keeps the paused
+   * session's mounts.
+   */
+  mounts?: SandboxMountSpec[];
 }
 
 export interface SandboxForkOptions extends SandboxWaitOptions {
@@ -98,6 +173,7 @@ export class Sandbox {
   maxTtlSeconds!: number;
   maxConcurrentExecs!: number;
   endpoints?: SandboxEndpoint[];
+  mounts!: SandboxMount[];
   createdAt!: Date;
   runningAt?: Date;
   finishedAt?: Date;
@@ -130,6 +206,7 @@ export class Sandbox {
     this.maxTtlSeconds = data.max_ttl_seconds;
     this.maxConcurrentExecs = data.max_concurrent_execs;
     this.endpoints = data.endpoints?.map((endpoint) => ({ ...endpoint }));
+    this.mounts = (data.mounts ?? []).map(sandboxMountFromWire);
     this.createdAt = new Date(data.created_at);
     this.runningAt = data.running_at ? new Date(data.running_at) : undefined;
     this.finishedAt = data.finished_at ? new Date(data.finished_at) : undefined;
@@ -151,6 +228,7 @@ export class Sandbox {
       maxTtlSeconds: this.maxTtlSeconds,
       maxConcurrentExecs: this.maxConcurrentExecs,
       endpoints: this.endpoints?.map((endpoint) => ({ ...endpoint })),
+      mounts: this.mounts.map((mount) => ({ ...mount })),
       createdAt: this.createdAt,
       runningAt: this.runningAt,
       finishedAt: this.finishedAt,
@@ -184,12 +262,15 @@ export class Sandbox {
   }
 
   /** Start this sandbox. */
-  async start(options: SandboxWaitOptions = {}) {
+  async start(options: SandboxStartOptions = {}) {
     const data = await unwrap(
       retryApiRequest(
         () =>
           this._client.POST("/api/sandboxes/{sid}/start", {
             params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
+            ...(options.mounts && {
+              body: { mounts: options.mounts.map(sandboxMountWire) } as never,
+            }),
           }),
         "transient",
       ),
