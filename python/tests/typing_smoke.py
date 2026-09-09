@@ -42,6 +42,7 @@ def sync_usage() -> None:
         name="trial",
         vcpu_count=2,
         mem_size_mib=4096,
+        idle_ttl_seconds=300,
         base_image="docker:29.7.1-dind",
         network=SandboxNetwork(
             egress=SandboxEgressPolicy(
@@ -59,7 +60,11 @@ def sync_usage() -> None:
     )
     _network: SandboxNetwork = sandbox.get_network()
     _network = sandbox.update_network(SandboxNetwork())
-    module_sandbox: Sandbox = archil.create_sandbox(name="trial")
+    module_sandbox: Sandbox = archil.create_sandbox(name="trial", idle_ttl_seconds=0)
+    sandbox = sandbox.set_timeout(3600)
+    sandbox = sandbox.set_timeout(idle_ttl_seconds=300)
+    sandbox = sandbox.set_timeout(3600, idle_ttl_seconds=0)
+    _idle_ttl: int = sandbox.idle_ttl_seconds
     _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
     module_sandbox = archil.get_sandbox(module_sandbox.id)
     sandbox_result: SandboxProcessResult = sandbox.exec("echo ready")
@@ -115,7 +120,10 @@ def sync_usage() -> None:
 
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
-        sandbox = await client.sandboxes.create.aio(name="trial")
+        sandbox = await client.sandboxes.create.aio(name="trial", idle_ttl_seconds=300)
+        sandbox = await sandbox.set_timeout.aio(3600)
+        sandbox = await sandbox.set_timeout.aio(idle_ttl_seconds=300)
+        sandbox = await sandbox.set_timeout.aio(3600, idle_ttl_seconds=0)
         _network: SandboxNetwork = await sandbox.get_network.aio()
         _network = await sandbox.update_network.aio(SandboxNetwork())
         result: SandboxProcessResult = await sandbox.exec.aio("echo ready")

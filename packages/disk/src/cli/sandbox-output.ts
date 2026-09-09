@@ -51,6 +51,7 @@ export function formatSandbox(sandbox: Sandbox, format: OutputFormat): string {
     ["image", sandbox.baseImage],
     ["platform", sandbox.platform ?? ""],
     ["max TTL", `${sandbox.maxTtlSeconds} seconds`],
+    ["idle TTL", sandbox.idleTtlSeconds === 0 ? "disabled" : `${sandbox.idleTtlSeconds} seconds`],
     ["max concurrent processes", String(sandbox.maxConcurrentExecs)],
     ["created", date(sandbox.createdAt)],
     ["running", date(sandbox.runningAt)],

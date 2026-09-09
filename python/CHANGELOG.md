@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add `sandbox.set_timeout()` for editing hard and idle TTLs independently or together. Expose `idle_ttl_seconds` on sandbox creation and responses; zero disables idle expiry. Hard TTL defaults to 24 hours.
+
 ## 0.12.2
 
 - Share HTTP/2 control-plane connections across clients with matching origins and credentials, with up to 100 connections per shared pool.

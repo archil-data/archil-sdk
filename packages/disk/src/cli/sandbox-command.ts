@@ -151,6 +151,7 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
     .option("--mem-size-mib <mib>", "Memory in MiB (256-65536)")
     .option("--base-image <image>", "Public OCI image", "ubuntu:26.04")
     .option("--max-ttl-seconds <seconds>", "Maximum sandbox lifetime")
+    .option("--idle-ttl-seconds <seconds>", "Seconds without a process connection before pausing (0 disables)")
     .option("--max-concurrent-processes <count>", "Maximum attached processes")
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], []);
   create.action(async (name: string | undefined, options: CreateSandboxCliOptions & { output: OutputFormat; wait: boolean }) => {

@@ -354,6 +354,7 @@ class SandboxData:
     finished_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     exit_reason: Optional[str] = None
+    idle_ttl_seconds: int = 0
 
     @classmethod
     def from_json(cls, d: dict) -> "SandboxData":
@@ -364,6 +365,7 @@ class SandboxData:
             vcpu_count=d["vcpu_count"],
             mem_size_mib=d["mem_size_mib"],
             max_ttl_seconds=d["max_ttl_seconds"],
+            idle_ttl_seconds=d.get("idle_ttl_seconds", 0),
             max_concurrent_execs=d["max_concurrent_execs"],
             base_image=d["base_image"],
             platform=d.get("platform"),
