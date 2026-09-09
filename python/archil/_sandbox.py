@@ -7,6 +7,7 @@ from ._http import _Transport
 from ._models import (
     SandboxData,
     SandboxEndpoint,
+    SandboxMount,
     SandboxNetwork,
     SandboxPlatform,
     SandboxProcessOutputHandler,
@@ -71,6 +72,10 @@ class _Sandbox:
     @property
     def endpoints(self) -> list[SandboxEndpoint]:
         return list(self._data.endpoints)
+
+    @property
+    def mounts(self) -> list[SandboxMount]:
+        return list(self._data.mounts)
 
     @property
     def created_at(self):

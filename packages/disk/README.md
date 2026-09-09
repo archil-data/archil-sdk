@@ -151,6 +151,26 @@ const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
 
+Archil disks can be mounted inside the sandbox at creation. They are mounted on every
+boot, persist across stop/start and pause/resume, and are inherited by forks:
+
+```ts
+const workspace = await client.sandboxes.create({
+  mounts: [
+    { disk: "dsk-abc123" }, // mounted at /mnt/archil
+    { disk: models, path: "/mnt/models", subdirectory: "llama", readOnly: true },
+    { disk: shared, path: "/workspace", conditional: true },
+  ],
+});
+console.log(workspace.mounts.map((mount) => mount.path));
+```
+
+`path` is required when more than one disk is mounted. Options: `readOnly`, `conditional`
+(concurrent writers without delegation checkouts), `subdirectory`, and `queueMs` (how long a
+plain mount waits for the disk's exclusive root delegation). A plain read-write mount holds
+that delegation for as long as the sandbox does, including while paused, so use `readOnly`
+or `conditional` for disks that other clients or forks also write.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```ts

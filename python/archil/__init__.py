@@ -56,6 +56,8 @@ from ._models import (
     S3Object,
     SandboxData,
     SandboxEndpoint,
+    SandboxMount,
+    SandboxMountSpec,
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
@@ -124,6 +126,8 @@ __all__ = [
     "TokenUser",
     "AwsStsUser",
     "SandboxTerminal",
+    "SandboxMount",
+    "SandboxMountSpec",
     "SandboxEgressPolicy",
     "SandboxEgressRule",
     "SandboxEgressTransform",
@@ -256,6 +260,7 @@ def create_sandbox(
     max_ttl_seconds: Optional[int] = None,
     max_concurrent_execs: Optional[int] = None,
     network: Optional[SandboxNetwork] = None,
+    mounts: Optional[list[SandboxMountSpec]] = None,
     wait: bool = True,
 ) -> Sandbox:
     return _client().sandboxes.create(
@@ -267,6 +272,7 @@ def create_sandbox(
         max_ttl_seconds=max_ttl_seconds,
         max_concurrent_execs=max_concurrent_execs,
         network=network,
+        mounts=mounts,
         wait=wait,
     )
 
