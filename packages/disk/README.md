@@ -151,6 +151,9 @@ const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
 
+`fork` pauses a running sandbox while the snapshot is taken and resumes it once the
+fork is accepted. A paused or stopped sandbox is forked in place and left as it is.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```ts

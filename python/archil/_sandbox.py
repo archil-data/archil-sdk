@@ -138,9 +138,9 @@ class _Sandbox:
             await asyncio.sleep(_POLL_INTERVAL_SECONDS)
             sandbox = await sandbox.refresh()
 
-    async def _wait_while(self, status: SandboxStatus) -> "_Sandbox":
+    async def _wait_while(self, *statuses: SandboxStatus) -> "_Sandbox":
         sandbox = self
-        while sandbox.status == status:
+        while sandbox.status in statuses:
             await asyncio.sleep(_POLL_INTERVAL_SECONDS)
             sandbox = await sandbox.refresh()
         return sandbox
@@ -170,15 +170,35 @@ class _Sandbox:
         return await sandbox._wait_for_start() if wait else sandbox
 
     async def fork(self, *, name: Optional[str] = None, wait: bool = True) -> "_Sandbox":
-        data = await self._transport.request_json(
-            "POST",
-            f"/api/sandboxes/{self.id}/fork",
-            params={"wait": wait},
-            json=None if name is None else {"name": name},
-            retry="connect",
-        )
+        """Fork this sandbox's current state. A running sandbox is paused for the
+        snapshot and resumed once the fork is accepted; a paused or stopped
+        sandbox is left as it is."""
+        source = await self.refresh()
+        resume_after_fork = source.status == "running"
+        if resume_after_fork:
+            source = await source.pause()
+        await source._wait_while("pausing", "stopping")
+
+        resumed: Optional[_Sandbox] = None
+        try:
+            data = await self._transport.request_json(
+                "POST",
+                f"/api/sandboxes/{self.id}/fork",
+                # A source we paused resumes as soon as the fork is accepted, not after the child boots.
+                params={"wait": wait and not resume_after_fork},
+                json=None if name is None else {"name": name},
+                retry="connect",
+            )
+        finally:
+            if resume_after_fork:
+                resumed = await self.resume(wait=False)
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
-        return await sandbox._wait_for_start() if wait else sandbox
+        if not wait:
+            return sandbox
+        sandbox = await sandbox._wait_for_start()
+        if resumed is not None:
+            await resumed._wait_for_start()
+        return sandbox
 
     async def get_network(self) -> SandboxNetwork:
         data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/network", retry="transient")

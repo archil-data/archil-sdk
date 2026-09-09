@@ -359,6 +359,7 @@ test("sandbox lifecycle methods can opt out of waiting", async () => {
       if (path.endsWith("/fork")) return ok(sandboxWire("pending", "0198-fork"));
       return ok(sandboxWire("pending"));
     },
+    GET: async () => ok(sandboxWire("stopped")),
   } as unknown as ApiClient;
 
   const created = await new Sandboxes(client).create({}, { wait: false });
@@ -389,7 +390,12 @@ test("fork creates a named branch and waits for it to start", async () => {
       post = { path, options };
       return ok(sandboxWire("pending", "0198-fork"));
     },
-    GET: async () => ok(sandboxWire("running", "0198-fork")),
+    GET: async (_path: string, options: any) =>
+      ok(
+        options.params.path.sid === "0198-fork"
+          ? sandboxWire("running", "0198-fork")
+          : sandboxWire("stopped"),
+      ),
   } as unknown as ApiClient;
   const sandbox = new Sandbox(sandboxWire("stopped") as any, client);
 
@@ -407,6 +413,49 @@ test("fork creates a named branch and waits for it to start", async () => {
       body: { name: "agent-task" },
     },
   });
+});
+
+test("fork pauses a running sandbox and resumes it once the fork is accepted", async () => {
+  vi.useFakeTimers();
+  const calls: Array<{ method: string; path: string; sid: string; wait?: boolean }> = [];
+  let sourceStatus = "running";
+  const nextSourceStatus: Record<string, string> = { pausing: "paused", pending: "running" };
+  const client = {
+    POST: async (path: string, options: any) => {
+      calls.push({ method: "POST", path, sid: options.params.path.sid, wait: options.params.query?.wait });
+      if (path.endsWith("/pause")) sourceStatus = "pausing";
+      if (path.endsWith("/resume")) sourceStatus = "pending";
+      if (path.endsWith("/fork")) {
+        assert.equal(sourceStatus, "paused");
+        return ok(sandboxWire("pending", "0198-fork"));
+      }
+      return ok(sandboxWire(sourceStatus));
+    },
+    GET: async (path: string, options: any) => {
+      calls.push({ method: "GET", path, sid: options.params.path.sid });
+      if (options.params.path.sid === "0198-fork") return ok(sandboxWire("running", "0198-fork"));
+      sourceStatus = nextSourceStatus[sourceStatus] ?? sourceStatus;
+      return ok(sandboxWire(sourceStatus));
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const forking = sandbox.fork({ name: "agent-task" });
+  await vi.advanceTimersByTimeAsync(1500);
+  const fork = await forking;
+
+  assert.equal(fork.id, "0198-fork");
+  assert.equal(fork.status, "running");
+  assert.equal(sandbox.status, "running");
+  assert.deepEqual(calls, [
+    { method: "GET", path: "/api/sandboxes/{sid}", sid: "0198-sandbox" },
+    { method: "POST", path: "/api/sandboxes/{sid}/pause", sid: "0198-sandbox", wait: undefined },
+    { method: "GET", path: "/api/sandboxes/{sid}", sid: "0198-sandbox" },
+    { method: "POST", path: "/api/sandboxes/{sid}/fork", sid: "0198-sandbox", wait: false },
+    { method: "POST", path: "/api/sandboxes/{sid}/resume", sid: "0198-sandbox", wait: false },
+    { method: "GET", path: "/api/sandboxes/{sid}", sid: "0198-fork" },
+    { method: "GET", path: "/api/sandboxes/{sid}", sid: "0198-sandbox" },
+  ]);
 });
 
 test("sandbox delete accepts 204", async () => {

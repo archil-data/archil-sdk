@@ -277,7 +277,10 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
         ("POST", "/api/sandboxes/sbx-1/stop", "transient"),
         ("POST", "/api/sandboxes/sbx-1/pause", "transient"),
         ("POST", "/api/sandboxes/sbx-1/resume", "transient"),
+        ("GET", "/api/sandboxes/sbx-1", "transient"),
+        ("POST", "/api/sandboxes/sbx-1/pause", "transient"),
         ("POST", "/api/sandboxes/sbx-1/fork", "connect"),
+        ("POST", "/api/sandboxes/sbx-1/resume", "transient"),
         ("GET", "/api/sandboxes/sbx-1/network", "transient"),
         ("PUT", "/api/sandboxes/sbx-1/network", "transient"),
         ("DELETE", "/api/sandboxes/sbx-1", "transient"),
@@ -500,6 +503,10 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
                     name="forked",
                 )
             )
+        if request.url.path.endswith("/pause"):
+            return ok_envelope(sandbox_json("paused"))
+        if request.url.path.endswith("/resume"):
+            return ok_envelope(sandbox_json("pending"))
         if request.url.path.endswith("/stop"):
             return ok_envelope(sandbox_json("stopped", finished_at=NOW))
         if request.method == "DELETE":
@@ -514,11 +521,34 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
 
     assert fork.id == "sbx-fork"
     assert stopped.status == "stopped"
-    assert router.requests[1].json == {"name": "forked"}
+    posts = [request for request in router.requests if request.method == "POST"]
+    assert [request.path.rsplit("/", 1)[-1] for request in posts] == ["pause", "fork", "resume", "stop"]
+    pause_request, fork_request, resume_request = posts[0], posts[1], posts[2]
+    assert pause_request.query == {}
+    assert fork_request.json == {"name": "forked"}
+    assert fork_request.query == {"wait": "false"}
+    assert resume_request.query == {"wait": "false"}
     assert router.requests[-1].method == "DELETE"
     assert router.requests[-1].path == "/api/sandboxes/sbx-1"
     stop_request = next(request for request in router.requests if request.path.endswith("/stop"))
     assert stop_request.query == {}
+
+
+def test_fork_of_paused_sandbox_leaves_it_paused(archil, router):
+    router.set(
+        lambda request: (
+            ok_envelope(sandbox_json(sandbox_id="sbx-fork", name="forked"))
+            if request.url.path.endswith("/fork")
+            else ok_envelope(sandbox_json("paused"))
+        )
+    )
+    sandbox = archil.sandboxes.get("sbx-1")
+    fork = sandbox.fork(name="forked")
+
+    assert fork.id == "sbx-fork"
+    posts = [request for request in router.requests if request.method == "POST"]
+    assert [request.path for request in posts] == ["/api/sandboxes/sbx-1/fork"]
+    assert posts[0].query == {"wait": "true"}
 
 
 def test_get_and_update_network_use_active_runtime_policy(archil, router):

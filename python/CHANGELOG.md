@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.3
+
+- `fork()` pauses a running sandbox before taking the snapshot and resumes it once the fork is accepted, so the fork no longer depends on the server finishing the pause within one request. Paused and stopped sandboxes are forked in place.
+
 ## 0.12.2
 
 - Share HTTP/2 control-plane connections across clients with matching origins and credentials, with up to 100 connections per shared pool.
