@@ -63,6 +63,8 @@ from ._models import (
     SandboxPortToken,
     CreatedSandboxPortToken,
     SandboxPortTokenPage,
+    SandboxMount,
+    SandboxMountSpec,
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
@@ -136,6 +138,8 @@ __all__ = [
     "AwsStsUser",
     "RegistryAuth",
     "SandboxTerminal",
+    "SandboxMount",
+    "SandboxMountSpec",
     "SandboxEgressPolicy",
     "SandboxEgressRule",
     "SandboxEgressTransform",
@@ -277,6 +281,7 @@ def create_sandbox(
     max_concurrent_execs: Optional[int] = None,
     network: Optional[SandboxNetwork] = None,
     ports: Optional[list[int]] = None,
+    mounts: Optional[list[SandboxMountSpec]] = None,
     wait: bool = True,
 ) -> Sandbox:
     return _client().sandboxes.create(
@@ -291,6 +296,7 @@ def create_sandbox(
         max_concurrent_execs=max_concurrent_execs,
         network=network,
         ports=ports,
+        mounts=mounts,
         wait=wait,
     )
 

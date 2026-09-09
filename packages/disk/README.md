@@ -261,6 +261,30 @@ a duration up to `"8760h"` (365 days). `listPortTokens` follows all pages (its
 Public ports bypass token authentication. Revocation and expiry deny new
 connections with HTTP 401; existing connections remain open.
 
+Archil disks can be mounted inside the sandbox at creation. They are mounted on every
+boot and persist across stop/start and pause/resume. A sandbox with mounts must be stopped
+before it is forked; the fork inherits them:
+
+```ts
+const workspace = await client.sandboxes.create({
+  mounts: [
+    { disk: "dsk-abc123" }, // mounted at /mnt/archil
+    { disk: "dsk-def456", path: "/mnt/models", subdirectory: "llama", readOnly: true },
+    { disk: "dsk-789abc", path: "/workspace", conditional: true },
+  ],
+});
+console.log(workspace.mounts.map((mount) => mount.path));
+
+await workspace.stop();
+await workspace.start({ mounts: [{ disk: "dsk-abc123", path: "/mnt/other" }] }); // replace them for the next session
+```
+
+`path` is required when more than one disk is mounted. Options: `readOnly`, `conditional`
+(concurrent writers without delegation checkouts), `subdirectory`, and `queueMs` (how long a
+plain mount waits for the disk's exclusive root delegation). A plain read-write mount holds
+that delegation for as long as the sandbox does, including while paused, so use `readOnly`
+or `conditional` for disks that other clients or forks also write.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```ts

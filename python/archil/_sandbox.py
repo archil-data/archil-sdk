@@ -16,6 +16,8 @@ from ._models import (
     SandboxPortToken,
     CreatedSandboxPortToken,
     SandboxPortTokenPage,
+    SandboxMount,
+    SandboxMountSpec,
     SandboxNetwork,
     SandboxPlatform,
     SandboxProcessOutputHandler,
@@ -94,6 +96,10 @@ class _Sandbox:
     @property
     def endpoints(self) -> list[SandboxEndpoint]:
         return list(self._data.endpoints)
+
+    @property
+    def mounts(self) -> list[SandboxMount]:
+        return list(self._data.mounts)
 
     @property
     def created_at(self):
@@ -255,11 +261,12 @@ class _Sandbox:
             sandbox = await sandbox.refresh()
         return sandbox
 
-    async def start(self, *, wait: bool = True) -> "_Sandbox":
+    async def start(self, *, mounts: Optional[list[SandboxMountSpec]] = None, wait: bool = True) -> "_Sandbox":
         data = await self._transport.request_json(
             "POST",
             f"/api/sandboxes/{self.id}/start",
             params={"wait": wait},
+            json=None if mounts is None else {"mounts": [mount.to_json() for mount in mounts]},
             retry="transient",
             retry_throttled=True,
         )

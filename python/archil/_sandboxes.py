@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ._http import _Transport
-from ._models import SandboxData, SandboxNetwork
+from ._models import SandboxData, SandboxMountSpec, SandboxNetwork
 from ._sandbox import _Sandbox
 
 
@@ -38,6 +38,7 @@ class _Sandboxes:
         max_concurrent_execs: Optional[int] = None,
         network: Optional[SandboxNetwork] = None,
         ports: Optional[list[int]] = None,
+        mounts: Optional[list[SandboxMountSpec]] = None,
         wait: bool = True,
     ) -> _Sandbox:
         body = {
@@ -54,6 +55,7 @@ class _Sandboxes:
                 "max_concurrent_execs": max_concurrent_execs,
                 "network": network.to_json() if network is not None else None,
                 "ports": ports,
+                "mounts": [mount.to_json() for mount in mounts] if mounts is not None else None,
             }.items()
             if value is not None
         }

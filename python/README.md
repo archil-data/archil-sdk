@@ -164,6 +164,30 @@ with `async for page in sandbox.list_port_token_pages.aio()`.
 Public ports bypass token authentication. Revocation and expiry deny new
 connections with HTTP 401; existing connections remain open.
 
+Archil disks can be mounted inside the sandbox at creation. They are mounted on every
+boot and persist across stop/start and pause/resume. A sandbox with mounts must be stopped
+before it is forked; the fork inherits them:
+
+```python
+workspace = archil.create_sandbox(
+    mounts=[
+        archil.SandboxMountSpec(disk="dsk-abc123"),  # mounted at /mnt/archil
+        archil.SandboxMountSpec(disk="dsk-def456", path="/mnt/models", subdirectory="llama", read_only=True),
+        archil.SandboxMountSpec(disk="dsk-789abc", path="/workspace", conditional=True),
+    ],
+)
+print([mount.path for mount in workspace.mounts])
+
+workspace.stop()
+workspace.start(mounts=[archil.SandboxMountSpec(disk="dsk-abc123", path="/mnt/other")])  # replace them for the next session
+```
+
+`path` is required when more than one disk is mounted. Options: `read_only`, `conditional`
+(concurrent writers without delegation checkouts), `subdirectory`, and `queue_ms` (how long a
+plain mount waits for the disk's exclusive root delegation). A plain read-write mount holds
+that delegation for as long as the sandbox does, including while paused, so use `read_only`
+or `conditional` for disks that other clients or forks also write.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```python
