@@ -1,6 +1,6 @@
 [project]
 name = "archil"
-version = "0.12.2"
+version = "0.12.3"
 description = "Pure-Python client for Archil disks and sandboxes"
 readme = "README.md"
 license = { file = "LICENSE" }

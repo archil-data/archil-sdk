@@ -9,11 +9,14 @@ import { Sandboxes } from "../src/sandboxes.js";
 const now = "2026-07-22T12:00:00Z";
 const nowDate = new Date(now);
 
+const INACTIVE_STATUSES = ["pausing", "paused", "stopping", "stopped"];
+
 function sandboxWire(status: string = "pending", id: string = "0198-sandbox") {
   return {
     sandbox_id: id,
     name: id === "0198-fork" ? "agent-task" : "prepared-environment",
     status,
+    ...(INACTIVE_STATUSES.includes(status) ? { checkpoint: `sandbox-${id}-epoch-1` } : {}),
     vcpu_count: 2,
     mem_size_mib: 4096,
     base_image: "ubuntu:26.04",
@@ -147,6 +150,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     lastActiveAt: nowDate,
     expiresAt: undefined,
     exitReason: undefined,
+    checkpoint: undefined,
   });
 
   const created = await sandboxes.create({
@@ -359,6 +363,7 @@ test("sandbox lifecycle methods can opt out of waiting", async () => {
       if (path.endsWith("/fork")) return ok(sandboxWire("pending", "0198-fork"));
       return ok(sandboxWire("pending"));
     },
+    GET: async () => ok(sandboxWire("stopped")),
   } as unknown as ApiClient;
 
   const created = await new Sandboxes(client).create({}, { wait: false });
@@ -376,7 +381,9 @@ test("sandbox lifecycle methods can opt out of waiting", async () => {
       { path: "/api/sandboxes/{sid}/resume", wait: false },
       { path: "/api/sandboxes/{sid}/stop", wait: undefined },
       { path: "/api/sandboxes/{sid}/pause", wait: undefined },
+      { path: "/api/sandboxes/{sid}/pause", wait: undefined },
       { path: "/api/sandboxes/{sid}/fork", wait: false },
+      { path: "/api/sandboxes/{sid}/resume", wait: false },
     ],
   );
 });
@@ -386,6 +393,7 @@ test("fork creates a named branch and waits for it to start", async () => {
   let post: { path: string; options: any } | undefined;
   const client = {
     POST: async (path: string, options: unknown) => {
+      if (path.endsWith("/pause")) return ok(sandboxWire("stopped"));
       post = { path, options };
       return ok(sandboxWire("pending", "0198-fork"));
     },
@@ -404,9 +412,85 @@ test("fork creates a named branch and waits for it to start", async () => {
     path: "/api/sandboxes/{sid}/fork",
     options: {
       params: { path: { sid: "0198-sandbox" }, query: { wait: true } },
-      body: { name: "agent-task" },
+      body: { name: "agent-task", checkpoint: "sandbox-0198-sandbox-epoch-1" },
     },
   });
+});
+
+test("fork pauses a running sandbox and resumes it once the fork is accepted", async () => {
+  vi.useFakeTimers();
+  const calls: Array<{ method: string; path: string; sid: string; wait?: boolean }> = [];
+  let sourceStatus = "running";
+  const nextSourceStatus: Record<string, string> = { pausing: "paused", pending: "running" };
+  const client = {
+    POST: async (path: string, options: any) => {
+      calls.push({ method: "POST", path, sid: options.params.path.sid, wait: options.params.query?.wait });
+      if (path.endsWith("/pause")) sourceStatus = "pausing";
+      if (path.endsWith("/resume")) sourceStatus = "pending";
+      if (path.endsWith("/fork")) {
+        assert.equal(sourceStatus, "paused");
+        assert.deepEqual(options.body, { name: "agent-task", checkpoint: "sandbox-0198-sandbox-epoch-1" });
+        return ok(sandboxWire("pending", "0198-fork"));
+      }
+      return ok(sandboxWire(sourceStatus));
+    },
+    GET: async (path: string, options: any) => {
+      calls.push({ method: "GET", path, sid: options.params.path.sid });
+      if (options.params.path.sid === "0198-fork") return ok(sandboxWire("running", "0198-fork"));
+      sourceStatus = nextSourceStatus[sourceStatus] ?? sourceStatus;
+      return ok(sandboxWire(sourceStatus));
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const forking = sandbox.fork({ name: "agent-task" });
+  await vi.advanceTimersByTimeAsync(1500);
+  const fork = await forking;
+
+  assert.equal(fork.id, "0198-fork");
+  assert.equal(fork.status, "running");
+  assert.equal(sandbox.status, "running");
+  assert.equal(sandbox.checkpoint, undefined);
+  assert.deepEqual(calls, [
+    { method: "POST", path: "/api/sandboxes/{sid}/pause", sid: "0198-sandbox", wait: undefined },
+    { method: "GET", path: "/api/sandboxes/{sid}", sid: "0198-sandbox" },
+    { method: "POST", path: "/api/sandboxes/{sid}/fork", sid: "0198-sandbox", wait: false },
+    { method: "POST", path: "/api/sandboxes/{sid}/resume", sid: "0198-sandbox", wait: false },
+    { method: "GET", path: "/api/sandboxes/{sid}", sid: "0198-fork" },
+    { method: "GET", path: "/api/sandboxes/{sid}", sid: "0198-sandbox" },
+  ]);
+});
+
+test("fork keeps the pause checkpoint when someone else resumes the source first", async () => {
+  vi.useFakeTimers();
+  const forkBodies: unknown[] = [];
+  let polls = 0;
+  const client = {
+    POST: async (path: string, options: any) => {
+      if (path.endsWith("/pause")) return ok(sandboxWire("pausing"));
+      if (path.endsWith("/fork")) {
+        forkBodies.push(options.body);
+        return ok(sandboxWire("running", "0198-fork"));
+      }
+      return ok(sandboxWire("running"));
+    },
+    GET: async (_path: string, options: any) => {
+      if (options.params.path.sid === "0198-fork") return ok(sandboxWire("running", "0198-fork"));
+      polls += 1;
+      // The first poll already sees the source running again at a later
+      // epoch, with no checkpoint of its own.
+      return ok(sandboxWire("running"));
+    },
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const forking = sandbox.fork();
+  await vi.advanceTimersByTimeAsync(1000);
+  const fork = await forking;
+
+  assert.equal(fork.id, "0198-fork");
+  assert.equal(polls, 1);
+  assert.deepEqual(forkBodies, [{ name: undefined, checkpoint: "sandbox-0198-sandbox-epoch-1" }]);
 });
 
 test("sandbox delete accepts 204", async () => {
