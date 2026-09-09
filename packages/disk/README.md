@@ -203,7 +203,7 @@ await timed.setTimeout(7200);
 await timed.setTimeout({ idleTtlSeconds: 60 });
 await timed.setTimeout({ timeoutSeconds: 3600, idleTtlSeconds: 300 });
 await timed.setTimeout({ idleTtlSeconds: 0 });
-console.log(timed.maxTtlSeconds, timed.idleTtlSeconds, timed.expiresAt);
+console.log(timed.maxTtlSeconds, timed.idleTtlSeconds);
 ```
 
 Omitted settings stay unchanged on edits. Updating the hard TTL resets its

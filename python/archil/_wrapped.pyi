@@ -1210,10 +1210,6 @@ class Sandbox:
         ...
 
     @property
-    def expires_at(self):
-        ...
-
-    @property
     def exit_reason(self) -> str | None:
         ...
 

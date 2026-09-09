@@ -34,9 +34,8 @@ export function formatSandboxList(sandboxes: Sandbox[], format: OutputFormat): s
       `${sandbox.memSizeMiB} MiB`,
       sandbox.baseImage,
       date(sandbox.lastActiveAt),
-      date(sandbox.expiresAt),
     ]),
-    ["id", "name", "status", "cpu", "memory", "image", "last active", "expires"],
+    ["id", "name", "status", "cpu", "memory", "image", "last active"],
   );
 }
 
@@ -57,7 +56,6 @@ export function formatSandbox(sandbox: Sandbox, format: OutputFormat): string {
     ["running", date(sandbox.runningAt)],
     ["finished", date(sandbox.finishedAt)],
     ["last active", date(sandbox.lastActiveAt)],
-    ["expires", date(sandbox.expiresAt)],
     ["exit reason", sandbox.exitReason ?? ""],
   ];
   for (const endpoint of sandbox.endpoints ?? []) {

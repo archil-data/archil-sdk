@@ -599,7 +599,7 @@ async def test_set_timeout_refreshes_sandbox_fields(archil, router, body, use_as
     assert result is sandbox
     assert sandbox.max_ttl_seconds == updated["max_ttl_seconds"]
     assert sandbox.idle_ttl_seconds == updated["idle_ttl_seconds"]
-    assert sandbox.expires_at == datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    assert not hasattr(sandbox, "expires_at")
     assert router.requests[-1].method == "POST"
     assert router.requests[-1].path == "/api/sandboxes/sbx-1/timeout"
     assert router.requests[-1].json == body

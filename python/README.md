@@ -131,7 +131,7 @@ timed.set_timeout(7200)
 timed.set_timeout(idle_ttl_seconds=60)
 timed.set_timeout(3600, idle_ttl_seconds=300)
 timed.set_timeout(idle_ttl_seconds=0)
-print(timed.max_ttl_seconds, timed.idle_ttl_seconds, timed.expires_at)
+print(timed.max_ttl_seconds, timed.idle_ttl_seconds)
 ```
 
 The same options work with `client.sandboxes.create.aio()` and

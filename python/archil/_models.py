@@ -352,7 +352,6 @@ class SandboxData:
     endpoints: list[SandboxEndpoint] = field(default_factory=list)
     running_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
     exit_reason: Optional[str] = None
     idle_ttl_seconds: int = 0
 
@@ -374,7 +373,6 @@ class SandboxData:
             running_at=_parse_datetime(d["running_at"]) if d.get("running_at") else None,
             finished_at=_parse_datetime(d["finished_at"]) if d.get("finished_at") else None,
             last_active_at=_parse_datetime(d["last_active_at"]),
-            expires_at=_parse_datetime(d["expires_at"]) if d.get("expires_at") else None,
             exit_reason=d.get("exit_reason"),
         )
 

@@ -48,7 +48,6 @@ export interface SandboxResponse {
   runningAt?: Date;
   finishedAt?: Date;
   lastActiveAt: Date;
-  expiresAt?: Date;
   exitReason?: string;
 }
 
@@ -124,7 +123,6 @@ export class Sandbox {
   runningAt?: Date;
   finishedAt?: Date;
   lastActiveAt!: Date;
-  expiresAt?: Date;
   exitReason?: string;
   readonly processes: SandboxProcesses;
   readonly files: SandboxFiles;
@@ -157,7 +155,6 @@ export class Sandbox {
     this.runningAt = data.running_at ? new Date(data.running_at) : undefined;
     this.finishedAt = data.finished_at ? new Date(data.finished_at) : undefined;
     this.lastActiveAt = new Date(data.last_active_at);
-    this.expiresAt = data.expires_at ? new Date(data.expires_at) : undefined;
     this.exitReason = data.exit_reason;
     return this;
   }
@@ -179,7 +176,6 @@ export class Sandbox {
       runningAt: this.runningAt,
       finishedAt: this.finishedAt,
       lastActiveAt: this.lastActiveAt,
-      expiresAt: this.expiresAt,
       exitReason: this.exitReason,
     };
   }

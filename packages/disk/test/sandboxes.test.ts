@@ -148,7 +148,6 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     runningAt: undefined,
     finishedAt: undefined,
     lastActiveAt: nowDate,
-    expiresAt: undefined,
     exitReason: undefined,
   });
 
@@ -241,7 +240,8 @@ test("sandbox snapshots expose API timestamps as Date objects", () => {
   assert.ok(sandbox.runningAt instanceof Date);
   assert.ok(sandbox.finishedAt instanceof Date);
   assert.ok(sandbox.lastActiveAt instanceof Date);
-  assert.ok(sandbox.expiresAt instanceof Date);
+  assert.equal("expiresAt" in sandbox, false);
+  assert.equal("expiresAt" in sandbox.toJSON(), false);
   assert.equal(sandbox.createdAt.toISOString(), "2026-07-22T12:00:00.000Z");
 });
 
@@ -313,12 +313,10 @@ test.each([
   { input: { idleTtlSeconds: 0 }, body: { idle_ttl_seconds: 0 } },
   { input: { timeoutSeconds: 86400, idleTtlSeconds: 45 }, body: { timeout: 86400, idle_ttl_seconds: 45 } },
 ])("sandbox setTimeout serializes $input and refreshes its fields", async ({ input, body }) => {
-  const expiresAt = "2026-07-23T12:00:00Z";
   const updated = {
     ...sandboxWire("running"),
     max_ttl_seconds: body.timeout ?? 3600,
     idle_ttl_seconds: body.idle_ttl_seconds ?? 30,
-    expires_at: expiresAt,
   };
   vi.stubGlobal("fetch", async (request: Request) => {
     assert.equal(request.method, "POST");
@@ -333,7 +331,6 @@ test.each([
   assert.equal(sandbox.maxTtlSeconds, updated.max_ttl_seconds);
   assert.equal(sandbox.idleTtlSeconds, updated.idle_ttl_seconds);
   assert.equal(sandbox.toJSON().idleTtlSeconds, updated.idle_ttl_seconds);
-  assert.equal(sandbox.expiresAt?.toISOString(), "2026-07-23T12:00:00.000Z");
 });
 
 test("sandbox setTimeout surfaces errors without changing its fields", async () => {

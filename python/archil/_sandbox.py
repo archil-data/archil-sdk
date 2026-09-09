@@ -93,10 +93,6 @@ class _Sandbox:
         return self._data.last_active_at
 
     @property
-    def expires_at(self):
-        return self._data.expires_at
-
-    @property
     def exit_reason(self) -> Optional[str]:
         return self._data.exit_reason
 

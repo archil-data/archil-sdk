@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add `sandbox.set_timeout()` for editing hard and idle TTLs independently or together. Expose `idle_ttl_seconds` on sandbox creation and responses; zero disables idle expiry. Hard TTL defaults to 24 hours.
+- Remove `Sandbox.expires_at`; the API no longer exposes the estimated sandbox deadline. Connection-token expiry is unchanged.
 
 ## 0.12.2
 
