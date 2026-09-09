@@ -22,6 +22,9 @@ export type SandboxNetwork = components["schemas"]["SandboxNetwork"];
 /** @internal */
 export type SandboxWire = components["schemas"]["Sandbox"];
 
+/** @internal `checkpoint` is newer than the minimum @archildata/api-types version. */
+type SandboxForkRequest = components["schemas"]["ForkSandboxRequest"] & { checkpoint?: string };
+
 export type SandboxStatus = components["schemas"]["SandboxState"];
 
 export interface SandboxEndpoint {
@@ -47,6 +50,8 @@ export interface SandboxResponse {
   lastActiveAt: Date;
   expiresAt?: Date;
   exitReason?: string;
+  /** Disk checkpoint the current session leaves behind; present while pausing, paused, stopping, or stopped. */
+  checkpoint?: string;
 }
 
 export interface SandboxWaitOptions {
@@ -104,6 +109,7 @@ export class Sandbox {
   lastActiveAt!: Date;
   expiresAt?: Date;
   exitReason?: string;
+  checkpoint?: string;
   readonly processes: SandboxProcesses;
   readonly files: SandboxFiles;
 
@@ -136,6 +142,8 @@ export class Sandbox {
     this.lastActiveAt = new Date(data.last_active_at);
     this.expiresAt = data.expires_at ? new Date(data.expires_at) : undefined;
     this.exitReason = data.exit_reason;
+    // Newer than the minimum @archildata/api-types version.
+    this.checkpoint = (data as { checkpoint?: string }).checkpoint;
     return this;
   }
 
@@ -157,6 +165,7 @@ export class Sandbox {
       lastActiveAt: this.lastActiveAt,
       expiresAt: this.expiresAt,
       exitReason: this.exitReason,
+      checkpoint: this.checkpoint,
     };
   }
 
@@ -243,20 +252,51 @@ export class Sandbox {
     return options.wait === false ? this : waitForSandboxStart(this);
   }
 
-  /** Create an isolated writable branch from this sandbox's current state. */
+  /**
+   * Create an isolated writable branch from this sandbox's current state.
+   * A running sandbox is paused for the snapshot and resumed once the fork is
+   * accepted; a paused or stopped sandbox is left as it is. The fork names the
+   * checkpoint the pause produced, so it does not depend on the source still
+   * being paused when the request lands.
+   */
   async fork(options: SandboxForkOptions = {}): Promise<Sandbox> {
-    const data = await unwrap(
+    await this.refresh();
+    const resumeAfterFork = this.status === "running";
+    if (resumeAfterFork) {
+      const pausing = await unwrap(
+        retryApiRequest(
+          () =>
+            this._client.POST("/api/sandboxes/{sid}/pause", {
+              params: { path: { sid: this.id } },
+            }),
+          "transient",
+        ),
+      );
+      this._apply(pausing);
+    }
+    const checkpoint = this.checkpoint;
+    await waitWhileSandboxStatus(this, "pausing", "stopping");
+
+    // A source we paused resumes as soon as the fork is accepted, not after the child boots.
+    const wait = resumeAfterFork ? false : (options.wait ?? true);
+    const body = { name: options.name, checkpoint } as SandboxForkRequest;
+    const fork = await unwrap(
       retryApiRequest(
         () =>
           this._client.POST("/api/sandboxes/{sid}/fork", {
-            params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
-            body: options.name === undefined ? undefined : { name: options.name },
+            params: { path: { sid: this.id }, query: { wait } },
+            body,
           }),
         "connect",
       ),
-    );
-    const fork = new Sandbox(data, this._client);
-    return options.wait === false ? fork : waitForSandboxStart(fork);
+    )
+      .then((data) => new Sandbox(data, this._client))
+      .finally(() => (resumeAfterFork ? this.resume({ wait: false }) : undefined));
+
+    if (options.wait === false) return fork;
+    await waitForSandboxStart(fork);
+    if (resumeAfterFork) await waitForSandboxStart(this);
+    return fork;
   }
 
   /** Get this running sandbox's effective network policy. */
@@ -311,9 +351,9 @@ export async function waitForSandboxStart(sandbox: Sandbox): Promise<Sandbox> {
 
 async function waitWhileSandboxStatus(
   sandbox: Sandbox,
-  status: SandboxStatus,
+  ...statuses: SandboxStatus[]
 ): Promise<Sandbox> {
-  while (sandbox.status === status) {
+  while (statuses.includes(sandbox.status)) {
     await sleep();
     await sandbox.refresh();
   }
