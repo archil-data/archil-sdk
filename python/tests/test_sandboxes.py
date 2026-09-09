@@ -267,6 +267,7 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
     await sandbox.fork(wait=False)
     await sandbox.get_network()
     await sandbox.update_network(SandboxNetwork())
+    await sandbox.set_timeout(3600)
     await sandbox.delete()
 
     assert calls == [
@@ -281,6 +282,7 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
         ("POST", "/api/sandboxes/sbx-1/fork", "connect"),
         ("GET", "/api/sandboxes/sbx-1/network", "transient"),
         ("PUT", "/api/sandboxes/sbx-1/network", "transient"),
+        ("POST", "/api/sandboxes/sbx-1/timeout", "transient"),
         ("DELETE", "/api/sandboxes/sbx-1", "transient"),
     ]
 
@@ -577,7 +579,11 @@ def test_older_sandbox_response_defaults_idle_ttl_to_disabled(archil, router):
     {"timeout": 86400, "idle_ttl_seconds": 45},
 ])
 @pytest.mark.asyncio
-async def test_set_timeout_refreshes_sandbox_fields(archil, router, body, use_async):
+async def test_set_timeout_retries_and_refreshes_sandbox_fields(archil, router, body, use_async, monkeypatch):
+    import archil._http as http_module
+
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    attempts = 0
     expires_at = "2026-08-15T12:00:00Z"
     updated = sandbox_json(
         max_ttl_seconds=body.get("timeout", 3600),
@@ -586,7 +592,13 @@ async def test_set_timeout_refreshes_sandbox_fields(archil, router, body, use_as
     )
 
     def handler(request):
+        nonlocal attempts
         if request.url.path.endswith("/timeout"):
+            attempts += 1
+            if attempts == 1:
+                raise httpx.ReadError("connection lost", request=request)
+            if attempts < 4:
+                return error_envelope(429 if attempts == 2 else 503, "unavailable")
             return ok_envelope(updated)
         return ok_envelope(sandbox_json())
 
@@ -597,6 +609,7 @@ async def test_set_timeout_refreshes_sandbox_fields(archil, router, body, use_as
     kwargs = {"idle_ttl_seconds": body["idle_ttl_seconds"]} if "idle_ttl_seconds" in body else {}
     result = await sandbox.set_timeout.aio(*args, **kwargs) if use_async else sandbox.set_timeout(*args, **kwargs)
     assert result is sandbox
+    assert attempts == 4
     assert sandbox.max_ttl_seconds == updated["max_ttl_seconds"]
     assert sandbox.idle_ttl_seconds == updated["idle_ttl_seconds"]
     assert not hasattr(sandbox, "expires_at")
@@ -605,13 +618,16 @@ async def test_set_timeout_refreshes_sandbox_fields(archil, router, body, use_as
     assert router.requests[-1].json == body
 
 
-def test_set_timeout_surfaces_errors_without_changing_fields(archil, router):
+@pytest.mark.parametrize("status", [400, 409])
+def test_set_timeout_surfaces_errors_without_retrying_or_changing_fields(archil, router, status):
     router.set(lambda request: ok_envelope(sandbox_json()))
     sandbox = archil.sandboxes.get("sbx-1")
-    router.set(lambda request: error_envelope(400, "invalid TTL"))
+    router.set(lambda request: error_envelope(status, "invalid TTL"))
+    request_count = len(router.requests)
     with pytest.raises(ArchilApiError, match="invalid TTL") as caught:
         sandbox.set_timeout(idle_ttl_seconds=-1)
-    assert caught.value.status == 400
+    assert caught.value.status == status
+    assert len(router.requests) == request_count + 1
     assert sandbox.max_ttl_seconds == 3600
     assert sandbox.idle_ttl_seconds == 30
 

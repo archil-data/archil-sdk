@@ -312,7 +312,9 @@ test.each([
   { input: { idleTtlSeconds: 45 }, body: { idle_ttl_seconds: 45 } },
   { input: { idleTtlSeconds: 0 }, body: { idle_ttl_seconds: 0 } },
   { input: { timeoutSeconds: 86400, idleTtlSeconds: 45 }, body: { timeout: 86400, idle_ttl_seconds: 45 } },
-])("sandbox setTimeout serializes $input and refreshes its fields", async ({ input, body }) => {
+])("sandbox setTimeout retries $input and refreshes its fields", async ({ input, body }) => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  let attempts = 0;
   const updated = {
     ...sandboxWire("running"),
     max_ttl_seconds: body.timeout ?? 3600,
@@ -322,28 +324,36 @@ test.each([
     assert.equal(request.method, "POST");
     assert.equal(new URL(request.url).pathname, "/api/sandboxes/0198-sandbox/timeout");
     assert.deepEqual(await request.json(), body);
+    attempts++;
+    if (attempts === 1) throw new TypeError("fetch failed");
+    if (attempts < 4) {
+      return Response.json({ success: false, error: "unavailable" }, { status: attempts === 2 ? 429 : 503 });
+    }
     return Response.json({ success: true, data: updated });
   });
   const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   assert.equal(await sandbox.setTimeout(input), sandbox);
+  assert.equal(attempts, 4);
   assert.equal(sandbox.maxTtlSeconds, updated.max_ttl_seconds);
   assert.equal(sandbox.idleTtlSeconds, updated.idle_ttl_seconds);
   assert.equal(sandbox.toJSON().idleTtlSeconds, updated.idle_ttl_seconds);
 });
 
-test("sandbox setTimeout surfaces errors without changing its fields", async () => {
-  vi.stubGlobal("fetch", async () => Response.json({ success: false, error: "invalid TTL" }, { status: 400 }));
+test.each([400, 409])("sandbox setTimeout surfaces %s without retrying or changing its fields", async (status) => {
+  const fetch = vi.fn(async () => Response.json({ success: false, error: "invalid TTL" }, { status }));
+  vi.stubGlobal("fetch", fetch);
   const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
   const before = sandbox.toJSON();
   await assert.rejects(sandbox.setTimeout({ idleTtlSeconds: -1 }), (error: unknown) => {
     assert.ok(error instanceof ArchilApiError);
-    assert.equal(error.status, 400);
+    assert.equal(error.status, status);
     assert.equal(error.message, "invalid TTL");
     return true;
   });
+  assert.equal(fetch.mock.calls.length, 1);
   assert.deepEqual(sandbox.toJSON(), before);
 });
 

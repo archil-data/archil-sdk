@@ -316,13 +316,17 @@ export class Sandbox {
     // The endpoint is newer than the minimum @archildata/api-types version.
     const client = this._client as unknown as SandboxExtensionClient;
     const data = await unwrap(
-      client.POST("/api/sandboxes/{sid}/timeout", {
-        params: { path: { sid: this.id } },
-        body: {
-          timeout: options.timeoutSeconds,
-          idle_ttl_seconds: options.idleTtlSeconds,
-        },
-      }),
+      retryApiRequest(
+        () =>
+          client.POST("/api/sandboxes/{sid}/timeout", {
+            params: { path: { sid: this.id } },
+            body: {
+              timeout: options.timeoutSeconds,
+              idle_ttl_seconds: options.idleTtlSeconds,
+            },
+          }),
+        "transient",
+      ),
     );
     return this._apply(data);
   }

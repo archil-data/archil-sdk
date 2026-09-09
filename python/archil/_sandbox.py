@@ -203,6 +203,7 @@ class _Sandbox:
             "POST",
             f"/api/sandboxes/{self.id}/timeout",
             json=body,
+            retry="transient",
         )
         self._data = SandboxData.from_json(data)
         return self
