@@ -37,12 +37,82 @@ const undiciModule = isNodeRuntime()
   ? import(undiciSpecifier) as Promise<typeof import("undici")>
   : undefined;
 
+const CONTROL_PLANE_CONNECTIONS = 1;
+const CONTROL_PLANE_CONCURRENT_STREAMS = 100;
+
+function isAsyncIterableBody(
+  body: Dispatcher.DispatchOptions["body"],
+): body is Dispatcher.DispatchOptions["body"] & AsyncIterable<Uint8Array | string> {
+  return body != null
+    && typeof body === "object"
+    && Symbol.asyncIterator in body;
+}
+
+async function bufferBody(body: AsyncIterable<Uint8Array | string>): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of body) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+// Undici deliberately serializes non-idempotent requests and streaming request
+// bodies, including the async iterable created internally for a fetch() POST.
+// The control-plane API needs POSTs (notably disk exec) to share HTTP/2 sessions,
+// so buffer the already-bounded request body and opt it into multiplexing. Guard
+// onConnect so Undici can never replay a request that reached a socket: a dropped
+// shared session fails in-flight operations instead of potentially running an
+// exec or another mutation twice.
+export const multiplexHttp2Requests: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (
+  options,
+  handler,
+) => {
+  let requestStarted = false;
+  const guardedHandler: Dispatcher.DispatchHandler = {
+    onRequestStart(controller, context) {
+      if (requestStarted) {
+        controller.abort(new Error("Archil control-plane requests are not replayed after a connection failure"));
+        return;
+      }
+      requestStarted = true;
+      handler.onRequestStart?.(controller, context);
+    },
+    onRequestUpgrade: handler.onRequestUpgrade?.bind(handler),
+    onResponseStart: handler.onResponseStart?.bind(handler),
+    onResponseData: handler.onResponseData?.bind(handler),
+    onResponseEnd: handler.onResponseEnd?.bind(handler),
+    onResponseError: handler.onResponseError?.bind(handler),
+  };
+
+  const dispatchBody = (body: Dispatcher.DispatchOptions["body"]): boolean => dispatch({
+    ...options,
+    body,
+    idempotent: true,
+  }, guardedHandler);
+
+  if (!isAsyncIterableBody(options.body)) return dispatchBody(options.body);
+
+  void bufferBody(options.body).then(
+    dispatchBody,
+    (error: unknown) => handler.onResponseError?.({
+      aborted: false,
+      paused: false,
+      reason: null,
+      abort() {},
+      pause() {},
+      resume() {},
+    }, error instanceof Error ? error : new Error(String(error))),
+  );
+  return true;
+};
+
 // Every Archil instance used to delegate to Node's default global fetch
 // dispatcher. That dispatcher currently negotiates HTTP/1.1, even when the
 // control plane advertises HTTP/2, and a burst of independently constructed
-// clients therefore creates substantial connection pressure. Keep one
-// HTTP/2-capable dispatcher per control-plane origin and credential, shared by
-// every client in this JavaScript process.
+// clients therefore creates substantial connection pressure. Keep one lazily
+// initialized HTTP/2-capable dispatcher per control-plane origin and credential,
+// shared by every client in this JavaScript process. It opens a single session
+// on demand, then Undici multiplexes concurrent requests over that session.
 const sharedDispatchers = new Map<string, Promise<Dispatcher>>();
 
 function dispatcherKey(baseUrl: string, apiKey: string): string {
@@ -59,10 +129,11 @@ function getSharedDispatcher(baseUrl: string, apiKey: string): Promise<Dispatche
     const { Agent } = await undiciModule;
     return new Agent({
       allowH2: true,
-      connections: 100,
+      connections: CONTROL_PLANE_CONNECTIONS,
+      pipelining: CONTROL_PLANE_CONCURRENT_STREAMS,
       keepAliveTimeout: 60_000,
       keepAliveMaxTimeout: 600_000,
-    });
+    }).compose(multiplexHttp2Requests);
   })();
 
   sharedDispatchers.set(key, dispatcher);
