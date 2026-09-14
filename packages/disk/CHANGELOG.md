@@ -1,5 +1,18 @@
 # disk
 
+## 1.2.0
+
+### Minor Changes
+
+- 68620ac: Add public sandbox ports: pass `ports` at creation, or use `exposePort()`, `listPorts()`, and `unexposePort()` on an existing sandbox. Expose returns the public hostname; list returns entries containing the port number and hostname.
+- a525194: Add `sandbox.setTimeout()` for editing hard and idle TTLs independently or together. Expose `idleTtlSeconds` on sandbox creation and responses; zero disables idle expiry. Hard TTL defaults to 24 hours.
+  
+  Remove `Sandbox.expiresAt` and the CLI's expiry display; the API no longer exposes the estimated sandbox deadline. Connection-token expiry is unchanged.
+
+### Patch Changes
+
+- c48da00: Lazily share one HTTP/2 session per control-plane origin and multiplex concurrent requests over it.
+
 ## 1.1.2
 
 ### Patch Changes
