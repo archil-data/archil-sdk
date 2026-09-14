@@ -1302,6 +1302,39 @@ class Sandbox:
 
     fork: __fork_spec
 
+    class __expose_port_spec(typing_extensions.Protocol):
+        def __call__(self, /, port: int) -> archil._models.SandboxEndpoint:
+            """Expose a TCP port publicly (1–65535), returning its port and hostname."""
+            ...
+
+        async def aio(self, /, port: int) -> archil._models.SandboxEndpoint:
+            """Expose a TCP port publicly (1–65535), returning its port and hostname."""
+            ...
+
+    expose_port: __expose_port_spec
+
+    class __list_ports_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> list[archil._models.SandboxEndpoint]:
+            """List explicitly exposed public ports. Service-published ports are in ``endpoints``."""
+            ...
+
+        async def aio(self, /) -> list[archil._models.SandboxEndpoint]:
+            """List explicitly exposed public ports. Service-published ports are in ``endpoints``."""
+            ...
+
+    list_ports: __list_ports_spec
+
+    class __delete_port_spec(typing_extensions.Protocol):
+        def __call__(self, /, port: int) -> None:
+            """Remove explicit public exposure. A service publishing the same port remains reachable."""
+            ...
+
+        async def aio(self, /, port: int) -> None:
+            """Remove explicit public exposure. A service publishing the same port remains reachable."""
+            ...
+
+    delete_port: __delete_port_spec
+
     class __get_network_spec(typing_extensions.Protocol):
         def __call__(self, /) -> archil._models.SandboxNetwork:
             ...
@@ -1363,10 +1396,10 @@ class Sandboxes:
     get: __get_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, wait: bool = True) -> Sandbox:
+        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
             ...
 
-        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, wait: bool = True) -> Sandbox:
+        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
             ...
 
     create: __create_spec

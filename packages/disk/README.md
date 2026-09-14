@@ -151,6 +151,27 @@ const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
 
+Expose TCP ports publicly when creating a sandbox or later with `exposePort`:
+
+```ts
+const web = await client.sandboxes.create({ baseImage: "python:3.12-slim", ports: [8080] });
+const server = await web.processes.start("python -m http.server 8080 --bind 0.0.0.0");
+await server.disconnect(); // The server keeps running.
+
+const endpoint = await web.exposePort(8080); // Returns the existing exposure if already public.
+console.log(`https://${endpoint.hostname}`); // Available once the server is listening.
+console.log(await web.listPorts()); // [{ port: 8080, hostname: "..." }]
+await web.deletePort(8080);
+```
+
+Ports must be between 1 and 65535. Exposing a port makes it publicly accessible
+without authentication; your application must listen on that port. HTTP services
+are reached through HTTPS on the returned hostname.
+`listPorts()` returns only explicitly exposed ports; `sandbox.endpoints` contains
+service-published ports. Deleting explicit exposure leaves a service publishing
+the same port reachable and does not stop the listening process. Routing changes
+may take a few seconds to propagate, and existing connections remain open.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```ts

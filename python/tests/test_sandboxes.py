@@ -10,6 +10,7 @@ import archil as archil_module
 from archil import (
     ArchilApiError,
     Sandbox,
+    SandboxEndpoint,
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
@@ -380,6 +381,7 @@ def test_create_and_list_sandboxes(archil, router):
         max_ttl_seconds=3600,
         idle_ttl_seconds=30,
         max_concurrent_execs=4,
+        ports=[3000, 8080],
         network=SandboxNetwork(
             egress=SandboxEgressPolicy(
                 default="deny",
@@ -415,6 +417,7 @@ def test_create_and_list_sandboxes(archil, router):
         "max_ttl_seconds": 3600,
         "idle_ttl_seconds": 30,
         "max_concurrent_execs": 4,
+        "ports": [3000, 8080],
         "network": network_json,
     }
 
@@ -525,6 +528,41 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
     assert router.requests[-1].path == "/api/sandboxes/sbx-1"
     stop_request = next(request for request in router.requests if request.path.endswith("/stop"))
     assert stop_request.query == {}
+
+
+@pytest.mark.asyncio
+async def test_public_ports_use_expose_list_delete_api(archil, router):
+    endpoint_json = {"port": 3000, "hostname": "3000-sandbox.example.com"}
+    endpoint = SandboxEndpoint.from_json(endpoint_json)
+    responses = iter([
+        ok_envelope(sandbox_json()),
+        httpx.Response(201, json={"success": True, "data": endpoint_json}),
+        ok_envelope(endpoint_json),
+        ok_envelope({"ports": [endpoint_json]}),
+        httpx.Response(204),
+        ok_envelope({"ports": []}),
+        error_envelope(404, "port not found"),
+    ])
+    router.set(lambda request: next(responses))
+    sandbox = archil.sandboxes.get("sbx-1")
+
+    assert sandbox.expose_port(3000) == endpoint
+    assert await sandbox.expose_port.aio(3000) == endpoint
+    assert sandbox.list_ports() == [endpoint]
+    assert sandbox.delete_port(3000) is None
+    assert await sandbox.list_ports.aio() == []
+    with pytest.raises(ArchilApiError) as exc_info:
+        await sandbox.delete_port.aio(3000)
+    assert exc_info.value.status == 404
+    assert sandbox.endpoints[0].port == 8080
+    assert [(r.method, r.path, r.content) for r in router.requests[1:]] == [
+        ("PUT", "/api/sandboxes/sbx-1/ports/3000", b""),
+        ("PUT", "/api/sandboxes/sbx-1/ports/3000", b""),
+        ("GET", "/api/sandboxes/sbx-1/ports", b""),
+        ("DELETE", "/api/sandboxes/sbx-1/ports/3000", b""),
+        ("GET", "/api/sandboxes/sbx-1/ports", b""),
+        ("DELETE", "/api/sandboxes/sbx-1/ports/3000", b""),
+    ]
 
 
 def test_get_and_update_network_use_active_runtime_policy(archil, router):
@@ -706,7 +744,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
     )
 
     network = SandboxNetwork(egress=SandboxEgressPolicy(default="deny", allow=["github.com"]))
-    assert archil_module.create_sandbox(name="trial", idle_ttl_seconds=0, network=network, wait=False) is expected
+    assert archil_module.create_sandbox(name="trial", idle_ttl_seconds=0, network=network, ports=[3000], wait=False) is expected
     assert archil_module.list_sandboxes(disk="dsk-1") == [expected]
     assert archil_module.get_sandbox("sbx-1") is expected
     assert calls == [
@@ -722,6 +760,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "idle_ttl_seconds": 0,
                 "max_concurrent_execs": None,
                 "network": network,
+                "ports": [3000],
                 "wait": False,
             },
         ),

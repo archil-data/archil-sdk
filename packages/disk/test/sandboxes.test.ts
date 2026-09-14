@@ -160,6 +160,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     maxTtlSeconds: 600,
     idleTtlSeconds: 30,
     maxConcurrentExecs: 16,
+    ports: [3000, 8080],
     network: {
       egress: {
         default: "deny",
@@ -197,6 +198,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
           max_ttl_seconds: 600,
           idle_ttl_seconds: 30,
           max_concurrent_execs: 16,
+          ports: [3000, 8080],
           network: {
             egress: {
               default: "deny",
@@ -215,6 +217,41 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
         },
       },
     },
+  ]);
+});
+
+test("sandbox public ports use the expose/list/delete API", async () => {
+  const endpoint = { port: 3000, hostname: "3000-sandbox.example.com" };
+  const requests: Array<{ method: string; path: string; body: string }> = [];
+  const responses = [
+    Response.json({ success: true, data: endpoint }, { status: 201 }),
+    Response.json({ success: true, data: endpoint }),
+    Response.json({ success: true, data: { ports: [endpoint] } }),
+    new Response(null, { status: 204 }),
+    Response.json({ success: true, data: { ports: [] } }),
+    Response.json({ success: false, error: "port not found" }, { status: 404 }),
+  ];
+  vi.stubGlobal("fetch", async (request: Request) => {
+    requests.push({ method: request.method, path: new URL(request.url).pathname, body: await request.text() });
+    return responses.shift()!;
+  });
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  assert.deepEqual(await sandbox.exposePort(3000), endpoint);
+  assert.deepEqual(await sandbox.exposePort(3000), endpoint);
+  assert.deepEqual(await sandbox.listPorts(), [endpoint]);
+  assert.equal(await sandbox.deletePort(3000), undefined);
+  assert.deepEqual(await sandbox.listPorts(), []);
+  await assert.rejects(sandbox.deletePort(3000), (error: unknown) => error instanceof ArchilApiError && error.status === 404);
+  assert.deepEqual(sandbox.endpoints, sandboxWire().endpoints);
+  assert.deepEqual(requests, [
+    { method: "PUT", path: "/api/sandboxes/0198-sandbox/ports/3000", body: "" },
+    { method: "PUT", path: "/api/sandboxes/0198-sandbox/ports/3000", body: "" },
+    { method: "GET", path: "/api/sandboxes/0198-sandbox/ports", body: "" },
+    { method: "DELETE", path: "/api/sandboxes/0198-sandbox/ports/3000", body: "" },
+    { method: "GET", path: "/api/sandboxes/0198-sandbox/ports", body: "" },
+    { method: "DELETE", path: "/api/sandboxes/0198-sandbox/ports/3000", body: "" },
   ]);
 });
 

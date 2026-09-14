@@ -36,6 +36,7 @@ class _Sandboxes:
         idle_ttl_seconds: Optional[int] = None,
         max_concurrent_execs: Optional[int] = None,
         network: Optional[SandboxNetwork] = None,
+        ports: Optional[list[int]] = None,
         wait: bool = True,
     ) -> _Sandbox:
         body = {
@@ -50,6 +51,7 @@ class _Sandboxes:
                 "idle_ttl_seconds": idle_ttl_seconds,
                 "max_concurrent_execs": max_concurrent_execs,
                 "network": network.to_json() if network is not None else None,
+                "ports": ports,
             }.items()
             if value is not None
         }

@@ -36,6 +36,8 @@ export interface CreateSandboxRequest {
   maxConcurrentExecs?: number;
   /** Creation-time network policy. Egress is unrestricted when omitted. */
   network?: SandboxNetwork;
+  /** TCP ports to expose publicly, from 1 to 65535. */
+  ports?: number[];
 }
 
 export interface ListSandboxesOptions {
@@ -97,6 +99,7 @@ export class Sandboxes {
       idle_ttl_seconds: request.idleTtlSeconds,
       max_concurrent_execs: request.maxConcurrentExecs,
       network: request.network,
+      ports: request.ports,
     };
     const data = await unwrap(
       retryApiRequest(
