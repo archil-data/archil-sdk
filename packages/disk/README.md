@@ -172,6 +172,9 @@ service-published ports. Deleting explicit exposure leaves a service publishing
 the same port reachable and does not stop the listening process. Routing changes
 may take a few seconds to propagate, and existing connections remain open.
 
+`fork` pauses a running sandbox while the snapshot is taken and resumes it once the
+fork is accepted. A paused or stopped sandbox is forked in place and left as it is.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```ts
