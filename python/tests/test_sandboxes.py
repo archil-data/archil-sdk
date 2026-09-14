@@ -229,6 +229,11 @@ def sandbox_json(status: str = "running", **overrides) -> dict:
         "created_at": NOW,
         "running_at": NOW if status == "running" else None,
         "last_active_at": NOW,
+        **(
+            {"checkpoint": "sandbox-sbx-1-epoch-1"}
+            if status in {"pausing", "paused", "stopping", "stopped"}
+            else {}
+        ),
         **overrides,
     }
 
@@ -280,6 +285,7 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
         ("POST", "/api/sandboxes/sbx-1/stop", "transient"),
         ("POST", "/api/sandboxes/sbx-1/pause", "transient"),
         ("POST", "/api/sandboxes/sbx-1/resume", "transient"),
+        ("POST", "/api/sandboxes/sbx-1/pause", "transient"),
         ("POST", "/api/sandboxes/sbx-1/fork", "connect"),
         ("GET", "/api/sandboxes/sbx-1/network", "transient"),
         ("PUT", "/api/sandboxes/sbx-1/network", "transient"),
@@ -509,6 +515,10 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
                     name="forked",
                 )
             )
+        if request.url.path.endswith("/pause"):
+            return ok_envelope(sandbox_json("pausing"))
+        if request.url.path.endswith("/resume"):
+            return ok_envelope(sandbox_json("pending"))
         if request.url.path.endswith("/stop"):
             return ok_envelope(sandbox_json("stopped", finished_at=NOW))
         if request.method == "DELETE":
@@ -518,12 +528,19 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
     router.set(handler)
     sandbox = archil.sandboxes.get("sbx-1")
     fork = sandbox.fork(name="forked")
+    assert sandbox.status == "running"
     stopped = sandbox.stop()
     stopped.delete()
 
     assert fork.id == "sbx-fork"
     assert stopped.status == "stopped"
-    assert router.requests[1].json == {"name": "forked"}
+    posts = [request for request in router.requests if request.method == "POST"]
+    assert [request.path.rsplit("/", 1)[-1] for request in posts] == ["pause", "fork", "resume", "stop"]
+    pause_request, fork_request, resume_request = posts[0], posts[1], posts[2]
+    assert pause_request.query == {}
+    assert fork_request.json == {"name": "forked", "checkpoint": "sandbox-sbx-1-epoch-1"}
+    assert fork_request.query == {"wait": "false"}
+    assert resume_request.query == {"wait": "false"}
     assert router.requests[-1].method == "DELETE"
     assert router.requests[-1].path == "/api/sandboxes/sbx-1"
     stop_request = next(request for request in router.requests if request.path.endswith("/stop"))
@@ -563,6 +580,92 @@ async def test_public_ports_use_expose_list_unexpose_api(archil, router):
         ("GET", "/api/sandboxes/sbx-1/ports", b""),
         ("DELETE", "/api/sandboxes/sbx-1/ports/3000", b""),
     ]
+
+
+def test_fork_of_paused_sandbox_does_not_resume_it(archil, router):
+    router.set(
+        lambda request: (
+            ok_envelope(sandbox_json(sandbox_id="sbx-fork", name="forked"))
+            if request.url.path.endswith("/fork")
+            else ok_envelope(sandbox_json("paused"))
+        )
+    )
+    sandbox = archil.sandboxes.get("sbx-1")
+    fork = sandbox.fork(name="forked")
+
+    assert fork.id == "sbx-fork"
+    posts = [request for request in router.requests if request.method == "POST"]
+    assert [request.path for request in posts] == ["/api/sandboxes/sbx-1/pause", "/api/sandboxes/sbx-1/fork"]
+    fork_request = posts[1]
+    assert fork_request.query == {"wait": "true"}
+    assert fork_request.json == {"name": "forked", "checkpoint": "sandbox-sbx-1-epoch-1"}
+
+
+def test_fork_returns_child_when_source_cannot_be_resumed(archil, router, monkeypatch):
+    import archil._sandbox as sandbox_module
+
+    monkeypatch.setattr(sandbox_module, "_POLL_INTERVAL_SECONDS", 0)
+
+    def handler(request):
+        if request.url.path.endswith("/pause"):
+            return ok_envelope(sandbox_json("pausing"))
+        if request.url.path.endswith("/fork"):
+            return ok_envelope(sandbox_json(sandbox_id="sbx-fork", name="forked"))
+        if request.url.path.endswith("/resume"):
+            return error_envelope(409, "no runtime host available")
+        return ok_envelope(sandbox_json("paused"))
+
+    router.set(handler)
+    source = archil.sandboxes.get("sbx-1")
+    fork = source.fork()
+
+    assert fork.id == "sbx-fork"
+    assert source.status == "paused"
+    posts = [request.path.rsplit("/", 1)[-1] for request in router.requests if request.method == "POST"]
+    assert posts == ["pause", "fork", "resume"]
+
+
+def test_fork_resumes_source_when_pause_wait_fails(archil, router, monkeypatch):
+    import archil._sandbox as sandbox_module
+
+    monkeypatch.setattr(sandbox_module, "_POLL_INTERVAL_SECONDS", 0)
+    reads = 0
+
+    def handler(request):
+        nonlocal reads
+        if request.url.path.endswith("/pause"):
+            return ok_envelope(sandbox_json("pausing"))
+        if request.method == "GET":
+            reads += 1
+            return ok_envelope(sandbox_json()) if reads == 1 else error_envelope(400, "boom")
+        return ok_envelope(sandbox_json("pending"))
+
+    router.set(handler)
+    with pytest.raises(ArchilApiError):
+        archil.sandboxes.get("sbx-1").fork()
+
+    posts = [request.path.rsplit("/", 1)[-1] for request in router.requests if request.method == "POST"]
+    assert posts == ["pause", "resume"]
+
+
+def test_fork_keeps_pause_checkpoint_when_source_resumes_first(archil, router, monkeypatch):
+    import archil._sandbox as sandbox_module
+
+    monkeypatch.setattr(sandbox_module, "_POLL_INTERVAL_SECONDS", 0)
+
+    def handler(request):
+        if request.url.path.endswith("/pause"):
+            return ok_envelope(sandbox_json("pausing"))
+        if request.url.path.endswith("/fork"):
+            return ok_envelope(sandbox_json(sandbox_id="sbx-fork", name="forked"))
+        return ok_envelope(sandbox_json())
+
+    router.set(handler)
+    fork = archil.sandboxes.get("sbx-1").fork()
+
+    assert fork.id == "sbx-fork"
+    fork_request = next(request for request in router.requests if request.path.endswith("/fork"))
+    assert fork_request.json == {"checkpoint": "sandbox-sbx-1-epoch-1"}
 
 
 def test_get_and_update_network_use_active_runtime_policy(archil, router):
