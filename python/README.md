@@ -82,7 +82,7 @@ server.disconnect()  # The server keeps running.
 endpoint = web.expose_port(8080)  # Returns the existing exposure if already public.
 print(f"https://{endpoint.hostname}")  # Available once the server is listening.
 print(web.list_ports())  # list[SandboxEndpoint] with port and hostname
-web.delete_port(8080)
+web.unexpose_port(8080)
 ```
 
 Ports must be between 1 and 65535. Exposing a port makes it publicly accessible

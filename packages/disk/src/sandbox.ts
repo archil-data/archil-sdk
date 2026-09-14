@@ -330,7 +330,7 @@ export class Sandbox {
   }
 
   /** Remove explicit public exposure. A service publishing the same port remains reachable. */
-  async deletePort(port: number): Promise<void> {
+  async unexposePort(port: number): Promise<void> {
     const client = this._client as unknown as SandboxExtensionClient;
     await unwrapEmpty(
       retryApiRequest(

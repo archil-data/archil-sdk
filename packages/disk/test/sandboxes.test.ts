@@ -220,7 +220,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
   ]);
 });
 
-test("sandbox public ports use the expose/list/delete API", async () => {
+test("sandbox public ports use the expose/list/unexpose API", async () => {
   const endpoint = { port: 3000, hostname: "3000-sandbox.example.com" };
   const requests: Array<{ method: string; path: string; body: string }> = [];
   const responses = [
@@ -241,9 +241,9 @@ test("sandbox public ports use the expose/list/delete API", async () => {
   assert.deepEqual(await sandbox.exposePort(3000), endpoint);
   assert.deepEqual(await sandbox.exposePort(3000), endpoint);
   assert.deepEqual(await sandbox.listPorts(), [endpoint]);
-  assert.equal(await sandbox.deletePort(3000), undefined);
+  assert.equal(await sandbox.unexposePort(3000), undefined);
   assert.deepEqual(await sandbox.listPorts(), []);
-  await assert.rejects(sandbox.deletePort(3000), (error: unknown) => error instanceof ArchilApiError && error.status === 404);
+  await assert.rejects(sandbox.unexposePort(3000), (error: unknown) => error instanceof ArchilApiError && error.status === 404);
   assert.deepEqual(sandbox.endpoints, sandboxWire().endpoints);
   assert.deepEqual(requests, [
     { method: "PUT", path: "/api/sandboxes/0198-sandbox/ports/3000", body: "" },

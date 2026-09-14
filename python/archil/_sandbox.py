@@ -192,7 +192,7 @@ class _Sandbox:
         data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/ports", retry="transient")
         return [SandboxEndpoint.from_json(item) for item in data["ports"]]
 
-    async def delete_port(self, port: int) -> None:
+    async def unexpose_port(self, port: int) -> None:
         """Remove explicit public exposure. A service publishing the same port remains reachable."""
         await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}/ports/{port}", retry="transient")
 

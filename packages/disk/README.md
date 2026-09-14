@@ -161,7 +161,7 @@ await server.disconnect(); // The server keeps running.
 const endpoint = await web.exposePort(8080); // Returns the existing exposure if already public.
 console.log(`https://${endpoint.hostname}`); // Available once the server is listening.
 console.log(await web.listPorts()); // [{ port: 8080, hostname: "..." }]
-await web.deletePort(8080);
+await web.unexposePort(8080);
 ```
 
 Ports must be between 1 and 65535. Exposing a port makes it publicly accessible

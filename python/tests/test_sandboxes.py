@@ -531,7 +531,7 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_public_ports_use_expose_list_delete_api(archil, router):
+async def test_public_ports_use_expose_list_unexpose_api(archil, router):
     endpoint_json = {"port": 3000, "hostname": "3000-sandbox.example.com"}
     endpoint = SandboxEndpoint.from_json(endpoint_json)
     responses = iter([
@@ -549,10 +549,10 @@ async def test_public_ports_use_expose_list_delete_api(archil, router):
     assert sandbox.expose_port(3000) == endpoint
     assert await sandbox.expose_port.aio(3000) == endpoint
     assert sandbox.list_ports() == [endpoint]
-    assert sandbox.delete_port(3000) is None
+    assert sandbox.unexpose_port(3000) is None
     assert await sandbox.list_ports.aio() == []
     with pytest.raises(ArchilApiError) as exc_info:
-        await sandbox.delete_port.aio(3000)
+        await sandbox.unexpose_port.aio(3000)
     assert exc_info.value.status == 404
     assert sandbox.endpoints[0].port == 8080
     assert [(r.method, r.path, r.content) for r in router.requests[1:]] == [

@@ -1324,7 +1324,7 @@ class Sandbox:
 
     list_ports: __list_ports_spec
 
-    class __delete_port_spec(typing_extensions.Protocol):
+    class __unexpose_port_spec(typing_extensions.Protocol):
         def __call__(self, /, port: int) -> None:
             """Remove explicit public exposure. A service publishing the same port remains reachable."""
             ...
@@ -1333,7 +1333,7 @@ class Sandbox:
             """Remove explicit public exposure. A service publishing the same port remains reachable."""
             ...
 
-    delete_port: __delete_port_spec
+    unexpose_port: __unexpose_port_spec
 
     class __get_network_spec(typing_extensions.Protocol):
         def __call__(self, /) -> archil._models.SandboxNetwork:
