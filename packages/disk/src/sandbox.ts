@@ -24,6 +24,9 @@ export type SandboxWire = components["schemas"]["Sandbox"] & {
   idle_ttl_seconds?: number;
 };
 
+/** @internal `checkpoint` is newer than the minimum @archildata/api-types version. */
+type SandboxForkRequest = components["schemas"]["ForkSandboxRequest"] & { checkpoint?: string };
+
 export type SandboxStatus = components["schemas"]["SandboxState"];
 
 export interface SandboxEndpoint {
@@ -49,6 +52,8 @@ export interface SandboxResponse {
   finishedAt?: Date;
   lastActiveAt: Date;
   exitReason?: string;
+  /** Disk checkpoint the current session leaves behind; present while pausing, paused, stopping, or stopped. */
+  checkpoint?: string;
 }
 
 export interface SandboxWaitOptions {
@@ -144,6 +149,7 @@ export class Sandbox {
   finishedAt?: Date;
   lastActiveAt!: Date;
   exitReason?: string;
+  checkpoint?: string;
   readonly processes: SandboxProcesses;
   readonly files: SandboxFiles;
 
@@ -176,6 +182,8 @@ export class Sandbox {
     this.finishedAt = data.finished_at ? new Date(data.finished_at) : undefined;
     this.lastActiveAt = new Date(data.last_active_at);
     this.exitReason = data.exit_reason;
+    // Newer than the minimum @archildata/api-types version.
+    this.checkpoint = (data as { checkpoint?: string }).checkpoint;
     return this;
   }
 
@@ -197,6 +205,7 @@ export class Sandbox {
       finishedAt: this.finishedAt,
       lastActiveAt: this.lastActiveAt,
       exitReason: this.exitReason,
+      checkpoint: this.checkpoint,
     };
   }
 
@@ -283,20 +292,50 @@ export class Sandbox {
     return options.wait === false ? this : waitForSandboxStart(this);
   }
 
-  /** Create an isolated writable branch from this sandbox's current state. */
+  /**
+   * Create an isolated writable branch from this sandbox's current state.
+   * A running sandbox is paused for the snapshot and resumed once the fork is
+   * accepted; a paused or stopped sandbox is left as it is. The fork names the
+   * checkpoint the pause returned, so it does not depend on the source still
+   * being paused when the request lands.
+   */
   async fork(options: SandboxForkOptions = {}): Promise<Sandbox> {
-    const data = await unwrap(
+    // Pause is idempotent: "pausing" means the sandbox was live and is ours to
+    // resume; "paused" or "stopped" means it was already inactive.
+    const paused = await unwrap(
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes/{sid}/pause", {
+            params: { path: { sid: this.id } },
+          }),
+        "transient",
+      ),
+    );
+    this._apply(paused);
+    const resumeAfterFork = this.status === "pausing";
+    const checkpoint = this.checkpoint;
+    await waitWhileSandboxStatus(this, "pausing");
+
+    // A source we paused resumes as soon as the fork is accepted, not after the child boots.
+    const wait = resumeAfterFork ? false : (options.wait ?? true);
+    const body = { name: options.name, checkpoint } as SandboxForkRequest;
+    const fork = await unwrap(
       retryApiRequest(
         () =>
           this._client.POST("/api/sandboxes/{sid}/fork", {
-            params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
-            body: options.name === undefined ? undefined : { name: options.name },
+            params: { path: { sid: this.id }, query: { wait } },
+            body,
           }),
         "connect",
       ),
-    );
-    const fork = new Sandbox(data, this._client);
-    return options.wait === false ? fork : waitForSandboxStart(fork);
+    )
+      .then((data) => new Sandbox(data, this._client))
+      .finally(() => (resumeAfterFork ? this.resume({ wait: false }) : undefined));
+
+    if (options.wait === false) return fork;
+    await waitForSandboxStart(fork);
+    if (resumeAfterFork) await waitForSandboxStart(this);
+    return fork;
   }
 
   /** Expose a TCP port publicly (1–65535), returning its hostname. */
