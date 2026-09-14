@@ -354,6 +354,7 @@ class SandboxData:
     finished_at: Optional[datetime] = None
     exit_reason: Optional[str] = None
     idle_ttl_seconds: int = 0
+    checkpoint: Optional[str] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "SandboxData":
@@ -374,6 +375,7 @@ class SandboxData:
             finished_at=_parse_datetime(d["finished_at"]) if d.get("finished_at") else None,
             last_active_at=_parse_datetime(d["last_active_at"]),
             exit_reason=d.get("exit_reason"),
+            checkpoint=d.get("checkpoint"),
         )
 
 
