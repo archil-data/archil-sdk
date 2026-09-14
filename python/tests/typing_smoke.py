@@ -62,7 +62,7 @@ def sync_usage() -> None:
     )
     _network: SandboxNetwork = sandbox.get_network()
     _network = sandbox.update_network(SandboxNetwork())
-    _endpoint: SandboxEndpoint = sandbox.expose_port(3000)
+    _hostname: str = sandbox.expose_port(3000)
     _ports: list[SandboxEndpoint] = sandbox.list_ports()
     sandbox.unexpose_port(3000)
     module_sandbox: Sandbox = archil.create_sandbox(name="trial", idle_ttl_seconds=0, ports=[3000])
@@ -126,7 +126,7 @@ def sync_usage() -> None:
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
         sandbox = await client.sandboxes.create.aio(name="trial", idle_ttl_seconds=300, ports=[3000])
-        _endpoint: SandboxEndpoint = await sandbox.expose_port.aio(3000)
+        _hostname: str = await sandbox.expose_port.aio(3000)
         _ports: list[SandboxEndpoint] = await sandbox.list_ports.aio()
         await sandbox.unexpose_port.aio(3000)
         sandbox = await sandbox.set_timeout.aio(3600)

@@ -79,8 +79,8 @@ web = archil.create_sandbox(base_image="python:3.12-slim", ports=[8080])
 server = web.processes.start("python -m http.server 8080 --bind 0.0.0.0")
 server.disconnect()  # The server keeps running.
 
-endpoint = web.expose_port(8080)  # Returns the existing exposure if already public.
-print(f"https://{endpoint.hostname}")  # Available once the server is listening.
+hostname = web.expose_port(8080)  # Returns the hostname, including if already public.
+print(f"https://{hostname}")  # Available once the server is listening.
 print(web.list_ports())  # list[SandboxEndpoint] with port and hostname
 web.unexpose_port(8080)
 ```

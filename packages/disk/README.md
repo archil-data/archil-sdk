@@ -158,8 +158,8 @@ const web = await client.sandboxes.create({ baseImage: "python:3.12-slim", ports
 const server = await web.processes.start("python -m http.server 8080 --bind 0.0.0.0");
 await server.disconnect(); // The server keeps running.
 
-const endpoint = await web.exposePort(8080); // Returns the existing exposure if already public.
-console.log(`https://${endpoint.hostname}`); // Available once the server is listening.
+const hostname = await web.exposePort(8080); // Returns the hostname, including if already public.
+console.log(`https://${hostname}`); // Available once the server is listening.
 console.log(await web.listPorts()); // [{ port: 8080, hostname: "..." }]
 await web.unexposePort(8080);
 ```

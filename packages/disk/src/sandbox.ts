@@ -299,11 +299,11 @@ export class Sandbox {
     return options.wait === false ? fork : waitForSandboxStart(fork);
   }
 
-  /** Expose a TCP port publicly (1–65535), returning its port and hostname. */
-  async exposePort(port: number): Promise<SandboxEndpoint> {
+  /** Expose a TCP port publicly (1–65535), returning its hostname. */
+  async exposePort(port: number): Promise<string> {
     // The endpoint is newer than the minimum @archildata/api-types version.
     const client = this._client as unknown as SandboxExtensionClient;
-    return unwrap(
+    const data = await unwrap(
       retryApiRequest(
         () =>
           client.PUT("/api/sandboxes/{sid}/ports/{port}", {
@@ -312,6 +312,7 @@ export class Sandbox {
         "transient",
       ),
     );
+    return data.hostname;
   }
 
   /** List explicitly exposed public ports. Service-published ports are in `endpoints`. */

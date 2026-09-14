@@ -546,8 +546,8 @@ async def test_public_ports_use_expose_list_unexpose_api(archil, router):
     router.set(lambda request: next(responses))
     sandbox = archil.sandboxes.get("sbx-1")
 
-    assert sandbox.expose_port(3000) == endpoint
-    assert await sandbox.expose_port.aio(3000) == endpoint
+    assert sandbox.expose_port(3000) == endpoint.hostname
+    assert await sandbox.expose_port.aio(3000) == endpoint.hostname
     assert sandbox.list_ports() == [endpoint]
     assert sandbox.unexpose_port(3000) is None
     assert await sandbox.list_ports.aio() == []

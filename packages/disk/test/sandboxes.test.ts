@@ -238,8 +238,8 @@ test("sandbox public ports use the expose/list/unexpose API", async () => {
   const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  assert.deepEqual(await sandbox.exposePort(3000), endpoint);
-  assert.deepEqual(await sandbox.exposePort(3000), endpoint);
+  assert.equal(await sandbox.exposePort(3000), endpoint.hostname);
+  assert.equal(await sandbox.exposePort(3000), endpoint.hostname);
   assert.deepEqual(await sandbox.listPorts(), [endpoint]);
   assert.equal(await sandbox.unexposePort(3000), undefined);
   assert.deepEqual(await sandbox.listPorts(), []);

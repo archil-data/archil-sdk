@@ -180,12 +180,12 @@ class _Sandbox:
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
 
-    async def expose_port(self, port: int) -> SandboxEndpoint:
-        """Expose a TCP port publicly (1–65535), returning its port and hostname."""
+    async def expose_port(self, port: int) -> str:
+        """Expose a TCP port publicly (1–65535), returning its hostname."""
         data = await self._transport.request_json(
             "PUT", f"/api/sandboxes/{self.id}/ports/{port}", retry="transient"
         )
-        return SandboxEndpoint.from_json(data)
+        return data["hostname"]
 
     async def list_ports(self) -> list[SandboxEndpoint]:
         """List explicitly exposed public ports. Service-published ports are in ``endpoints``."""

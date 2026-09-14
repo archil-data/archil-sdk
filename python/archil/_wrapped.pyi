@@ -1303,12 +1303,12 @@ class Sandbox:
     fork: __fork_spec
 
     class __expose_port_spec(typing_extensions.Protocol):
-        def __call__(self, /, port: int) -> archil._models.SandboxEndpoint:
-            """Expose a TCP port publicly (1–65535), returning its port and hostname."""
+        def __call__(self, /, port: int) -> str:
+            """Expose a TCP port publicly (1–65535), returning its hostname."""
             ...
 
-        async def aio(self, /, port: int) -> archil._models.SandboxEndpoint:
-            """Expose a TCP port publicly (1–65535), returning its port and hostname."""
+        async def aio(self, /, port: int) -> str:
+            """Expose a TCP port publicly (1–65535), returning its hostname."""
             ...
 
     expose_port: __expose_port_spec
