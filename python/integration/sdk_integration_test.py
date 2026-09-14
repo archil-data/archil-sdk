@@ -23,6 +23,8 @@ import time
 import uuid
 from pathlib import Path
 
+import httpx
+
 from archil import Archil, ArchilError, ArchilS3Error, SandboxTerminal, TokenUser
 
 
@@ -71,6 +73,7 @@ def run_sandbox_suite(archil) -> None:
         with step("Create sandbox"):
             sandbox = archil.sandboxes.create(
                 name=f"sdk-py-sandbox-{uuid.uuid4().hex[:12]}",
+                base_image="python:3.12-slim",
                 max_ttl_seconds=600,
             )
             sandbox_ids.append(sandbox.id)
@@ -93,6 +96,41 @@ def run_sandbox_suite(archil) -> None:
                 result.stdout == "sandbox-ready",
                 f"unexpected sandbox stdout: {result.stdout!r}",
             )
+
+        with step("Start HTTP server and expose its port"):
+            marker = f"sdk-public-port-{uuid.uuid4().hex}"
+            result = sandbox.exec(f"mkdir -p /tmp/sdk-http && printf '{marker}' > /tmp/sdk-http/index.html")
+            assert_that(result.exit_code == 0, f"failed to prepare HTTP response: {result.stderr}")
+            server = sandbox.processes.start(
+                "python3 -m http.server 8080 --bind 0.0.0.0 --directory /tmp/sdk-http"
+            )
+            server.disconnect()
+            hostname = sandbox.expose_port(8080)
+            ports = sandbox.list_ports()
+            assert_that(
+                [(port.port, port.hostname) for port in ports] == [(8080, hostname)],
+                f"unexpected exposed ports: {ports}",
+            )
+
+        with step("Reach the exposed port through its public HTTPS hostname"):
+            deadline = time.monotonic() + 60
+            while True:
+                try:
+                    response = httpx.get(f"https://{hostname}/", timeout=10)
+                    response.raise_for_status()
+                    break
+                except httpx.HTTPError:
+                    # Allow the listener to start and the public route to propagate.
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(1)
+            assert_that(response.status_code == 200, f"unexpected HTTP status: {response.status_code}")
+            assert_that(response.text == marker, f"unexpected HTTP response: {response.text!r}")
+
+        with step("Remove public port exposure"):
+            sandbox.unexpose_port(8080)
+            assert_that(sandbox.list_ports() == [], "port is still listed after removing exposure")
+            server.kill()
 
         with step("Stream a large binary file through the sandbox"):
             payload = bytes(range(256)) * 10_241

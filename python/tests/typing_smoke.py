@@ -18,6 +18,7 @@ from archil import (
     S3CompatibleMount,
     S3Mount,
     Sandbox,
+    SandboxEndpoint,
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
@@ -40,6 +41,7 @@ def sync_usage() -> None:
     client = Archil(api_key="key-x", region="aws-us-east-1")
     sandbox: Sandbox = client.sandboxes.create(
         name="trial",
+        ports=[3000],
         vcpu_count=2,
         mem_size_mib=4096,
         idle_ttl_seconds=300,
@@ -60,7 +62,10 @@ def sync_usage() -> None:
     )
     _network: SandboxNetwork = sandbox.get_network()
     _network = sandbox.update_network(SandboxNetwork())
-    module_sandbox: Sandbox = archil.create_sandbox(name="trial", idle_ttl_seconds=0)
+    _hostname: str = sandbox.expose_port(3000)
+    _ports: list[SandboxEndpoint] = sandbox.list_ports()
+    sandbox.unexpose_port(3000)
+    module_sandbox: Sandbox = archil.create_sandbox(name="trial", idle_ttl_seconds=0, ports=[3000])
     sandbox = sandbox.set_timeout(3600)
     sandbox = sandbox.set_timeout(idle_ttl_seconds=300)
     sandbox = sandbox.set_timeout(3600, idle_ttl_seconds=0)
@@ -120,7 +125,10 @@ def sync_usage() -> None:
 
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
-        sandbox = await client.sandboxes.create.aio(name="trial", idle_ttl_seconds=300)
+        sandbox = await client.sandboxes.create.aio(name="trial", idle_ttl_seconds=300, ports=[3000])
+        _hostname: str = await sandbox.expose_port.aio(3000)
+        _ports: list[SandboxEndpoint] = await sandbox.list_ports.aio()
+        await sandbox.unexpose_port.aio(3000)
         sandbox = await sandbox.set_timeout.aio(3600)
         sandbox = await sandbox.set_timeout.aio(idle_ttl_seconds=300)
         sandbox = await sandbox.set_timeout.aio(3600, idle_ttl_seconds=0)

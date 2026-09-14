@@ -72,6 +72,28 @@ all_sandboxes = archil.list_sandboxes()
 using_disk = archil.list_sandboxes(disk="dsk-abc123")
 ```
 
+Expose TCP ports publicly when creating a sandbox or later with `expose_port`:
+
+```python
+web = archil.create_sandbox(base_image="python:3.12-slim", ports=[8080])
+server = web.processes.start("python -m http.server 8080 --bind 0.0.0.0")
+server.disconnect()  # The server keeps running.
+
+hostname = web.expose_port(8080)  # Returns the hostname, including if already public.
+print(f"https://{hostname}")  # Available once the server is listening.
+print(web.list_ports())  # list[SandboxEndpoint] with port and hostname
+web.unexpose_port(8080)
+```
+
+Ports must be between 1 and 65535. Exposing a port makes it publicly accessible
+without authentication; your application must listen on that port. HTTP services
+are reached through HTTPS on the returned hostname.
+`list_ports()` returns only explicitly exposed ports; `sandbox.endpoints` contains
+service-published ports. Deleting explicit exposure leaves a service publishing
+the same port reachable and does not stop the listening process. Routing changes
+may take a few seconds to propagate, and existing connections remain open.
+These methods also have `.aio` variants for async callers.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```python

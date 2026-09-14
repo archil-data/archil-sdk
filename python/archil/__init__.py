@@ -257,6 +257,7 @@ def create_sandbox(
     idle_ttl_seconds: Optional[int] = None,
     max_concurrent_execs: Optional[int] = None,
     network: Optional[SandboxNetwork] = None,
+    ports: Optional[list[int]] = None,
     wait: bool = True,
 ) -> Sandbox:
     return _client().sandboxes.create(
@@ -269,6 +270,7 @@ def create_sandbox(
         idle_ttl_seconds=idle_ttl_seconds,
         max_concurrent_execs=max_concurrent_execs,
         network=network,
+        ports=ports,
         wait=wait,
     )
 

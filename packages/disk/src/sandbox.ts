@@ -73,6 +73,26 @@ export interface SandboxTimeoutOptions {
 
 type SandboxExtensionClient = {
   GET(
+    path: "/api/sandboxes/{sid}/ports",
+    options: { params: { path: { sid: string } } },
+  ): Promise<{
+    data?: { success: boolean; data?: { ports: SandboxEndpoint[] }; error?: string };
+    error?: unknown;
+    response: Response;
+  }>;
+  PUT(
+    path: "/api/sandboxes/{sid}/ports/{port}",
+    options: { params: { path: { sid: string; port: number } } },
+  ): Promise<{
+    data?: { success: boolean; data?: SandboxEndpoint; error?: string };
+    error?: unknown;
+    response: Response;
+  }>;
+  DELETE(
+    path: "/api/sandboxes/{sid}/ports/{port}",
+    options: { params: { path: { sid: string; port: number } } },
+  ): Promise<{ error?: unknown; response: Response }>;
+  GET(
     path: "/api/sandboxes/{sid}/network",
     options: { params: { path: { sid: string } } },
   ): Promise<{
@@ -277,6 +297,51 @@ export class Sandbox {
     );
     const fork = new Sandbox(data, this._client);
     return options.wait === false ? fork : waitForSandboxStart(fork);
+  }
+
+  /** Expose a TCP port publicly (1–65535), returning its hostname. */
+  async exposePort(port: number): Promise<string> {
+    // The endpoint is newer than the minimum @archildata/api-types version.
+    const client = this._client as unknown as SandboxExtensionClient;
+    const data = await unwrap(
+      retryApiRequest(
+        () =>
+          client.PUT("/api/sandboxes/{sid}/ports/{port}", {
+            params: { path: { sid: this.id, port } },
+          }),
+        "transient",
+      ),
+    );
+    return data.hostname;
+  }
+
+  /** List explicitly exposed public ports. Service-published ports are in `endpoints`. */
+  async listPorts(): Promise<SandboxEndpoint[]> {
+    const client = this._client as unknown as SandboxExtensionClient;
+    const data = await unwrap(
+      retryApiRequest(
+        () =>
+          client.GET("/api/sandboxes/{sid}/ports", {
+            params: { path: { sid: this.id } },
+          }),
+        "transient",
+      ),
+    );
+    return data.ports;
+  }
+
+  /** Remove explicit public exposure. A service publishing the same port remains reachable. */
+  async unexposePort(port: number): Promise<void> {
+    const client = this._client as unknown as SandboxExtensionClient;
+    await unwrapEmpty(
+      retryApiRequest(
+        () =>
+          client.DELETE("/api/sandboxes/{sid}/ports/{port}", {
+            params: { path: { sid: this.id, port } },
+          }),
+        "transient",
+      ),
+    );
   }
 
   /** Get this running sandbox's effective network policy. */

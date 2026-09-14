@@ -180,6 +180,22 @@ class _Sandbox:
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
 
+    async def expose_port(self, port: int) -> str:
+        """Expose a TCP port publicly (1–65535), returning its hostname."""
+        data = await self._transport.request_json(
+            "PUT", f"/api/sandboxes/{self.id}/ports/{port}", retry="transient"
+        )
+        return data["hostname"]
+
+    async def list_ports(self) -> list[SandboxEndpoint]:
+        """List explicitly exposed public ports. Service-published ports are in ``endpoints``."""
+        data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/ports", retry="transient")
+        return [SandboxEndpoint.from_json(item) for item in data["ports"]]
+
+    async def unexpose_port(self, port: int) -> None:
+        """Remove explicit public exposure. A service publishing the same port remains reachable."""
+        await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}/ports/{port}", retry="transient")
+
     async def get_network(self) -> SandboxNetwork:
         data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/network", retry="transient")
         return SandboxNetwork.from_json(data)
