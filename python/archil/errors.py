@@ -34,6 +34,17 @@ class SandboxStartError(ArchilError):
         self.latest = sandbox
 
 
+class SandboxPauseError(ArchilError):
+    """The sandbox left pausing without reaching paused; latest holds its state."""
+
+    def __init__(self, sandbox: object) -> None:
+        state = getattr(sandbox, "status", "unknown")
+        reason = getattr(sandbox, "exit_reason", None)
+        detail = f": {reason}" if reason else ""
+        super().__init__(f"Sandbox entered {state} before it paused{detail}", 409, "SANDBOX_PAUSE_FAILED")
+        self.latest = sandbox
+
+
 class SandboxFileTransferError(ArchilError):
     def __init__(self, operation: str, path: str, detail: str) -> None:
         super().__init__(
