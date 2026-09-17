@@ -67,7 +67,7 @@ def delete_sandbox(sandbox, timeout_seconds: float = 30.0) -> None:
 
 
 def run_private_port_suite(sandbox) -> None:
-    with step("Start a private HTTP server and issue port tokens"):
+    with step("Start a private HTTP server"):
         marker = f"sdk-private-port-{uuid.uuid4().hex}"
         result = sandbox.exec(f"mkdir -p /tmp/sdk-private-http && printf '{marker}' > /tmp/sdk-private-http/index.html")
         assert_that(result.exit_code == 0, f"failed to prepare private HTTP response: {result.stderr}")
@@ -76,9 +76,10 @@ def run_private_port_suite(sandbox) -> None:
         )
         server.disconnect()
     try:
-        access = sandbox.create_port_token(8081, ttl="5m")
-        other = sandbox.create_port_token(8081)
-        url = f"https://{access.hostname}/"
+        with step("Issue expiring and non-expiring port tokens"):
+            access = sandbox.create_port_token(8081, ttl="5m")
+            other = sandbox.create_port_token(8081)
+            url = f"https://{access.hostname}/"
 
         # Each call opens a new connection so revocation/expiry is reauthorized.
         def request(token=None):
