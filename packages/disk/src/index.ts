@@ -22,6 +22,7 @@ export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js"
 export { Sandbox } from "./sandbox.js";
 export type {
   SandboxEndpoint,
+  SandboxEgressDrainRule,
   SandboxEgressPolicy,
   SandboxEgressRule,
   SandboxEgressTransform,
@@ -88,6 +89,7 @@ export {
   ArchilApiError,
   ArchilS3Error,
   SandboxFileTransferError,
+  SandboxPauseError,
 } from "./errors.js";
 
 export { VERSION, USER_AGENT } from "./version.js";
