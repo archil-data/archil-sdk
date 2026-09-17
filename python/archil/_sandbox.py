@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Optional, Union
+from typing import AsyncIterator, Optional, Union
 
 from ._http import _Transport
 from ._models import (
     SandboxData,
     SandboxEndpoint,
+    SandboxPortToken,
+    CreatedSandboxPortToken,
+    SandboxPortTokenPage,
     SandboxNetwork,
     SandboxPlatform,
     SandboxProcessOutputHandler,
@@ -227,6 +230,72 @@ class _Sandbox:
     async def unexpose_port(self, port: int) -> None:
         """Remove explicit public exposure. A service publishing the same port remains reachable."""
         await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}/ports/{port}", retry="transient")
+
+    async def create_port_token(self, port: int, *, ttl: Optional[str] = None) -> CreatedSandboxPortToken:
+        """Authorize HTTP access to one port without making it public.
+
+        ``ttl`` is a duration such as "1h" or "30m", up to "8760h" (365 days).
+        Omit it for no expiration. Save the returned token: it is only returned
+        on creation. Send it in the ``X-Archil-Token`` header.
+        """
+        body: dict = {"port": port}
+        if ttl is not None:
+            body["ttl"] = ttl
+        data = await self._transport.request_json(
+            "POST", f"/api/sandboxes/{self.id}/port-tokens", json=body, retry="connect"
+        )
+        return CreatedSandboxPortToken.from_json(data)
+
+    async def get_port_token(self, token_id: str) -> SandboxPortToken:
+        """Get token metadata. Expired and revoked tokens return not found."""
+        data = await self._transport.request_json(
+            "GET", f"/api/sandboxes/{self.id}/port-tokens/{token_id}", retry="transient"
+        )
+        return SandboxPortToken.from_json(data)
+
+    async def _port_token_page(self, *, limit: int, cursor: Optional[str]) -> SandboxPortTokenPage:
+        data, next_cursor = await self._transport.request_json_page(
+            "GET", f"/api/sandboxes/{self.id}/port-tokens",
+            params={"limit": limit, "cursor": cursor}, retry="transient",
+        )
+        return SandboxPortTokenPage(
+            tokens=[SandboxPortToken.from_json(item) for item in data["tokens"]], next_cursor=next_cursor
+        )
+
+    async def list_port_tokens(
+        self, *, limit: Optional[int] = None, cursor: Optional[str] = None
+    ) -> list[SandboxPortToken]:
+        """List token metadata across pages. ``limit`` caps the total returned."""
+        tokens: list[SandboxPortToken] = []
+        while True:
+            remaining = None if limit is None else limit - len(tokens)
+            if remaining is not None and remaining <= 0:
+                return tokens
+            page = await self._port_token_page(limit=100 if remaining is None else min(remaining, 100), cursor=cursor)
+            tokens.extend(page.tokens)
+            if not page.next_cursor:
+                return tokens
+            cursor = page.next_cursor
+
+    async def list_port_token_pages(
+        self, *, cursor: Optional[str] = None, page_size: int = 100
+    ) -> AsyncIterator[SandboxPortTokenPage]:
+        """Yield token metadata pages. Use each page's ``next_cursor`` to resume.
+
+        Async iteration: ``async for page in sandbox.list_port_token_pages.aio(): ...``.
+        """
+        while True:
+            page = await self._port_token_page(limit=page_size, cursor=cursor)
+            yield page
+            if not page.next_cursor:
+                return
+            cursor = page.next_cursor
+
+    async def delete_port_token(self, token_id: str) -> None:
+        """Revoke a token for new connections. Existing connections remain open."""
+        await self._transport.request_empty(
+            "DELETE", f"/api/sandboxes/{self.id}/port-tokens/{token_id}", retry="transient"
+        )
 
     async def get_network(self) -> SandboxNetwork:
         data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}/network", retry="transient")

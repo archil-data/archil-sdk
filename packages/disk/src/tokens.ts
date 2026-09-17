@@ -36,8 +36,8 @@ export class Tokens {
 
   async delete(id: string): Promise<void> {
     await unwrapEmpty(
-      this._client.DELETE("/api/tokens/{id}", {
-        params: { path: { id } },
+      this._client.DELETE("/api/tokens/{tokenId}", {
+        params: { path: { tokenId: id } },
       }),
     );
   }

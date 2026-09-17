@@ -25,7 +25,7 @@ from pathlib import Path
 
 import httpx
 
-from archil import Archil, ArchilError, ArchilS3Error, SandboxTerminal, TokenUser
+from archil import Archil, ArchilApiError, ArchilError, ArchilS3Error, SandboxTerminal, TokenUser
 
 
 def require_env(name: str) -> str:
@@ -64,6 +64,85 @@ def delete_sandbox(sandbox, timeout_seconds: float = 30.0) -> None:
             if "dependent forks" not in str(err) or time.monotonic() >= deadline:
                 raise
             time.sleep(0.5)
+
+
+def run_private_port_suite(sandbox) -> None:
+    with step("Start a private HTTP server and issue port tokens"):
+        marker = f"sdk-private-port-{uuid.uuid4().hex}"
+        result = sandbox.exec(f"mkdir -p /tmp/sdk-private-http && printf '{marker}' > /tmp/sdk-private-http/index.html")
+        assert_that(result.exit_code == 0, f"failed to prepare private HTTP response: {result.stderr}")
+        server = sandbox.processes.start(
+            "python3 -m http.server 8081 --bind 0.0.0.0 --directory /tmp/sdk-private-http"
+        )
+        server.disconnect()
+    try:
+        access = sandbox.create_port_token(8081, ttl="5m")
+        other = sandbox.create_port_token(8081)
+        url = f"https://{access.hostname}/"
+
+        # Each call opens a new connection so revocation/expiry is reauthorized.
+        def request(token=None):
+            headers = {} if token is None else {"X-Archil-Token": token}
+            return httpx.get(url, headers=headers, timeout=10)
+
+        with step("Reach the private port with its token"):
+            deadline = time.monotonic() + 60
+            while True:
+                try:
+                    response = request(access.token)
+                    response.raise_for_status()
+                    break
+                except httpx.HTTPError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(1)
+            assert_that(response.text == marker, "private endpoint returned the wrong body")
+            assert_that(sandbox.list_ports() == [], "creating a token publicly exposed the port")
+
+        with step("Reject missing and invalid port tokens"):
+            assert_that(request().status_code == 401, "missing token was not rejected")
+            assert_that(request("invalid").status_code == 401, "invalid token was not rejected")
+
+        with step("Get and paginate port-token metadata"):
+            metadata = sandbox.get_port_token(access.id)
+            assert_that(metadata.port == 8081 and metadata.expires_at is not None, "wrong token metadata")
+            assert_that(other.expires_at is None, "token without TTL has an expiration")
+            assert_that(not hasattr(metadata, "token") and not hasattr(metadata, "hostname"), "get returned creation fields")
+            expected = {access.id, other.id}
+            assert_that({token.id for token in sandbox.list_port_tokens()} == expected, "token list mismatch")
+            pages = list(sandbox.list_port_token_pages(page_size=1))
+            assert_that(len(pages) == 2 and all(len(page.tokens) == 1 for page in pages), "incorrect token pagination")
+            assert_that({token.id for page in pages for token in page.tokens} == expected, "paginated token list mismatch")
+
+        with step("Revoke one token while preserving the other"):
+            sandbox.delete_port_token(access.id)
+            assert_that(request(access.token).status_code == 401, "revoked token was not rejected")
+            response = request(other.token)
+            assert_that(response.status_code == 200 and response.text == marker, "revocation affected another token")
+            try:
+                sandbox.get_port_token(access.id)
+            except ArchilApiError as error:
+                assert_that(error.status == 404, f"unexpected lookup status: {error.status}")
+            else:
+                raise AssertionError("revoked token still exists")
+            sandbox.delete_port_token(other.id)
+
+        with step("Expire a token and omit it from get/list"):
+            expiring = sandbox.create_port_token(8081, ttl="5s")
+            assert_that(request(expiring.token).status_code == 200, "fresh token was not accepted")
+            deadline = time.monotonic() + 15
+            while request(expiring.token).status_code != 401:
+                assert_that(time.monotonic() < deadline, "expired token was not rejected")
+                time.sleep(0.5)
+            try:
+                sandbox.get_port_token(expiring.id)
+            except ArchilApiError as error:
+                assert_that(error.status == 404, f"unexpected lookup status: {error.status}")
+            else:
+                raise AssertionError("expired token still exists")
+            assert_that(sandbox.list_port_tokens() == [], "revoked or expired tokens are still listed")
+    finally:
+        server.kill()
 
 
 def run_sandbox_suite(archil) -> None:
@@ -131,6 +210,8 @@ def run_sandbox_suite(archil) -> None:
             sandbox.unexpose_port(8080)
             assert_that(sandbox.list_ports() == [], "port is still listed after removing exposure")
             server.kill()
+
+        run_private_port_suite(sandbox)
 
         with step("Stream a large binary file through the sandbox"):
             payload = bytes(range(256)) * 10_241

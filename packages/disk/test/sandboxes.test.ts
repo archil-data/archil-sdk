@@ -1282,3 +1282,67 @@ test("sandbox instance methods use the owning sandbox id", async () => {
     options: { params: { path: { sid: "0198-sandbox" } } },
   });
 });
+
+
+test("sandbox port tokens return the secret only on creation and preserve metadata dates", async () => {
+  const metadata = { id: "token-1", port: 8080, created_at: now, expires_at: "2026-07-22T13:00:00Z" };
+  const requests: Array<{ method: string; path: string; body: string }> = [];
+  const responses = [
+    Response.json({ success: true, data: { ...metadata, hostname: "8080-sandbox.example.com", token: "secret" } }, { status: 201 }),
+    Response.json({ success: true, data: metadata }),
+    new Response(null, { status: 204 }),
+    Response.json({ success: false, error: "port token not found" }, { status: 404 }),
+    Response.json({ success: false, error: "backend unavailable" }, { status: 503 }),
+  ];
+  vi.stubGlobal("fetch", async (request: Request) => {
+    requests.push({ method: request.method, path: new URL(request.url).pathname, body: await request.text() });
+    return responses.shift()!;
+  });
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+  const created = await sandbox.createPortToken(8080, { ttl: "1h" });
+  assert.equal(created.token, "secret");
+  assert.equal(created.hostname, "8080-sandbox.example.com");
+  const token = await sandbox.getPortToken(created.id);
+  assert.deepEqual(token, { id: created.id, port: 8080, createdAt: nowDate, expiresAt: new Date(metadata.expires_at) });
+  assert.deepEqual(created, { ...token, hostname: created.hostname, token: "secret" });
+  await sandbox.deletePortToken(created.id);
+  await assert.rejects(sandbox.getPortToken(created.id), (error: unknown) => error instanceof ArchilApiError && error.status === 404);
+  // A response error must not replay creation: its one-time secret may already have been issued.
+  await assert.rejects(sandbox.createPortToken(8080), (error: unknown) => error instanceof ArchilApiError && error.status === 503);
+  assert.deepEqual(requests, [
+    { method: "POST", path: "/api/sandboxes/0198-sandbox/port-tokens", body: '{"port":8080,"ttl":"1h"}' },
+    { method: "GET", path: "/api/sandboxes/0198-sandbox/port-tokens/token-1", body: "" },
+    { method: "DELETE", path: "/api/sandboxes/0198-sandbox/port-tokens/token-1", body: "" },
+    { method: "GET", path: "/api/sandboxes/0198-sandbox/port-tokens/token-1", body: "" },
+    { method: "POST", path: "/api/sandboxes/0198-sandbox/port-tokens", body: '{"port":8080}' },
+  ]);
+});
+
+test("sandbox token listing follows cursors and caps the total returned", async () => {
+  const tokens = [1, 2].map((id) => ({ id: `token-${id}`, port: 8080, created_at: now }));
+  const queries: Array<Record<string, string>> = [];
+  vi.stubGlobal("fetch", async (request: Request) => {
+    const query = Object.fromEntries(new URL(request.url).searchParams);
+    queries.push(query);
+    return Response.json({
+      success: true,
+      data: { tokens: [query.cursor ? tokens[1] : tokens[0]] },
+      ...(query.cursor ? {} : { nextCursor: "token-1" }),
+    });
+  });
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+  const listed = await sandbox.listPortTokens();
+  assert.deepEqual(listed.map((token) => token.id), ["token-1", "token-2"]);
+  assert.equal(listed[0].expiresAt, undefined);
+  assert.ok(listed[0].createdAt instanceof Date);
+  assert.deepEqual((await sandbox.listPortTokens({ limit: 1 })).map((token) => token.id), ["token-1"]);
+  const page = await sandbox.listPortTokensPage({ limit: 1 });
+  assert.equal(page.nextCursor, "token-1");
+  assert.equal((await sandbox.listPortTokensPage({ cursor: page.nextCursor })).nextCursor, undefined);
+  assert.deepEqual(queries, [
+    { limit: "100" }, { limit: "100", cursor: "token-1" },
+    { limit: "1" }, { limit: "1" }, { limit: "100", cursor: "token-1" },
+  ]);
+});
