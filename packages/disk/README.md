@@ -637,3 +637,36 @@ Archil has two credential types, and the examples above use both:
 ## Support
 
 Questions, feature requests, or issues? Reach us at **support@archil.com**.
+
+
+To finish selected model requests before pausing, opt in when creating the sandbox:
+
+```ts
+const sandbox = await archil.sandboxes.create({
+  network: {
+    egress: {
+      default: "allow",
+      drain_on_pause: [
+        { host: "*.anthropic.com", path: "/v1/messages" },
+        { host: "api.openai.com", path: "/v1/responses*" },
+        { host: "bedrock-runtime.*.amazonaws.com", path: "/model/*/invoke*" },
+      ],
+    },
+  },
+});
+await sandbox.pause();
+```
+
+Both fields support `*`; `host: "*"` selects every host. A leading `*.` matches
+subdomains but excludes the apex. Paths are case sensitive, include slash matching,
+and exclude query strings. Matching happens before request forwarding. These selectors
+do not grant network access. Pausing gates new matches and waits for active HTTP(S)
+responses, including streams, to reach the guest. Other requests do not delay the drain.
+Selected requests have a ten-minute total timeout by default, from forwarding upstream
+through the end of the response. Streaming activity and starting a pause do not reset it.
+An expired request fails, allowing draining to continue; the pause timeout is separate.
+HTTP ports 80 and 443 are supported. Clients must trust the sandbox egress CA for HTTPS
+and retry stale connections after resume. Set selectors at creation to cover every
+connection; live network updates cannot intercept existing passthrough connections.
+A failed pause leaves the sandbox in `failed` with the failure reason and raises
+`SandboxPauseError` when waiting; `error.latest` contains the resulting sandbox state.
