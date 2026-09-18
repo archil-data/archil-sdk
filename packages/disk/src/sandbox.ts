@@ -1,6 +1,6 @@
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
-import { unwrap, unwrapEmpty } from "./client.js";
+import { unwrap, unwrapEmpty, unwrapPage } from "./client.js";
 import {
   SandboxProcesses,
   type SandboxProcessResult,
@@ -29,6 +29,44 @@ export type SandboxStatus = components["schemas"]["SandboxState"];
 export interface SandboxEndpoint {
   port: number;
   hostname: string;
+}
+
+/** Port-token metadata. The secret and hostname are returned only on creation. */
+export interface SandboxPortToken {
+  id: string;
+  port: number;
+  createdAt: Date;
+  expiresAt?: Date;
+}
+
+export interface CreatedSandboxPortToken extends SandboxPortToken {
+  hostname: string;
+  /** Send in X-Archil-Token. Save it now; it cannot be retrieved again. */
+  token: string;
+}
+
+export interface CreateSandboxPortTokenOptions {
+  /** Duration such as "1h" or "30m", up to "8760h" (365 days). Omit for no expiration. */
+  ttl?: string;
+}
+
+export interface ListSandboxPortTokensOptions {
+  limit?: number;
+  cursor?: string;
+}
+
+export interface SandboxPortTokenPage {
+  tokens: SandboxPortToken[];
+  nextCursor?: string;
+}
+
+function portTokenFromWire(data: components["schemas"]["SandboxPortToken"]): SandboxPortToken {
+  return {
+    id: data.id,
+    port: data.port,
+    createdAt: new Date(data.created_at),
+    expiresAt: data.expires_at ? new Date(data.expires_at) : undefined,
+  };
 }
 
 export interface SandboxResponse {
@@ -378,6 +416,79 @@ export class Sandbox {
           client.DELETE("/api/sandboxes/{sid}/ports/{port}", {
             params: { path: { sid: this.id, port } },
           }),
+        "transient",
+      ),
+    );
+  }
+
+  /** Authorize HTTP access to one port without making it public. */
+  async createPortToken(
+    port: number,
+    options: CreateSandboxPortTokenOptions = {},
+  ): Promise<CreatedSandboxPortToken> {
+    const data = await unwrap(
+      retryApiRequest(
+        () => this._client.POST("/api/sandboxes/{sid}/port-tokens", {
+          params: { path: { sid: this.id } },
+          body: { port, ttl: options.ttl },
+        }),
+        "connect",
+      ),
+    );
+    return { ...portTokenFromWire(data), hostname: data.hostname, token: data.token };
+  }
+
+  /** Get token metadata. Expired and revoked tokens return not found. */
+  async getPortToken(tokenId: string): Promise<SandboxPortToken> {
+    const data = await unwrap(
+      retryApiRequest(
+        () => this._client.GET("/api/sandboxes/{sid}/port-tokens/{token_id}", {
+          params: { path: { sid: this.id, token_id: tokenId } },
+        }),
+        "transient",
+      ),
+    );
+    return portTokenFromWire(data);
+  }
+
+  /** List token metadata across pages. `limit` caps the total number returned. */
+  async listPortTokens(options: ListSandboxPortTokensOptions = {}): Promise<SandboxPortToken[]> {
+    const tokens: SandboxPortToken[] = [];
+    let cursor = options.cursor;
+    for (;;) {
+      const remaining = options.limit === undefined ? undefined : options.limit - tokens.length;
+      if (remaining !== undefined && remaining <= 0) return tokens;
+      const page = await this.listPortTokensPage({
+        limit: remaining === undefined ? 100 : Math.min(remaining, 100),
+        cursor,
+      });
+      tokens.push(...page.tokens);
+      if (!page.nextCursor) return tokens;
+      cursor = page.nextCursor;
+    }
+  }
+
+  /** Fetch one page of token metadata; pass `nextCursor` back as `cursor`. */
+  async listPortTokensPage(options: ListSandboxPortTokensOptions = {}): Promise<SandboxPortTokenPage> {
+    const { data, nextCursor } = await unwrapPage(
+      retryApiRequest(
+        () => this._client.GET("/api/sandboxes/{sid}/port-tokens", {
+          params: { path: { sid: this.id }, query: { limit: options.limit ?? 100, cursor: options.cursor } },
+        }),
+        "transient",
+      ),
+    );
+    return { tokens: data.tokens.map(portTokenFromWire), nextCursor };
+  }
+
+  /** Revoke a token for new connections. Existing connections remain open. */
+  async deletePortToken(token: SandboxPortToken | string): Promise<void> {
+    const tokenId = typeof token === "string" ? token : token.id;
+    await unwrapEmpty(
+      retryApiRequest(
+        () => this._client.DELETE("/api/sandboxes/{sid}/port-tokens/{token_id}", {
+          params: { path: { sid: this.id, token_id: tokenId } },
+        }),
         "transient",
       ),
     );

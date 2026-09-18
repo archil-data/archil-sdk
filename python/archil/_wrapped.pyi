@@ -1335,6 +1335,86 @@ class Sandbox:
 
     unexpose_port: __unexpose_port_spec
 
+    class __create_port_token_spec(typing_extensions.Protocol):
+        def __call__(self, /, port: int, *, ttl: typing.Optional[str] = None) -> archil._models.CreatedSandboxPortToken:
+            """Authorize HTTP access to one port without making it public.
+
+            ``ttl`` is a duration such as "1h" or "30m", up to "8760h" (365 days).
+            Omit it for no expiration. Save the returned token: it is only returned
+            on creation. Send it in the ``X-Archil-Token`` header.
+            """
+            ...
+
+        async def aio(self, /, port: int, *, ttl: typing.Optional[str] = None) -> archil._models.CreatedSandboxPortToken:
+            """Authorize HTTP access to one port without making it public.
+
+            ``ttl`` is a duration such as "1h" or "30m", up to "8760h" (365 days).
+            Omit it for no expiration. Save the returned token: it is only returned
+            on creation. Send it in the ``X-Archil-Token`` header.
+            """
+            ...
+
+    create_port_token: __create_port_token_spec
+
+    class __get_port_token_spec(typing_extensions.Protocol):
+        def __call__(self, /, token_id: str) -> archil._models.SandboxPortToken:
+            """Get token metadata. Expired and revoked tokens return not found."""
+            ...
+
+        async def aio(self, /, token_id: str) -> archil._models.SandboxPortToken:
+            """Get token metadata. Expired and revoked tokens return not found."""
+            ...
+
+    get_port_token: __get_port_token_spec
+
+    class ___port_token_page_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, limit: int, cursor: typing.Optional[str]) -> archil._models.SandboxPortTokenPage:
+            ...
+
+        async def aio(self, /, *, limit: int, cursor: typing.Optional[str]) -> archil._models.SandboxPortTokenPage:
+            ...
+
+    _port_token_page: ___port_token_page_spec
+
+    class __list_port_tokens_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil._models.SandboxPortToken]:
+            """List token metadata across pages. ``limit`` caps the total returned."""
+            ...
+
+        async def aio(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil._models.SandboxPortToken]:
+            """List token metadata across pages. ``limit`` caps the total returned."""
+            ...
+
+    list_port_tokens: __list_port_tokens_spec
+
+    class __list_port_token_pages_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, cursor: typing.Optional[str] = None, page_size: int = 100) -> typing.Iterator[archil._models.SandboxPortTokenPage]:
+            """Yield token metadata pages. Use each page's ``next_cursor`` to resume.
+
+            Async iteration: ``async for page in sandbox.list_port_token_pages.aio(): ...``.
+            """
+            ...
+
+        def aio(self, /, *, cursor: typing.Optional[str] = None, page_size: int = 100) -> typing.AsyncIterator[archil._models.SandboxPortTokenPage]:
+            """Yield token metadata pages. Use each page's ``next_cursor`` to resume.
+
+            Async iteration: ``async for page in sandbox.list_port_token_pages.aio(): ...``.
+            """
+            ...
+
+    list_port_token_pages: __list_port_token_pages_spec
+
+    class __delete_port_token_spec(typing_extensions.Protocol):
+        def __call__(self, /, token: typing.Union[archil._models.SandboxPortToken, str]) -> None:
+            """Revoke a token for new connections. Existing connections remain open."""
+            ...
+
+        async def aio(self, /, token: typing.Union[archil._models.SandboxPortToken, str]) -> None:
+            """Revoke a token for new connections. Existing connections remain open."""
+            ...
+
+    delete_port_token: __delete_port_token_spec
+
     class __get_network_spec(typing_extensions.Protocol):
         def __call__(self, /) -> archil._models.SandboxNetwork:
             ...

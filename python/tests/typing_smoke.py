@@ -19,6 +19,9 @@ from archil import (
     S3Mount,
     Sandbox,
     SandboxEndpoint,
+    SandboxPortToken,
+    CreatedSandboxPortToken,
+    SandboxPortTokenPage,
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
@@ -65,6 +68,12 @@ def sync_usage() -> None:
     _hostname: str = sandbox.expose_port(3000)
     _ports: list[SandboxEndpoint] = sandbox.list_ports()
     sandbox.unexpose_port(3000)
+    port_token: CreatedSandboxPortToken = sandbox.create_port_token(3000, ttl="1h")
+    _token_metadata: SandboxPortToken = sandbox.get_port_token(port_token.id)
+    _tokens: list[SandboxPortToken] = sandbox.list_port_tokens()
+    for page in sandbox.list_port_token_pages(page_size=10):
+        _token_page: SandboxPortTokenPage = page
+    sandbox.delete_port_token(port_token)
     module_sandbox: Sandbox = archil.create_sandbox(name="trial", idle_ttl_seconds=0, ports=[3000])
     sandbox = sandbox.set_timeout(3600)
     sandbox = sandbox.set_timeout(idle_ttl_seconds=300)
@@ -129,6 +138,12 @@ async def async_usage() -> None:
         _hostname: str = await sandbox.expose_port.aio(3000)
         _ports: list[SandboxEndpoint] = await sandbox.list_ports.aio()
         await sandbox.unexpose_port.aio(3000)
+        port_token: CreatedSandboxPortToken = await sandbox.create_port_token.aio(3000, ttl="1h")
+        _token_metadata: SandboxPortToken = await sandbox.get_port_token.aio(port_token.id)
+        _tokens: list[SandboxPortToken] = await sandbox.list_port_tokens.aio()
+        async for token_page in sandbox.list_port_token_pages.aio(page_size=10):
+            _token_page: SandboxPortTokenPage = token_page
+        await sandbox.delete_port_token.aio(port_token)
         sandbox = await sandbox.set_timeout.aio(3600)
         sandbox = await sandbox.set_timeout.aio(idle_ttl_seconds=300)
         sandbox = await sandbox.set_timeout.aio(3600, idle_ttl_seconds=0)

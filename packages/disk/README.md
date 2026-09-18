@@ -175,6 +175,34 @@ may take a few seconds to propagate, and existing connections remain open.
 `fork` pauses a running sandbox while the snapshot is taken and resumes it once the
 fork is accepted. A paused or stopped sandbox is forked in place and left as it is.
 
+For private HTTP access, create a port token without exposing the port publicly:
+
+```ts
+const privateWeb = await client.sandboxes.create({ baseImage: "python:3.12-slim" });
+const server = await privateWeb.processes.start("python -m http.server 8080 --bind 0.0.0.0");
+await server.disconnect();
+
+const access = await privateWeb.createPortToken(8080, { ttl: "1h" });
+// Once the server is listening:
+const response = await fetch(`https://${access.hostname}/`, {
+  headers: { "X-Archil-Token": access.token },
+});
+console.log(await response.text());
+
+const metadata = await privateWeb.getPortToken(access.id);
+const tokens = await privateWeb.listPortTokens();
+const page = await privateWeb.listPortTokensPage({ limit: 10 });
+await privateWeb.deletePortToken(access);
+await privateWeb.delete();
+```
+
+The secret and hostname are returned only by `createPortToken`; get/list return
+metadata. Save the secret when creating it. Omit `ttl` for no expiration, or use
+a duration up to `"8760h"` (365 days). `listPortTokens` follows all pages (its
+`limit` caps the total); `listPortTokensPage` returns `nextCursor` for pagination.
+Public ports bypass token authentication. Revocation and expiry deny new
+connections with HTTP 401; existing connections remain open.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```ts

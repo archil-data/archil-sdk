@@ -94,6 +94,40 @@ the same port reachable and does not stop the listening process. Routing changes
 may take a few seconds to propagate, and existing connections remain open.
 These methods also have `.aio` variants for async callers.
 
+For private HTTP access, create a port token without exposing the port publicly:
+
+```python
+import httpx
+
+private_web = archil.create_sandbox(base_image="python:3.12-slim")
+server = private_web.processes.start("python -m http.server 8080 --bind 0.0.0.0")
+server.disconnect()
+
+access = private_web.create_port_token(8080, ttl="1h")
+# Once the server is listening:
+response = httpx.get(
+    f"https://{access.hostname}/",
+    headers={"X-Archil-Token": access.token},
+)
+print(response.text)
+
+metadata = private_web.get_port_token(access.id)
+tokens = private_web.list_port_tokens()
+for page in private_web.list_port_token_pages(page_size=10):
+    print(page.tokens)
+private_web.delete_port_token(access)
+private_web.delete()
+```
+
+The secret and hostname are returned only by `create_port_token`; get/list return
+metadata. Save the secret when creating it. Omit `ttl` for no expiration, or use
+a duration up to `"8760h"` (365 days). `list_port_tokens` follows all pages (its
+`limit` caps the total); `list_port_token_pages` yields pages with `next_cursor`
+for resuming. These methods also have `.aio` variants, including async iteration
+with `async for page in sandbox.list_port_token_pages.aio()`.
+Public ports bypass token authentication. Revocation and expiry deny new
+connections with HTTP 401; existing connections remain open.
+
 Network egress can optionally be restricted when creating a sandbox:
 
 ```python

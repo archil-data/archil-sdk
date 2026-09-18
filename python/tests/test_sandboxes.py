@@ -1154,3 +1154,100 @@ async def test_process_callback_errors_do_not_hide_connection_errors():
         assert str(exc_info.value.__cause__) == ("process_failed: specific runtime failure")
     finally:
         loop.set_exception_handler(previous_handler)
+
+
+@pytest.mark.parametrize("delete_input", ["created", "metadata", "id"])
+async def test_port_tokens_sync_and_async(archil, router, delete_input):
+    metadata = {
+        "id": "token-1",
+        "port": 8080,
+        "created_at": "2026-09-17T00:00:00Z",
+        "expires_at": "2026-09-17T01:00:00Z",
+    }
+    responses = iter(
+        [
+            ok_envelope(sandbox_json()),
+            ok_envelope({**metadata, "hostname": "8080-sandbox.example.com", "token": "secret"}),
+            ok_envelope(metadata),
+            httpx.Response(204),
+            error_envelope(404, "port token not found"),
+            error_envelope(503, "backend unavailable"),
+        ]
+    )
+    router.set(lambda request: next(responses))
+    sandbox = archil.sandboxes.get("sbx-1")
+
+    created = sandbox.create_port_token(8080, ttl="1h")
+    assert isinstance(created, archil_module.CreatedSandboxPortToken)
+    assert created.token == "secret"
+    assert "secret" not in repr(created)
+    assert created.hostname == "8080-sandbox.example.com"
+
+    metadata_result = await sandbox.get_port_token.aio(created.id)
+    assert isinstance(metadata_result, archil_module.SandboxPortToken)
+    assert metadata_result.created_at == datetime.fromisoformat("2026-09-17T00:00:00+00:00")
+    assert metadata_result.expires_at == datetime.fromisoformat("2026-09-17T01:00:00+00:00")
+    assert not hasattr(metadata_result, "token")
+    assert not hasattr(metadata_result, "hostname")
+
+    delete_target = {"created": created, "metadata": metadata_result, "id": created.id}[delete_input]
+    await sandbox.delete_port_token.aio(delete_target)
+    with pytest.raises(ArchilApiError) as error:
+        sandbox.get_port_token(created.id)
+    assert error.value.status == 404
+
+    # A response error must not replay creation of a one-time secret.
+    with pytest.raises(ArchilApiError) as error:
+        await sandbox.create_port_token.aio(8080)
+    assert error.value.status == 503
+    assert [(r.method, r.path, r.json) for r in router.requests[1:]] == [
+        ("POST", "/api/sandboxes/sbx-1/port-tokens", {"port": 8080, "ttl": "1h"}),
+        ("GET", "/api/sandboxes/sbx-1/port-tokens/token-1", None),
+        ("DELETE", "/api/sandboxes/sbx-1/port-tokens/token-1", None),
+        ("GET", "/api/sandboxes/sbx-1/port-tokens/token-1", None),
+        ("POST", "/api/sandboxes/sbx-1/port-tokens", {"port": 8080}),
+    ]
+
+
+async def test_port_token_pagination(archil, router):
+    def handler(request):
+        if not request.url.path.endswith("/port-tokens"):
+            return ok_envelope(sandbox_json())
+        second_page = bool(request.url.params.get("cursor"))
+        return ok_envelope(
+            {
+                "tokens": [
+                    {
+                        "id": "token-2" if second_page else "token-1",
+                        "port": 8080,
+                        "created_at": "2026-09-17T00:00:00Z",
+                    }
+                ]
+            },
+            next_cursor=None if second_page else "token-1",
+        )
+
+    router.set(handler)
+    sandbox = archil.sandboxes.get("sbx-1")
+
+    listed = sandbox.list_port_tokens()
+    assert [token.id for token in listed] == ["token-1", "token-2"]
+    assert listed[0].expires_at is None
+    assert [token.id for token in await sandbox.list_port_tokens.aio(limit=1)] == ["token-1"]
+
+    pages = list(sandbox.list_port_token_pages(page_size=1))
+    assert pages[0].next_cursor == "token-1"
+    assert pages[1].next_cursor is None
+
+    resumed = [
+        page async for page in sandbox.list_port_token_pages.aio(cursor=pages[0].next_cursor)
+    ]
+    assert [token.id for token in resumed[0].tokens] == ["token-2"]
+    assert [r.query for r in router.requests[1:]] == [
+        {"limit": "100"},
+        {"limit": "100", "cursor": "token-1"},
+        {"limit": "1"},
+        {"limit": "1"},
+        {"limit": "1", "cursor": "token-1"},
+        {"limit": "100", "cursor": "token-1"},
+    ]

@@ -13,6 +13,7 @@ minimumReleaseAgeExclude:
   - '@archildata/api-types@0.0.23'
   - '@archildata/api-types@0.0.24'
   - '@archildata/api-types@0.0.36'
+  - '@archildata/api-types@0.0.40'
 
 catalog:
   typescript: ^6.0.3

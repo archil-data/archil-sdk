@@ -257,6 +257,49 @@ class SandboxEndpoint:
 
 
 @dataclass(frozen=True)
+class SandboxPortToken:
+    """Token metadata. The secret and hostname are returned only on creation."""
+
+    id: str
+    port: int
+    created_at: datetime
+    expires_at: Optional[datetime]
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxPortToken":
+        return cls(
+            id=d["id"],
+            port=d["port"],
+            created_at=_parse_datetime(d["created_at"]),
+            expires_at=_parse_datetime(d["expires_at"]) if d.get("expires_at") else None,
+        )
+
+
+@dataclass(frozen=True)
+class CreatedSandboxPortToken(SandboxPortToken):
+    hostname: str
+    token: str = field(repr=False)
+
+    @classmethod
+    def from_json(cls, d: dict) -> "CreatedSandboxPortToken":
+        metadata = SandboxPortToken.from_json(d)
+        return cls(
+            id=metadata.id,
+            port=metadata.port,
+            created_at=metadata.created_at,
+            expires_at=metadata.expires_at,
+            hostname=d["hostname"],
+            token=d["token"],
+        )
+
+
+@dataclass(frozen=True)
+class SandboxPortTokenPage:
+    tokens: list[SandboxPortToken]
+    next_cursor: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class SandboxEgressTransform:
     headers: Optional[dict[str, str]] = None
 
