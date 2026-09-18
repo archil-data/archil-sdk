@@ -49,6 +49,24 @@ d.remove_user("token", user.identifier)
 d.delete()
 ```
 
+### Disk terminals
+
+`disk.connect()` opens Bash in a PTY with the disk mounted at `/mnt/archil`:
+
+```python
+shell = d.connect(cols=120, rows=40, on_output=lambda event: print(event.data.decode(), end=""))
+shell.send_input("python --version\n")
+shell.resize(cols=160, rows=50)
+shell.disconnect()
+resumed = d.connect(sandbox_id=shell.sandbox_id, process_id=shell.id, offset=shell.cursor)
+```
+
+An attached connection keeps the VM active. After the last disconnect, the VM expires
+in 10 seconds by default; reconnect within that window to retain the process. After
+expiry, call `d.connect()` without IDs for a new shell. Disk files persist, while memory
+and rootfs changes are temporary. Output streams to `on_output`; `collect_output=True`
+also retains it in the process result. These methods also support `.aio`.
+
 ### Sandboxes
 
 Use `Archil.sandboxes` or the module-level helpers to manage persistent microVMs:

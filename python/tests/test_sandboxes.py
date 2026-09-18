@@ -982,7 +982,7 @@ async def test_process_stdin_close_waits_for_writes():
     async def control(_request: dict[str, object]):
         pass
 
-    process = _SandboxProcess("", 0, None, True, connect, control)
+    process = _SandboxProcess("sbx-1", "", 0, None, True, connect, control)
     await process._connect(
         {
             "type": "start",
@@ -1121,7 +1121,7 @@ async def test_process_callback_errors_do_not_hide_connection_errors():
         raise RuntimeError("callback failed")
 
     try:
-        process = _SandboxProcess("", 0, on_output, True, connect, control)
+        process = _SandboxProcess("sbx-1", "", 0, on_output, True, connect, control)
         await process._connect(
             {
                 "type": "start",
@@ -1154,3 +1154,46 @@ async def test_process_callback_errors_do_not_hide_connection_errors():
         assert str(exc_info.value.__cause__) == ("process_failed: specific runtime failure")
     finally:
         loop.set_exception_handler(previous_handler)
+
+
+@pytest.mark.asyncio
+async def test_disk_connect_opens_bash_and_reconnects_the_same_process(archil, router, monkeypatch):
+    import archil._sandbox_process as process_module
+    from test_disk_ops import DISK_JSON
+
+    sockets = []
+
+    async def connect(url):
+        socket = FakeProcessWebSocket()
+        sockets.append(socket)
+        return socket
+
+    def handler(request):
+        if request.url.path == "/api/disks/dsk-1":
+            return ok_envelope(DISK_JSON)
+        if request.url.path.endswith("/connections"):
+            return ok_envelope({"url": "wss://sandbox.example/connect?token=signed", "expires_at": NOW})
+        return ok_envelope(sandbox_json())
+
+    router.set(handler)
+    monkeypatch.setattr(process_module, "_websocket_connect", connect)
+    disk = await archil.disks.get.aio("dsk-1")
+    output = []
+    shell = await disk.connect.aio(cols=100, rows=40, on_output=output.append)
+    assert isinstance(shell, SandboxProcess)
+    assert shell.sandbox_id == "sbx-1"
+    assert json.loads(sockets[0].sent[0]) == {
+        "type": "start", "command": "exec /bin/bash -i", "terminal": {"cols": 100, "rows": 40},
+        "env": {"TERM": "xterm-256color"},
+    }
+    await sockets[0].push(process_output_frame(1, 0, b"prompt"))
+    await shell.send_input.aio("python\n")
+    assert sockets[0].sent[1] == b"python\n"
+    assert output[0].data == b"prompt"
+    await shell.disconnect.aio()
+    resumed = await disk.connect.aio(sandbox_id=shell.sandbox_id, process_id=shell.id, offset=shell.cursor)
+    assert json.loads(sockets[1].sent[0]) == {"type": "attach", "process_id": shell.id, "offset": 6}
+    await resumed.disconnect.aio()
+    assert [req.json for req in router.requests if req.path == "/api/disks/dsk-1/connect"] == [
+        {}, {"sandbox_id": "sbx-1"},
+    ]

@@ -37,7 +37,7 @@ class _SandboxProcesses:
         on_output: Optional[SandboxProcessOutputHandler] = None,
         collect_output: bool = True,
     ) -> "_SandboxProcess":
-        process = _SandboxProcess("", 0, on_output, collect_output, self._new_connection, self._control)
+        process = _SandboxProcess(self._sandbox_id, "", 0, on_output, collect_output, self._new_connection, self._control)
         terminal_request: Union[bool, dict[str, int]]
         if isinstance(terminal, SandboxTerminal):
             terminal_request = {"cols": terminal.cols, "rows": terminal.rows}
@@ -63,6 +63,7 @@ class _SandboxProcesses:
         collect_output: bool = True,
     ) -> "_SandboxProcess":
         process = _SandboxProcess(
+            self._sandbox_id,
             process_id,
             offset,
             on_output,
@@ -114,6 +115,7 @@ class _SandboxProcesses:
 class _SandboxProcess:
     def __init__(
         self,
+        sandbox_id: str,
         process_id: str,
         cursor: int,
         on_output: Optional[SandboxProcessOutputHandler],
@@ -121,6 +123,7 @@ class _SandboxProcess:
         new_connection: Callable[[], Awaitable[ClientConnection]],
         control_process: Callable[[dict[str, object]], Awaitable[None]],
     ) -> None:
+        self._sandbox_id = sandbox_id
         self._id = process_id
         self._cursor = cursor
         self._on_output = on_output
@@ -141,6 +144,10 @@ class _SandboxProcess:
         self.status: SandboxProcessStatus = "running"
         self.stdout = ""
         self.stderr = ""
+
+    @property
+    def sandbox_id(self) -> str:
+        return self._sandbox_id
 
     @property
     def id(self) -> str:

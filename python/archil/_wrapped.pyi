@@ -593,6 +593,17 @@ class Disk:
 
     exec: __exec_spec
 
+    class __connect_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, cols: int = 80, rows: int = 24, sandbox_id: str | None = None, process_id: str | None = None, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = False) -> SandboxProcess:
+            """Open a Bash PTY at /mnt/archil. Supply both IDs to reconnect within the idle TTL (10s by default)."""
+            ...
+
+        async def aio(self, /, *, cols: int = 80, rows: int = 24, sandbox_id: str | None = None, process_id: str | None = None, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = False) -> SandboxProcess:
+            """Open a Bash PTY at /mnt/archil. Supply both IDs to reconnect within the idle TTL (10s by default)."""
+            ...
+
+    connect: __connect_spec
+
     class __grep_spec(typing_extensions.Protocol):
         def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
             """Constant-time parallel grep across files on this disk. The returned
@@ -970,7 +981,11 @@ class SandboxFiles:
 
 class SandboxProcess:
 
-    def __init__(self, process_id: str, cursor: int, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None, collect_output: bool, new_connection: collections.abc.Callable[[], websockets.asyncio.client.ClientConnection], control_process: collections.abc.Callable[[dict[str, object]], None]) -> None:
+    def __init__(self, sandbox_id: str, process_id: str, cursor: int, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None, collect_output: bool, new_connection: collections.abc.Callable[[], websockets.asyncio.client.ClientConnection], control_process: collections.abc.Callable[[dict[str, object]], None]) -> None:
+        ...
+
+    @property
+    def sandbox_id(self) -> str:
         ...
 
     @property
@@ -1178,6 +1193,10 @@ class Sandbox:
         ...
 
     @property
+    def checkpoint(self) -> str | None:
+        ...
+
+    @property
     def max_concurrent_execs(self) -> int:
         ...
 
@@ -1295,9 +1314,25 @@ class Sandbox:
 
     class __fork_spec(typing_extensions.Protocol):
         def __call__(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+            """Fork this sandbox's current state. A running sandbox is paused for the
+            snapshot and resumed once the fork is accepted; a paused or stopped
+            sandbox is left as it is. The fork names the checkpoint the pause
+            returned, so it does not depend on the source still being paused when
+            the request lands. Resuming the source is best effort: the child is
+            returned even if the source could not be resumed, and this sandbox is
+            updated in place with the source's state after the fork.
+            """
             ...
 
         async def aio(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+            """Fork this sandbox's current state. A running sandbox is paused for the
+            snapshot and resumed once the fork is accepted; a paused or stopped
+            sandbox is left as it is. The fork names the checkpoint the pause
+            returned, so it does not depend on the source still being paused when
+            the request lands. Resuming the source is best effort: the child is
+            returned even if the source could not be resumed, and this sandbox is
+            updated in place with the source's state after the fork.
+            """
             ...
 
     fork: __fork_spec
