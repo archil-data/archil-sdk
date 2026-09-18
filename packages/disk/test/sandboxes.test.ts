@@ -1283,7 +1283,7 @@ test("sandbox instance methods use the owning sandbox id", async () => {
   });
 });
 
-test("sandbox port tokens return the secret only on creation and preserve metadata dates", async () => {
+test.each(["created", "metadata", "id"])("port token lifecycle: delete by %s", async (input) => {
   const metadata = {
     id: "token-1",
     port: 8080,
@@ -1340,7 +1340,8 @@ test("sandbox port tokens return the secret only on creation and preserve metada
     token: "secret",
   });
 
-  await sandbox.deletePortToken(created.id);
+  const deleteTarget = input === "created" ? created : input === "metadata" ? token : created.id;
+  await sandbox.deletePortToken(deleteTarget);
   await assert.rejects(
     sandbox.getPortToken(created.id),
     (error: unknown) => error instanceof ArchilApiError && error.status === 404,

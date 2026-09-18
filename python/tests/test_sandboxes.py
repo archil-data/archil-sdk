@@ -1156,7 +1156,8 @@ async def test_process_callback_errors_do_not_hide_connection_errors():
         loop.set_exception_handler(previous_handler)
 
 
-async def test_port_tokens_sync_and_async(archil, router):
+@pytest.mark.parametrize("delete_input", ["created", "metadata", "id"])
+async def test_port_tokens_sync_and_async(archil, router, delete_input):
     metadata = {
         "id": "token-1",
         "port": 8080,
@@ -1189,7 +1190,8 @@ async def test_port_tokens_sync_and_async(archil, router):
     assert not hasattr(metadata_result, "token")
     assert not hasattr(metadata_result, "hostname")
 
-    await sandbox.delete_port_token.aio(created.id)
+    delete_target = {"created": created, "metadata": metadata_result, "id": created.id}[delete_input]
+    await sandbox.delete_port_token.aio(delete_target)
     with pytest.raises(ArchilApiError) as error:
         sandbox.get_port_token(created.id)
     assert error.value.status == 404

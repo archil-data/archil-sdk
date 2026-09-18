@@ -482,7 +482,8 @@ export class Sandbox {
   }
 
   /** Revoke a token for new connections. Existing connections remain open. */
-  async deletePortToken(tokenId: string): Promise<void> {
+  async deletePortToken(token: SandboxPortToken | string): Promise<void> {
+    const tokenId = typeof token === "string" ? token : token.id;
     await unwrapEmpty(
       retryApiRequest(
         () => this._client.DELETE("/api/sandboxes/{sid}/port-tokens/{token_id}", {

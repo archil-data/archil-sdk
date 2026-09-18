@@ -115,7 +115,7 @@ metadata = private_web.get_port_token(access.id)
 tokens = private_web.list_port_tokens()
 for page in private_web.list_port_token_pages(page_size=10):
     print(page.tokens)
-private_web.delete_port_token(access.id)
+private_web.delete_port_token(access)
 private_web.delete()
 ```
 

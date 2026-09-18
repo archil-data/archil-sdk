@@ -192,7 +192,7 @@ console.log(await response.text());
 const metadata = await privateWeb.getPortToken(access.id);
 const tokens = await privateWeb.listPortTokens();
 const page = await privateWeb.listPortTokensPage({ limit: 10 });
-await privateWeb.deletePortToken(access.id);
+await privateWeb.deletePortToken(access);
 await privateWeb.delete();
 ```
 

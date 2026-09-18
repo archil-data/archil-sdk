@@ -134,7 +134,7 @@ def run_private_port_suite(sandbox) -> None:
             )
 
         with step("Revoke one token while preserving the other"):
-            sandbox.delete_port_token(access.id)
+            sandbox.delete_port_token(access)
             assert_that(request(access.token).status_code == 401, "revoked token was not rejected")
             response = request(other.token)
             assert_that(

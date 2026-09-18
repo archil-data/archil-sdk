@@ -291,8 +291,9 @@ class _Sandbox:
                 return
             cursor = page.next_cursor
 
-    async def delete_port_token(self, token_id: str) -> None:
+    async def delete_port_token(self, token: Union[SandboxPortToken, str]) -> None:
         """Revoke a token for new connections. Existing connections remain open."""
+        token_id = token if isinstance(token, str) else token.id
         await self._transport.request_empty(
             "DELETE", f"/api/sandboxes/{self.id}/port-tokens/{token_id}", retry="transient"
         )

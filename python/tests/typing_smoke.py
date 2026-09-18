@@ -73,7 +73,7 @@ def sync_usage() -> None:
     _tokens: list[SandboxPortToken] = sandbox.list_port_tokens()
     for page in sandbox.list_port_token_pages(page_size=10):
         _token_page: SandboxPortTokenPage = page
-    sandbox.delete_port_token(port_token.id)
+    sandbox.delete_port_token(port_token)
     module_sandbox: Sandbox = archil.create_sandbox(name="trial", idle_ttl_seconds=0, ports=[3000])
     sandbox = sandbox.set_timeout(3600)
     sandbox = sandbox.set_timeout(idle_ttl_seconds=300)
@@ -143,7 +143,7 @@ async def async_usage() -> None:
         _tokens: list[SandboxPortToken] = await sandbox.list_port_tokens.aio()
         async for token_page in sandbox.list_port_token_pages.aio(page_size=10):
             _token_page: SandboxPortTokenPage = token_page
-        await sandbox.delete_port_token.aio(port_token.id)
+        await sandbox.delete_port_token.aio(port_token)
         sandbox = await sandbox.set_timeout.aio(3600)
         sandbox = await sandbox.set_timeout.aio(idle_ttl_seconds=300)
         sandbox = await sandbox.set_timeout.aio(3600, idle_ttl_seconds=0)

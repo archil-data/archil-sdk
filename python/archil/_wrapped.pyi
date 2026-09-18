@@ -1405,11 +1405,11 @@ class Sandbox:
     list_port_token_pages: __list_port_token_pages_spec
 
     class __delete_port_token_spec(typing_extensions.Protocol):
-        def __call__(self, /, token_id: str) -> None:
+        def __call__(self, /, token: typing.Union[archil._models.SandboxPortToken, str]) -> None:
             """Revoke a token for new connections. Existing connections remain open."""
             ...
 
-        async def aio(self, /, token_id: str) -> None:
+        async def aio(self, /, token: typing.Union[archil._models.SandboxPortToken, str]) -> None:
             """Revoke a token for new connections. Existing connections remain open."""
             ...
 
