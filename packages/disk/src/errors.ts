@@ -1,4 +1,5 @@
 import { parseXml } from "./s3xml.js";
+import type { Sandbox } from "./sandbox.js";
 
 /**
  * Base class for every error the SDK throws. Catch with `instanceof ArchilError`
@@ -24,6 +25,17 @@ export class ArchilApiError extends ArchilError {
   constructor(message: string, status: number, code?: string) {
     super(message, status, code);
     this.name = "ArchilApiError";
+  }
+}
+
+export class SandboxPauseError extends ArchilError {
+  constructor(readonly latest: Sandbox) {
+    super(
+      `Sandbox entered ${latest.status} before it paused${latest.exitReason ? `: ${latest.exitReason}` : ""}`,
+      409,
+      "SANDBOX_PAUSE_FAILED",
+    );
+    this.name = "SandboxPauseError";
   }
 }
 

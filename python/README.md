@@ -552,3 +552,34 @@ To mount a disk as a real filesystem on your machine, use the [`archil`](https:/
 ## Support
 
 Questions, feature requests, or issues? Reach us at **support@archil.com**.
+
+
+To finish selected HTTP(S) requests before pausing, configure the sandbox network:
+
+```python
+from archil import SandboxEgressDrainRule, SandboxEgressPolicy, SandboxNetwork
+
+sandbox = client.sandboxes.create(network=SandboxNetwork(egress=SandboxEgressPolicy(
+    default="allow",
+    drain_on_pause=[
+        SandboxEgressDrainRule(host="*.anthropic.com", path="/v1/messages"),
+        SandboxEgressDrainRule(host="api.openai.com", path="/v1/responses*"),
+        SandboxEgressDrainRule(host="bedrock-runtime.*.amazonaws.com", path="/model/*/invoke*"),
+    ],
+)))
+sandbox = sandbox.pause()
+```
+
+`*` works anywhere in host and path patterns; `host="*"` selects every host.
+Leading `*.` excludes the apex domain. Paths are case sensitive, exclude queries,
+and match before forwarding. Selectors do not grant network access. Pausing gates
+new matches and waits for active responses, including streams, to reach the guest;
+unmatched traffic does not delay draining. Selected requests have a ten-minute total
+timeout by default, from forwarding upstream through the end of the response. Streaming
+activity and starting a pause do not reset it. An expired request fails, allowing draining
+to continue; the pause timeout is separate. Only HTTP ports 80 and 443 are supported.
+HTTPS clients must trust the sandbox egress CA. Connections may require retries after
+resume. Configure selectors at creation: live updates cannot intercept existing
+passthrough connections. A failed pause leaves the sandbox in `failed` with the
+failure reason and raises `SandboxPauseError` when waiting. Inspect `error.latest`
+for the resulting sandbox state.
