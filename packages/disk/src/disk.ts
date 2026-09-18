@@ -1,4 +1,6 @@
 import type { ApiClient } from "./client.js";
+import { Sandbox, waitForSandboxStart } from "./sandbox.js";
+import type { SandboxProcess, SandboxProcessOutputHandler, SandboxTerminalOptions } from "./sandbox-process.js";
 import { unwrap, unwrapEmpty } from "./client.js";
 import { ArchilS3Error, parseS3Error } from "./errors.js";
 import { parseXml } from "./s3xml.js";
@@ -24,6 +26,12 @@ import type {
   GrepMatch,
   GrepStoppedReason,
 } from "./types.js";
+
+export interface DiskConnectOptions extends SandboxTerminalOptions {
+  onOutput?: SandboxProcessOutputHandler;
+  /** Retain decoded stdout and stderr as well as streaming output. Defaults to false. */
+  collectOutput?: boolean;
+}
 
 export interface MountOptions {
   authToken?: string;
@@ -560,6 +568,25 @@ export class Disk implements FileSystem {
         body: { command },
       }),
     );
+  }
+
+  /** Open a fresh ephemeral Bash PTY with this disk at /mnt/archil. Idle sessions expire after 10s by default. */
+  async connect(options: DiskConnectOptions = {}): Promise<SandboxProcess> {
+    const data = await unwrap(
+      this._client.POST("/api/disks/{id}/connect", {
+        params: { path: { id: this.id } },
+      }),
+    );
+    const sandbox = await waitForSandboxStart(new Sandbox(data, this._client));
+    if (sandbox.status !== "running") {
+      throw new Error(`Disk session ${sandbox.id} is ${sandbox.status}: ${sandbox.exitReason ?? "startup did not complete"}`);
+    }
+    return sandbox.processes.start("exec /bin/bash -i", {
+      onOutput: options.onOutput,
+      collectOutput: options.collectOutput ?? false,
+      terminal: { cols: options.cols, rows: options.rows },
+      env: { TERM: "xterm-256color" },
+    });
   }
 
   /**

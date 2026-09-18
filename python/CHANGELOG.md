@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add `disk.connect()` for a fresh ephemeral Bash PTY with the disk mounted at `/mnt/archil`. Sessions expire after 10 seconds disconnected by default; files on the disk persist.
+
 ## 0.13.0
 
 - Add public sandbox ports: pass `ports` at creation, or use `expose_port()`, `list_ports()`, and `unexpose_port()` on an existing sandbox. Expose returns the public hostname; list returns entries containing the port number and hostname.
