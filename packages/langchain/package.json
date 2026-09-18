@@ -1,6 +1,6 @@
 {
   "name": "@archildata/langchain",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "description": "Archil filesystem adapter for LangChain",
   "keywords": [
     "archil",
