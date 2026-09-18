@@ -11,6 +11,7 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - '.github/workflows/node-release.yaml'
+      - '.github/scripts/publish-node.sh'
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -40,16 +41,16 @@ jobs:
 
       - name: Create Release Pull Request or Publish to npm
         id: changesets
-        uses: changesets/action@v2.0.0-next.2
+        uses: changesets/action@v2.1.2
         with:
-          publish: pnpm release
+          publish-script: bash .github/scripts/publish-node.sh
 
       - name: Deprecate @archildata/client (deprecated bridge)
         if: steps.changesets.outputs.published == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/.npmrc
-          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs['published-packages'] }}
         run: |
           VERSION="$(
             node --input-type=module <<'NODE'
