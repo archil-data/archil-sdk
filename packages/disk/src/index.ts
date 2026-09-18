@@ -48,6 +48,7 @@ export type {
 export { Disk, DiskMultipart, effectiveUploadPartSize } from "./disk.js";
 export type {
   MountOptions,
+  DiskConnectOptions,
   ExecResult,
   GrepOptions,
   GrepResult,

@@ -74,6 +74,29 @@ await d.removeUser("token", user.identifier!);
 await d.delete();
 ```
 
+### Disk terminals
+
+`disk.connect()` opens Bash in a PTY with the disk mounted at `/mnt/archil`:
+
+```ts
+const shell = await d.connect({
+  cols: 120, rows: 40,
+  onOutput: ({ data }) => process.stdout.write(data),
+});
+shell.sendInput("python --version\n");
+await shell.resize({ cols: 160, rows: 50 });
+shell.disconnect();
+const resumed = await d.connect({
+  sandboxId: shell.sandboxId, processId: shell.id, offset: shell.cursor,
+});
+```
+
+An attached connection keeps the VM active. After the last disconnect, the VM expires
+in 10 seconds by default; reconnect within that window to retain the process. After
+expiry, call `d.connect()` without IDs for a new shell. Disk files persist, while memory
+and rootfs changes are temporary. Output streams to `onOutput`; set `collectOutput: true`
+to also accumulate it on the process handle.
+
 ### Sandboxes
 
 Use `Archil.sandboxes` to manage persistent VMs:

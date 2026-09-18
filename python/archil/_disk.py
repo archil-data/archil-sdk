@@ -29,6 +29,9 @@ from ._models import (
     PartInfo,
     PartListing,
     RootAttrs,
+    SandboxData,
+    SandboxProcessOutputHandler,
+    SandboxTerminal,
     PutObjectResult,
     S3Object,
     ShareUrl,
@@ -45,6 +48,8 @@ from ._s3xml import (
     parse_list_parts,
 )
 from .errors import ArchilS3Error, parse_s3_error
+from ._sandbox import _Sandbox
+from ._sandbox_process import _SandboxProcess
 
 # Imported at runtime (not under TYPE_CHECKING) so the synchronicity stub
 # generator can resolve agent_tools()'s return type. The agent_tools package
@@ -335,6 +340,33 @@ class _Disk:
             "POST", f"/api/disks/{self.id}/exec", json={"command": command}
         )
         return ExecResult.from_json(data)
+
+    async def connect(
+        self,
+        *,
+        cols: int = 80,
+        rows: int = 24,
+        sandbox_id: Optional[str] = None,
+        process_id: Optional[str] = None,
+        offset: int = 0,
+        on_output: Optional[SandboxProcessOutputHandler] = None,
+        collect_output: bool = False,
+    ) -> _SandboxProcess:
+        """Open a Bash PTY at /mnt/archil. Supply both IDs to reconnect within the idle TTL (10s by default)."""
+        if (sandbox_id is None) != (process_id is None):
+            raise ValueError("sandbox_id and process_id must be supplied together")
+        data = await self._transport.request_json(
+            "POST", f"/api/disks/{self.id}/connect", json={"sandbox_id": sandbox_id} if sandbox_id else {}
+        )
+        sandbox = await _Sandbox(self._transport, SandboxData.from_json(data))._wait_for_start()
+        if process_id is not None:
+            return await sandbox.processes.connect(
+                process_id, offset=offset, on_output=on_output, collect_output=collect_output
+            )
+        return await sandbox.processes.start(
+            "exec /bin/bash -i", terminal=SandboxTerminal(cols=cols, rows=rows),
+            env={"TERM": "xterm-256color"}, on_output=on_output, collect_output=collect_output,
+        )
 
     async def grep(
         self,

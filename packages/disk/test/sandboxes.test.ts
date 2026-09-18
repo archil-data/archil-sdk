@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import type { ApiClient } from "../src/client.js";
+import { Disk } from "../src/disk.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess } from "../src/sandbox-process.js";
 import { Sandbox } from "../src/sandbox.js";
@@ -909,4 +910,47 @@ test("sandbox instance methods use the owning sandbox id", async () => {
     path: "/api/sandboxes/{sid}/stop",
     options: { params: { path: { sid: "0198-sandbox" } } },
   });
+});
+
+test("disk.connect starts a Bash PTY and reconnects through the shared process protocol", async () => {
+  const calls: Array<{ path: string; options: any }> = [];
+  const client = {
+    POST: async (path: string, options: any) => {
+      calls.push({ path, options });
+      return path === "/api/disks/{id}/connect"
+        ? ok(sandboxWire("running"))
+        : ok({ url: "wss://sandbox.example/connect?token=signed", expires_at: now });
+    },
+  } as unknown as ApiClient;
+  const disk = new Disk({
+    id: "dsk-1", name: "disk", organization: "owner", status: "available",
+    provider: "aws", region: "aws-us-east-1", createdAt: now,
+  }, client, "aws-us-east-1");
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
+  const output: string[] = [];
+  const connecting = disk.connect({ cols: 100, rows: 40, onOutput: (event) => output.push(new TextDecoder().decode(event.data)) });
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
+  const first = TestWebSocket.instances[0];
+  assert.deepEqual(JSON.parse(first.sent[0] as string), {
+    type: "start", command: "exec /bin/bash -i", terminal: { cols: 100, rows: 40 }, env: { TERM: "xterm-256color" },
+  });
+  first.emit("message", { data: JSON.stringify({ type: "started", process_id: "shell-1" }) });
+  const shell = await connecting;
+  assert.equal(shell.sandboxId, "0198-sandbox");
+  first.emit("message", { data: outputFrame(1, 0, "prompt") });
+  await vi.waitFor(() => assert.deepEqual(output, ["prompt"]));
+  assert.equal(shell.stdout, "");
+  shell.sendInput("python\n");
+  assert.deepEqual(first.sent[1], new TextEncoder().encode("python\n"));
+  shell.disconnect();
+  const resuming = disk.connect({ sandboxId: shell.sandboxId, processId: shell.id, offset: shell.cursor });
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[1].sent.length, 1));
+  const second = TestWebSocket.instances[1];
+  assert.deepEqual(JSON.parse(second.sent[0] as string), { type: "attach", process_id: "shell-1", offset: 6 });
+  second.emit("message", { data: JSON.stringify({ type: "attached", process_id: "shell-1" }) });
+  (await resuming).disconnect();
+  assert.deepEqual(calls.filter((call) => call.path === "/api/disks/{id}/connect").map((call) => call.options.body), [
+    { sandbox_id: undefined }, { sandbox_id: "0198-sandbox" },
+  ]);
 });
