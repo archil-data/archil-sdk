@@ -69,8 +69,12 @@ def delete_sandbox(sandbox, timeout_seconds: float = 30.0) -> None:
 def run_private_port_suite(sandbox) -> None:
     with step("Start a private HTTP server"):
         marker = f"sdk-private-port-{uuid.uuid4().hex}"
-        result = sandbox.exec(f"mkdir -p /tmp/sdk-private-http && printf '{marker}' > /tmp/sdk-private-http/index.html")
-        assert_that(result.exit_code == 0, f"failed to prepare private HTTP response: {result.stderr}")
+        result = sandbox.exec(
+            f"mkdir -p /tmp/sdk-private-http && printf '{marker}' > /tmp/sdk-private-http/index.html"
+        )
+        assert_that(
+            result.exit_code == 0, f"failed to prepare private HTTP response: {result.stderr}"
+        )
         server = sandbox.processes.start(
             "python3 -m http.server 8081 --bind 0.0.0.0 --directory /tmp/sdk-private-http"
         )
@@ -106,20 +110,37 @@ def run_private_port_suite(sandbox) -> None:
 
         with step("Get and paginate port-token metadata"):
             metadata = sandbox.get_port_token(access.id)
-            assert_that(metadata.port == 8081 and metadata.expires_at is not None, "wrong token metadata")
+            assert_that(
+                metadata.port == 8081 and metadata.expires_at is not None, "wrong token metadata"
+            )
             assert_that(other.expires_at is None, "token without TTL has an expiration")
-            assert_that(not hasattr(metadata, "token") and not hasattr(metadata, "hostname"), "get returned creation fields")
+            assert_that(
+                not hasattr(metadata, "token") and not hasattr(metadata, "hostname"),
+                "get returned creation fields",
+            )
             expected = {access.id, other.id}
-            assert_that({token.id for token in sandbox.list_port_tokens()} == expected, "token list mismatch")
+            assert_that(
+                {token.id for token in sandbox.list_port_tokens()} == expected,
+                "token list mismatch",
+            )
             pages = list(sandbox.list_port_token_pages(page_size=1))
-            assert_that(len(pages) == 2 and all(len(page.tokens) == 1 for page in pages), "incorrect token pagination")
-            assert_that({token.id for page in pages for token in page.tokens} == expected, "paginated token list mismatch")
+            assert_that(
+                len(pages) == 2 and all(len(page.tokens) == 1 for page in pages),
+                "incorrect token pagination",
+            )
+            assert_that(
+                {token.id for page in pages for token in page.tokens} == expected,
+                "paginated token list mismatch",
+            )
 
         with step("Revoke one token while preserving the other"):
             sandbox.delete_port_token(access.id)
             assert_that(request(access.token).status_code == 401, "revoked token was not rejected")
             response = request(other.token)
-            assert_that(response.status_code == 200 and response.text == marker, "revocation affected another token")
+            assert_that(
+                response.status_code == 200 and response.text == marker,
+                "revocation affected another token",
+            )
             try:
                 sandbox.get_port_token(access.id)
             except ArchilApiError as error:
@@ -141,7 +162,9 @@ def run_private_port_suite(sandbox) -> None:
                 assert_that(error.status == 404, f"unexpected lookup status: {error.status}")
             else:
                 raise AssertionError("expired token still exists")
-            assert_that(sandbox.list_port_tokens() == [], "revoked or expired tokens are still listed")
+            assert_that(
+                sandbox.list_port_tokens() == [], "revoked or expired tokens are still listed"
+            )
     finally:
         server.kill()
 
