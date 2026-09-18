@@ -11,6 +11,7 @@ on:
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - '.github/workflows/node-release.yaml'
+      - '.github/scripts/publish-node.sh'
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -42,7 +43,7 @@ jobs:
         id: changesets
         uses: changesets/action@v2.1.2
         with:
-          publish-script: pnpm release
+          publish-script: bash .github/scripts/publish-node.sh
 
       - name: Deprecate @archildata/client (deprecated bridge)
         if: steps.changesets.outputs.published == 'true'
