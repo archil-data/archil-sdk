@@ -11,6 +11,8 @@ from archil import (
     ArchilApiError,
     Sandbox,
     SandboxEndpoint,
+    SandboxEgressDrainRule,
+    SandboxPauseError,
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
@@ -369,6 +371,7 @@ def test_create_and_list_sandboxes(archil, router):
                 },
             ],
             "deny": ["169.254.0.0/16"],
+            "drain_on_pause": [{"host": "bedrock-runtime.*.amazonaws.com", "path": "/model/*/invoke*"}],
         }
     }
 
@@ -403,6 +406,7 @@ def test_create_and_list_sandboxes(archil, router):
                     ),
                 ],
                 deny=["169.254.0.0/16"],
+                drain_on_pause=[SandboxEgressDrainRule(host="bedrock-runtime.*.amazonaws.com", path="/model/*/invoke*")],
             )
         ),
     )
@@ -680,6 +684,7 @@ def test_get_and_update_network_use_active_runtime_policy(archil, router):
             default="deny",
             allow=["github.com", "140.82.112.0/20"],
             deny=["169.254.0.0/16"],
+                drain_on_pause=[SandboxEgressDrainRule(host="bedrock-runtime.*.amazonaws.com", path="/model/*/invoke*")],
         )
     )
 
@@ -1154,3 +1159,17 @@ async def test_process_callback_errors_do_not_hide_connection_errors():
         assert str(exc_info.value.__cause__) == ("process_failed: specific runtime failure")
     finally:
         loop.set_exception_handler(previous_handler)
+
+
+def test_drain_selectors_round_trip():
+    for rules in [None, [], [SandboxEgressDrainRule(host="*", path="/v1/messages")]]:
+        policy = SandboxEgressPolicy(default="allow", drain_on_pause=rules)
+        assert SandboxEgressPolicy.from_json(policy.to_json()) == policy
+
+
+def test_pause_reports_drain_failure(archil, router):
+    router.set(lambda request: ok_envelope(sandbox_json("failed", exit_reason="snapshot failed: request drain timed out")))
+    sandbox = archil.sandboxes.get("sbx-1")
+    with pytest.raises(SandboxPauseError, match="request drain timed out") as error:
+        sandbox.pause()
+    assert error.value.latest.status == "failed"

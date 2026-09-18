@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add `SandboxEgressDrainRule` and `drain_on_pause` host/path wildcard selectors.
+- Raise `SandboxPauseError` when a waited pause finishes without reaching paused.
+
 ## 0.13.0
 
 - Add public sandbox ports: pass `ports` at creation, or use `expose_port()`, `list_ports()`, and `unexpose_port()` on an existing sandbox. Expose returns the public hostname; list returns entries containing the port number and hostname.
