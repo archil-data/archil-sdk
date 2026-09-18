@@ -95,6 +95,7 @@ export class SandboxProcesses {
     options: SandboxProcessStartOptions = {},
   ): Promise<SandboxProcess> {
     const process = new SandboxProcess(
+      this._sandboxId,
       "",
       0,
       options.onOutput,
@@ -125,6 +126,7 @@ export class SandboxProcesses {
   ): Promise<SandboxProcess> {
     const offset = options.offset ?? 0;
     const process = new SandboxProcess(
+      this._sandboxId,
       processId,
       offset,
       options.onOutput,
@@ -211,6 +213,7 @@ export class SandboxProcess {
 
   /** @internal */
   constructor(
+    readonly sandboxId: string,
     processId: string,
     cursor: number,
     onOutput: SandboxProcessOutputHandler | undefined,
