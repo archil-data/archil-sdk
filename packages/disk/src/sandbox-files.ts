@@ -1,9 +1,9 @@
+import type { Sandbox } from "./sandbox.js";
 import { SandboxFileTransferError } from "./errors.js";
 import type {
   SandboxProcess,
   SandboxProcessOutput,
   SandboxProcessResult,
-  SandboxProcesses,
 } from "./sandbox-process.js";
 
 export type SandboxFileSource =
@@ -136,11 +136,11 @@ class ProcessOutputReader {
 }
 
 export class SandboxFiles {
-  private readonly _processes: SandboxProcesses;
+  private readonly _sandbox: Pick<Sandbox, "run">;
 
   /** @internal */
-  constructor(processes: SandboxProcesses) {
-    this._processes = processes;
+  constructor(sandbox: Pick<Sandbox, "run">) {
+    this._sandbox = sandbox;
   }
 
   async uploadFile(
@@ -156,7 +156,7 @@ export class SandboxFiles {
 
     let process: SandboxProcess | undefined;
     try {
-      process = await this._processes.start(UPLOAD_COMMAND, {
+      process = await this._sandbox.run(UPLOAD_COMMAND, {
         env: {
           ARCHIL_FILE_PARENT: parent,
           ARCHIL_FILE_TARGET: path,
@@ -186,7 +186,7 @@ export class SandboxFiles {
     const reader = new ProcessOutputReader();
     let process: SandboxProcess | undefined;
     try {
-      process = await this._processes.start(DOWNLOAD_COMMAND, {
+      process = await this._sandbox.run(DOWNLOAD_COMMAND, {
         env: {
           ARCHIL_FILE_PATH: path,
           ARCHIL_FILE_TEMP: `/tmp/.archil-download-${transferId()}`,

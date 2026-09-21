@@ -75,7 +75,7 @@ def run_private_port_suite(sandbox) -> None:
         assert_that(
             result.exit_code == 0, f"failed to prepare private HTTP response: {result.stderr}"
         )
-        server = sandbox.processes.start(
+        server = sandbox.run(
             "python3 -m http.server 8081 --bind 0.0.0.0 --directory /tmp/sdk-private-http"
         )
         server.disconnect()
@@ -204,7 +204,7 @@ def run_sandbox_suite(archil) -> None:
             marker = f"sdk-public-port-{uuid.uuid4().hex}"
             result = sandbox.exec(f"mkdir -p /tmp/sdk-http && printf '{marker}' > /tmp/sdk-http/index.html")
             assert_that(result.exit_code == 0, f"failed to prepare HTTP response: {result.stderr}")
-            server = sandbox.processes.start(
+            server = sandbox.run(
                 "python3 -m http.server 8080 --bind 0.0.0.0 --directory /tmp/sdk-http"
             )
             server.disconnect()
@@ -251,7 +251,7 @@ def run_sandbox_suite(archil) -> None:
                 assert_that(mode.stdout == "640\n", f"unexpected uploaded mode: {mode.stdout!r}")
 
         with step("Execute runtime process with streamed stdin"):
-            process = sandbox.processes.start("cat")
+            process = sandbox.run("cat")
             process.send_input("process-input\n")
             process.close_stdin()
             process_result = process.wait()
@@ -262,7 +262,7 @@ def run_sandbox_suite(archil) -> None:
             )
 
         with step("Execute runtime-owned terminal"):
-            terminal = sandbox.processes.start(
+            terminal = sandbox.run(
                 "read line; printf 'terminal:%s' \"$line\"",
                 terminal=SandboxTerminal(cols=120, rows=40),
             )
@@ -275,11 +275,11 @@ def run_sandbox_suite(archil) -> None:
             )
 
         with step("Disconnect and resume runtime process"):
-            process = sandbox.processes.start("sleep 1; printf resumed")
+            process = sandbox.run("sleep 1; printf resumed")
             process_id = process.id
             cursor = process.cursor
             process.disconnect()
-            resumed = sandbox.processes.connect(process_id, offset=cursor)
+            resumed = sandbox.attach(process_id, offset=cursor)
             resumed_result = resumed.wait()
             assert_that(
                 resumed_result.stdout == "resumed",

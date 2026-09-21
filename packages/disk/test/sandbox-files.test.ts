@@ -10,7 +10,6 @@ import type {
   SandboxProcessOutputHandler,
   SandboxProcessResult,
   SandboxProcessStartOptions,
-  SandboxProcesses,
 } from "../src/sandbox-process.js";
 
 const completed: SandboxProcessResult = {
@@ -100,7 +99,7 @@ class FakeProcess {
   }
 }
 
-class FakeProcesses {
+class FakeSandbox {
   readonly started: FakeProcess[] = [];
 
   constructor(
@@ -108,7 +107,7 @@ class FakeProcesses {
     private readonly _gap = false,
   ) {}
 
-  async start(
+  async run(
     command: string,
     options: SandboxProcessStartOptions = {},
   ): Promise<SandboxProcess> {
@@ -118,12 +117,12 @@ class FakeProcesses {
   }
 }
 
-function files(processes: FakeProcesses): SandboxFiles {
-  return new SandboxFiles(processes as unknown as SandboxProcesses);
+function files(processes: FakeSandbox): SandboxFiles {
+  return new SandboxFiles(processes);
 }
 
 test("uploadFile streams source chunks through the process API", async () => {
-  const processes = new FakeProcesses();
+  const processes = new FakeSandbox();
   async function* source() {
     yield new Uint8Array([0, 1, 2]);
     yield new Uint8Array([253, 254, 255]);
@@ -147,7 +146,7 @@ test("uploadFile streams source chunks through the process API", async () => {
 test("downloadFile requests bounded ranges and writes binary chunks", async () => {
   const content = new Uint8Array(512 * 1024 + 3);
   content.set([0, 255, 1], content.byteLength - 3);
-  const processes = new FakeProcesses(content);
+  const processes = new FakeSandbox(content);
   const chunks: Uint8Array[] = [];
 
   await files(processes).downloadFile("/workspace/result.bin", (chunk) => {
@@ -171,7 +170,7 @@ test("downloadFile requests bounded ranges and writes binary chunks", async () =
 
 test("downloadFile reads a zero-length chunk after an exact multiple", async () => {
   const content = new Uint8Array(512 * 1024);
-  const processes = new FakeProcesses(content);
+  const processes = new FakeSandbox(content);
   let written = 0;
 
   await files(processes).downloadFile("/workspace/result.bin", (chunk) => {
@@ -186,7 +185,7 @@ test("downloadFile reads a zero-length chunk after an exact multiple", async () 
 });
 
 test("downloadFile rejects replay gaps", async () => {
-  const processes = new FakeProcesses(new Uint8Array([1, 2, 3]), true);
+  const processes = new FakeSandbox(new Uint8Array([1, 2, 3]), true);
 
   await assert.rejects(
     files(processes).downloadFile("/workspace/result.bin", () => {}),
@@ -200,7 +199,7 @@ test("downloadFile rejects replay gaps", async () => {
 });
 
 test("file transfer paths must be absolute", async () => {
-  const sandboxFiles = files(new FakeProcesses());
+  const sandboxFiles = files(new FakeSandbox());
 
   await assert.rejects(
     sandboxFiles.uploadFile(new Uint8Array(), "relative/path"),
