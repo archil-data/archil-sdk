@@ -49,7 +49,7 @@ function fakeSandbox(overrides: Partial<Sandbox> = {}): Sandbox {
     delete: vi.fn(async () => undefined),
     refresh: vi.fn(async function(this: Sandbox) { return this; }),
     exec: vi.fn(async () => ({ status: "completed", exitCode: 0, stdout: "", stderr: "" })),
-    processes: { start: vi.fn() },
+    run: vi.fn(),
     ...overrides,
   } as unknown as Sandbox;
 }
@@ -239,12 +239,12 @@ test("wait handles stable and transitional states, targets, output, and timeouts
 test("run preserves argv, streams output, and propagates remote status", async () => {
   const result: SandboxProcessResult = { status: "failed", exitCode: 7, stdout: "", stderr: "" };
   const closeStdin = vi.fn(async () => undefined);
-  const start = vi.fn(async (_command: string, options: Parameters<Sandbox["processes"]["start"]>[1]) => {
+  const start = vi.fn(async (_command: string, options: Parameters<Sandbox["run"]>[1]) => {
     options?.onOutput?.({ stream: "stdout", offset: 0, data: new TextEncoder().encode("out") });
     options?.onOutput?.({ stream: "stderr", offset: 3, data: new TextEncoder().encode("err") });
     return { wait: vi.fn(async () => result), closeStdin, kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
   });
-  const item = fakeSandbox({ processes: { start } as unknown as Sandbox["processes"] });
+  const item = fakeSandbox({ run: start as unknown as Sandbox["run"] });
   const cli = harness([item]);
   const args = ["sh", "-c", "printf '%s\\n' \"$1\"; echo done", "", "a b", "single'quote", "double\"quote", "$HOME", "line\nfeed"];
   await cli.run("run", "one", "--env", "A=b", "--timeout", "9", "--", ...args);
@@ -267,8 +267,8 @@ test("run preserves argv, streams output, and propagates remote status", async (
 test("run supports JSON and kills the remote process on local signals", async () => {
   const completed: SandboxProcessResult = { status: "completed", exitCode: 0, stdout: "json-out", stderr: "" };
   const jsonRemote = { wait: vi.fn(async () => completed), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "json-out", stderr: "" };
-  const jsonStart = vi.fn(async (_command: string, _options: Parameters<Sandbox["processes"]["start"]>[1]) => jsonRemote);
-  const json = harness([fakeSandbox({ processes: { start: jsonStart } as unknown as Sandbox["processes"] })]);
+  const jsonStart = vi.fn(async (_command: string, _options: Parameters<Sandbox["run"]>[1]) => jsonRemote);
+  const json = harness([fakeSandbox({ run: jsonStart as unknown as Sandbox["run"] })]);
   await json.run("run", "one", "echo", "ok", "--output", "json");
   assert.deepEqual(JSON.parse(text(json.stdout.values)), completed);
   assert.equal(jsonStart.mock.calls[0]![1]?.collectOutput, true);
@@ -276,7 +276,7 @@ test("run supports JSON and kills the remote process on local signals", async ()
 
   const wait = new Promise<SandboxProcessResult>(() => {});
   const interruptedRemote = { wait: vi.fn(() => wait), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
-  const interrupted = harness([fakeSandbox({ processes: { start: vi.fn(async () => interruptedRemote) } as unknown as Sandbox["processes"] })]);
+  const interrupted = harness([fakeSandbox({ run: vi.fn(async () => interruptedRemote) as unknown as Sandbox["run"] })]);
   const running = interrupted.run("run", "one", "sleep", "30");
   await vi.waitFor(() => assert.equal(interrupted.signals.listenerCount("SIGINT"), 1));
   interrupted.signals.emit("SIGINT");
@@ -290,7 +290,7 @@ test("run supports JSON and kills the remote process on local signals", async ()
   let acknowledgeKill!: () => void;
   const hungKill = new Promise<void>((resolve) => { acknowledgeKill = resolve; });
   const hungRemote = { wait: vi.fn(() => wait), closeStdin: vi.fn(async () => undefined), kill: vi.fn(() => hungKill), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
-  const hung = harness([fakeSandbox({ processes: { start: vi.fn(async () => hungRemote) } as unknown as Sandbox["processes"] })]);
+  const hung = harness([fakeSandbox({ run: vi.fn(async () => hungRemote) as unknown as Sandbox["run"] })]);
   const hungRun = hung.run("run", "one", "sleep", "30");
   await vi.waitFor(() => assert.equal(hung.signals.listenerCount("SIGINT"), 1));
   hung.signals.emit("SIGINT");
@@ -304,7 +304,7 @@ test("run supports JSON and kills the remote process on local signals", async ()
   const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });
   const startingRemote = { wait: vi.fn(async () => completed), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
   const gatedStart = vi.fn(async () => { await startGate; return startingRemote; });
-  const starting = harness([fakeSandbox({ processes: { start: gatedStart } as unknown as Sandbox["processes"] })]);
+  const starting = harness([fakeSandbox({ run: gatedStart as unknown as Sandbox["run"] })]);
   const startingRun = starting.run("run", "one", "echo", "ok");
   await vi.waitFor(() => assert.equal(gatedStart.mock.calls.length, 1));
   assert.equal(starting.signals.listenerCount("SIGINT"), 0);
@@ -321,7 +321,7 @@ test("run kills the remote process if its output connection fails", async () => 
     stdout: "",
     stderr: "",
   };
-  const cli = harness([fakeSandbox({ processes: { start: vi.fn(async () => remote) } as unknown as Sandbox["processes"] })]);
+  const cli = harness([fakeSandbox({ run: vi.fn(async () => remote) as unknown as Sandbox["run"] })]);
   await assert.rejects(cli.run("run", "one", "sleep", "30"), /connection closed/);
   assert.equal(remote.kill.mock.calls.length, 1);
   assert.equal(remote.disconnect.mock.calls.length, 1);
@@ -334,7 +334,7 @@ test("run reports failures without remote stderr", async () => {
     [{ status: "cancelled", exitReason: "sandbox stopped", stdout: "", stderr: "" }, ["false"], /Process cancelled: sandbox stopped/],
   ] as const) {
     const remote = { wait: vi.fn(async () => result), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
-    const item = fakeSandbox({ processes: { start: vi.fn(async () => remote) } as unknown as Sandbox["processes"] });
+    const item = fakeSandbox({ run: vi.fn(async () => remote) as unknown as Sandbox["run"] });
     const cli = harness([item]);
     await cli.run("run", "one", ...args);
     assert.match(text(cli.stderr.values), expected);

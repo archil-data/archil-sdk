@@ -119,7 +119,7 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
   const priorRaw = stdin.isRaw ?? false;
 
   try {
-    remote = await options.sandbox.processes.start("/bin/sh -l", {
+    remote = await options.sandbox.run("/bin/sh -l", {
       terminal: { cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 },
       collectOutput: false,
       onOutput: ({ data }) => {
