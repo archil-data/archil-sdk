@@ -109,6 +109,26 @@ await d.removeUser("token", user.identifier!);
 await d.delete();
 ```
 
+### Disk terminals
+
+`disk.connect()` creates a fresh ephemeral Bash PTY with the disk mounted at `/mnt/archil`:
+
+```ts
+const shell = await d.connect({
+  cols: 120, rows: 40,
+  onOutput: ({ data }) => process.stdout.write(data),
+});
+shell.sendInput("python --version\n");
+await shell.resize({ cols: 160, rows: 50 });
+shell.disconnect();
+```
+
+An attached connection keeps the VM active. After the last disconnect, the VM expires
+in 10 seconds by default. Every `d.connect()` call creates a new session. Disk files
+persist across sessions, while memory and rootfs changes are temporary.
+Output streams to `onOutput`; set `collectOutput: true`
+to also accumulate it on the process handle.
+
 ### Sandboxes
 
 Use `Archil.sandboxes` to manage persistent VMs:
@@ -127,7 +147,7 @@ const sandbox = await client.sandboxes.create({
 const result = await sandbox.exec("uname -a");
 console.log(result.stdout);
 
-const terminal = await sandbox.processes.start("codex", {
+const terminal = await sandbox.run("codex", {
   terminal: { cols: 120, rows: 40 },
   onOutput: ({ data }) => process.stdout.write(data),
 });
@@ -137,7 +157,7 @@ await terminal.resize({ cols: 160, rows: 50 });
 const cursor = terminal.cursor;
 await terminal.disconnect();
 
-const resumed = await sandbox.processes.connect(processId, {
+const resumed = await sandbox.attach(processId, {
   offset: cursor,
   onOutput: ({ data }) => process.stdout.write(data),
 });
@@ -159,7 +179,7 @@ Expose TCP ports publicly when creating a sandbox or later with `exposePort`:
 
 ```ts
 const web = await client.sandboxes.create({ baseImage: "python:3.12-slim", ports: [8080] });
-const server = await web.processes.start("python -m http.server 8080 --bind 0.0.0.0");
+const server = await web.run("python -m http.server 8080 --bind 0.0.0.0");
 await server.disconnect(); // The server keeps running.
 
 const hostname = await web.exposePort(8080); // Returns the hostname, including if already public.
@@ -183,7 +203,7 @@ For private HTTP access, create a port token without exposing the port publicly:
 
 ```ts
 const privateWeb = await client.sandboxes.create({ baseImage: "python:3.12-slim" });
-const server = await privateWeb.processes.start("python -m http.server 8080 --bind 0.0.0.0");
+const server = await privateWeb.run("python -m http.server 8080 --bind 0.0.0.0");
 await server.disconnect();
 
 const access = await privateWeb.createPortToken(8080, { ttl: "1h" });
@@ -277,11 +297,11 @@ Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 hard timeouts accept 60–86,400 seconds, default to 24 hours, and can be reset
 up to 24 hours from now.
 
-`sandbox.processes.start()` always returns a runtime-owned process immediately.
+`sandbox.run()` always returns a runtime-owned process immediately.
 Pass `terminal: true` when the command needs terminal behavior, or provide
 `{ cols, rows }` for an initial size. Terminal processes merge stdout and stderr
 into `stdout`; non-terminal processes keep the streams separate. Disconnecting
-leaves the process running. Reconnect with `sandbox.processes.connect(id)` to
+leaves the process running. Reconnect with `sandbox.attach(id)` to
 replay buffered output from the beginning, or pass `{ offset: process.cursor }`
 to continue where the previous connection stopped. `onOutput` receives raw
 bytes with their stream and absolute offset. Call `closeStdin()` to deliver EOF
@@ -295,9 +315,10 @@ one-shot controls do not count. Pausing a sandbox disconnects attachments but
 preserves its processes for reattachment after resume. Hard and idle expiry
 also pause the sandbox; stopping it ends its processes.
 `sandbox.exec()` is the one-call start-and-wait convenience for ordinary
-commands. It uses `sandbox.processes` internally and does not create a durable
-control-plane exec record; use `sandbox.processes.start()` when you need the
-process handle.
+commands. It uses `sandbox.run()` internally and does not create a durable
+control-plane exec record; use `sandbox.run()` when you need the
+process handle. Replace `sandbox.processes.start()` with `sandbox.run()` and
+`sandbox.processes.connect()` with `sandbox.attach()`; the `processes` object has been removed.
 
 Transfer files through the sandbox process connection without buffering the
 whole file in memory:

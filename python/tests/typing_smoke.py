@@ -85,7 +85,7 @@ def sync_usage() -> None:
     _sandbox_exit: Optional[int] = sandbox_result.exit_code
     sandbox.files.upload_file("local.txt", "/workspace/remote.txt", mode=0o640)
     sandbox.files.download_file("/workspace/remote.txt", "downloaded.txt")
-    process: SandboxProcess = sandbox.processes.start(
+    process: SandboxProcess = sandbox.run(
         "codex",
         terminal=SandboxTerminal(cols=120, rows=40),
         on_output=consume_process_output,
@@ -94,7 +94,7 @@ def sync_usage() -> None:
     process.send_input(b"Review this repository\n")
     cursor: int = process.cursor
     process.disconnect()
-    resumed = sandbox.processes.connect(process.id, offset=cursor)
+    resumed = sandbox.attach(process.id, offset=cursor)
     resumed.kill()
     sandbox.stop().delete()
     created = client.disks.create(
@@ -154,7 +154,7 @@ async def async_usage() -> None:
         await sandbox.files.upload_file.aio("local.txt", "/workspace/remote.txt")
         await sandbox.files.download_file.aio("/workspace/remote.txt", "downloaded.txt")
         await (await sandbox.stop.aio()).delete.aio()
-        process = await sandbox.processes.start.aio("cat")
+        process = await sandbox.run.aio("cat")
         await process.close_stdin.aio()
         _process_result = await process.wait.aio()
         d = await client.disks.get.aio("dsk-1")

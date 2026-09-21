@@ -133,7 +133,7 @@ class _SandboxFiles:
         temporary = str(remote.parent / f".archil-upload-{uuid4().hex}")
         process: Optional[_SandboxProcess] = None
         try:
-            transfer: _SandboxProcess = await self._sandbox.processes.start(
+            transfer: _SandboxProcess = await self._sandbox.run(
                 _UPLOAD_COMMAND,
                 env={
                     "ARCHIL_FILE_PARENT": str(remote.parent),
@@ -172,7 +172,7 @@ class _SandboxFiles:
         reader = _ProcessOutputReader()
         process: Optional[_SandboxProcess] = None
         try:
-            transfer: _SandboxProcess = await self._sandbox.processes.start(
+            transfer: _SandboxProcess = await self._sandbox.run(
                 _DOWNLOAD_COMMAND,
                 env={
                     "ARCHIL_FILE_PATH": str(remote),
