@@ -1251,3 +1251,54 @@ async def test_port_token_pagination(archil, router):
         {"limit": "1", "cursor": "token-1"},
         {"limit": "100", "cursor": "token-1"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_disk_connect_opens_a_fresh_bash_session_on_every_call(archil, router, monkeypatch):
+    import archil._sandbox_process as process_module
+    from test_disk_ops import DISK_JSON
+
+    sockets = []
+    session_count = 0
+
+    async def connect(url):
+        socket = FakeProcessWebSocket()
+        sockets.append(socket)
+        return socket
+
+    def handler(request):
+        nonlocal session_count
+        if request.url.path == "/api/disks/dsk-1":
+            return ok_envelope(DISK_JSON)
+        if request.url.path.endswith("/connections"):
+            return ok_envelope({"url": "wss://sandbox.example/connect?token=signed", "expires_at": NOW})
+        session_count += 1
+        return ok_envelope(sandbox_json(sandbox_id=f"session-{session_count}"))
+
+    router.set(handler)
+    monkeypatch.setattr(process_module, "_websocket_connect", connect)
+    disk = await archil.disks.get.aio("dsk-1")
+    output = []
+    shell = await disk.connect.aio(cols=100, rows=40, on_output=output.append)
+    assert isinstance(shell, SandboxProcess)
+    assert json.loads(sockets[0].sent[0]) == {
+        "type": "start", "command": "exec /bin/bash -i", "terminal": {"cols": 100, "rows": 40},
+        "env": {"TERM": "xterm-256color"},
+    }
+    await sockets[0].push(process_output_frame(1, 0, b"prompt"))
+    await shell.send_input.aio("python\n")
+    assert sockets[0].sent[1] == b"python\n"
+    assert output[0].data == b"prompt"
+    await shell.disconnect.aio()
+    new_shell = await disk.connect.aio()
+    assert json.loads(sockets[1].sent[0]) == {
+        "type": "start", "command": "exec /bin/bash -i", "terminal": {"cols": 80, "rows": 24},
+        "env": {"TERM": "xterm-256color"},
+    }
+    await new_shell.disconnect.aio()
+    assert [req.json for req in router.requests if req.path == "/api/disks/dsk-1/connect"] == [
+        None, None,
+    ]
+    assert [req.path for req in router.requests if req.path.endswith("/connections")] == [
+        "/api/sandboxes/session-1/connections", "/api/sandboxes/session-2/connections",
+    ]

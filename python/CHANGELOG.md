@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add `disk.connect()` for a fresh ephemeral Bash PTY with the disk mounted at `/mnt/archil`. Sessions expire after 10 seconds disconnected by default; files on the disk persist.
+
 ## 0.13.0
 
 - Add sandbox port tokens for private HTTP access: create, get, list/paginate, and delete tokens with optional expiration, in both sync and async APIs.
