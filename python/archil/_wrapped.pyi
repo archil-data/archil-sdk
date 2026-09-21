@@ -593,6 +593,17 @@ class Disk:
 
     exec: __exec_spec
 
+    class __connect_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, cols: int = 80, rows: int = 24, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = False) -> SandboxProcess:
+            """Open a fresh ephemeral Bash PTY at /mnt/archil. Idle sessions expire after 10s by default."""
+            ...
+
+        async def aio(self, /, *, cols: int = 80, rows: int = 24, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = False) -> SandboxProcess:
+            """Open a fresh ephemeral Bash PTY at /mnt/archil. Idle sessions expire after 10s by default."""
+            ...
+
+    connect: __connect_spec
+
     class __grep_spec(typing_extensions.Protocol):
         def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
             """Constant-time parallel grep across files on this disk. The returned
