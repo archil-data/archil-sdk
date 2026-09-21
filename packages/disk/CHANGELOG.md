@@ -1,5 +1,11 @@
 # disk
 
+## 1.4.0
+
+### Minor Changes
+
+- 0bbf053: Add per-client `tls.ca` support for private-CA control-plane and S3 endpoints in Node.js, with HTTP/2 pools isolated by CA configuration.
+
 ## 1.3.0
 
 ### Minor Changes
