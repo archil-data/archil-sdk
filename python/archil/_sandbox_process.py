@@ -5,110 +5,17 @@ import codecs
 import json
 from typing import Awaitable, Callable, Optional, Union
 
-import httpx
-from websockets.asyncio.client import ClientConnection, connect as _websocket_connect
-from websockets.exceptions import WebSocketException
+from websockets.asyncio.client import ClientConnection
 
-from ._http import _MAX_RETRIES, _Transport, _retry_delay
 from ._models import (
     SandboxProcessOutput,
     SandboxProcessOutputHandler,
     SandboxProcessResult,
     SandboxProcessStatus,
     SandboxProcessStream,
-    SandboxTerminal,
 )
 
 _STDIN_CHUNK_BYTES = 1024 * 1024
-
-
-class _SandboxProcesses:
-    def __init__(self, transport: _Transport, sandbox_id: str) -> None:
-        self._transport = transport
-        self._sandbox_id = sandbox_id
-
-    async def start(
-        self,
-        command: str,
-        *,
-        terminal: Union[bool, SandboxTerminal] = False,
-        env: Optional[dict[str, str]] = None,
-        timeout_seconds: Optional[int] = None,
-        on_output: Optional[SandboxProcessOutputHandler] = None,
-        collect_output: bool = True,
-    ) -> "_SandboxProcess":
-        process = _SandboxProcess("", 0, on_output, collect_output, self._new_connection, self._control)
-        terminal_request: Union[bool, dict[str, int]]
-        if isinstance(terminal, SandboxTerminal):
-            terminal_request = {"cols": terminal.cols, "rows": terminal.rows}
-        else:
-            terminal_request = terminal
-        request: dict[str, object] = {
-            "type": "start",
-            "command": command,
-            "terminal": terminal_request,
-            "env": env or {},
-        }
-        if timeout_seconds is not None:
-            request["timeout_seconds"] = timeout_seconds
-        await process._connect(request, "started")
-        return process
-
-    async def connect(
-        self,
-        process_id: str,
-        *,
-        offset: int = 0,
-        on_output: Optional[SandboxProcessOutputHandler] = None,
-        collect_output: bool = True,
-    ) -> "_SandboxProcess":
-        process = _SandboxProcess(
-            process_id,
-            offset,
-            on_output,
-            collect_output,
-            self._new_connection,
-            self._control,
-        )
-        await process._connect(
-            {"type": "attach", "process_id": process_id, "offset": offset},
-            "attached",
-        )
-        return process
-
-    async def _new_connection(self) -> ClientConnection:
-        attempt = 0
-        while True:
-            try:
-                data = await self._transport.request_json(
-                    "POST",
-                    f"/api/sandboxes/{self._sandbox_id}/connections",
-                    retry="transient",
-                )
-                return await _websocket_connect(data["url"])
-            except httpx.TransportError as exc:
-                raise ConnectionError("Process connection failed") from exc
-            except (OSError, WebSocketException) as exc:
-                if attempt >= _MAX_RETRIES:
-                    raise ConnectionError(f"Process connection failed after {attempt + 1} attempts") from exc
-            await asyncio.sleep(_retry_delay(attempt))
-            attempt += 1
-
-    async def _control(self, request: dict[str, object]) -> None:
-        socket = await self._new_connection()
-        try:
-            await socket.send(json.dumps(request, separators=(",", ":")))
-            response = await socket.recv()
-            if not isinstance(response, str):
-                raise RuntimeError(f"Invalid process {request['type']} response")
-            event = json.loads(response)
-            if event.get("type") == "error":
-                raise RuntimeError(f"{event['error']}: {event['message']}")
-            expected = "killed" if request["type"] == "kill" else "resized"
-            if event != {"type": expected}:
-                raise RuntimeError(f"Invalid process {request['type']} response")
-        finally:
-            await socket.close()
 
 
 class _SandboxProcess:

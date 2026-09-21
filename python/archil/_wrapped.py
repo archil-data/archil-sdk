@@ -9,9 +9,9 @@ stub re-declares the model dataclasses as distinct types and breaks pyright)."""
 from ._archil import _Archil
 from ._disk import _Disk, _DiskMultipart
 from ._disks import _Disks
-from ._sandbox import _Sandbox
+from ._sandbox import _Sandbox, _SandboxProcesses
 from ._sandbox_files import _SandboxFiles
-from ._sandbox_process import _SandboxProcess, _SandboxProcesses
+from ._sandbox_process import _SandboxProcess
 from ._sandboxes import _Sandboxes
 from ._synchronizer import synchronizer
 from ._tokens import _Tokens

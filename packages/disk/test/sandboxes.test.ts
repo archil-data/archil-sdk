@@ -3,7 +3,7 @@ import { afterEach, test, vi } from "vitest";
 import { createApiClient, type ApiClient } from "../src/client.js";
 import { ArchilApiError } from "../src/errors.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
-import { SandboxProcess } from "../src/sandbox-process.js";
+import { SandboxProcess, SandboxProcesses } from "../src/index.js";
 import { Sandbox } from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
 
@@ -758,7 +758,7 @@ test("process connections retry API and WebSocket handshake failures", async () 
   TestWebSocket.autoOpen = false;
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("true");
+  const starting = sandbox.run("true");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances.length, 1));
   assert.equal(connectionAttempts, 3);
   const first = TestWebSocket.instances[0];
@@ -783,7 +783,7 @@ test("process connections retry API and WebSocket handshake failures", async () 
   await process.disconnect();
 });
 
-test("processes start directly, disconnect, and resume from their output cursor", async () => {
+test.each(["sandbox", "processes"] as const)("%s API returns a process before exit and supports reattachment", async (api) => {
   const calls: Array<{ path: string; options: any }> = [];
   const output: Array<{ stream: string; offset: number; data: number[] }> = [];
   const client = {
@@ -799,7 +799,14 @@ test("processes start directly, disconnect, and resume from their output cursor"
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("echo hello", {
+  assert.ok(sandbox.processes instanceof SandboxProcesses);
+  const start = api === "processes"
+    ? sandbox.processes.start.bind(sandbox.processes)
+    : sandbox.run.bind(sandbox);
+  const attach = api === "processes"
+    ? sandbox.processes.connect.bind(sandbox.processes)
+    : sandbox.attach.bind(sandbox);
+  const starting = start("echo hello", {
     terminal: false,
     env: { HELLO: "world" },
     timeoutSeconds: 10,
@@ -842,7 +849,7 @@ test("processes start directly, disconnect, and resume from their output cursor"
   await process.disconnect();
   assert.equal(process.connected, false);
 
-  const connecting = sandbox.processes.connect(process.id, {
+  const connecting = attach(process.id, {
     offset: process.cursor,
     onOutput: (event) =>
       output.push({
@@ -923,7 +930,7 @@ test("processes reconnect by ID and an explicit output cursor", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const connecting = sandbox.processes.connect("0198-process", {
+  const connecting = sandbox.attach("0198-process", {
     offset: 1_000,
     onOutput: (event) =>
       output.push({
@@ -984,7 +991,7 @@ test("a terminal is a process with terminal sizing, input, and kill", async () =
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("codex", {
+  const starting = sandbox.run("codex", {
     terminal: { cols: 132, rows: 43 },
   });
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
@@ -1054,7 +1061,7 @@ test("process input is streamed as ordered WebSocket frames", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("cat", {
+  const starting = sandbox.run("cat", {
     onOutput: (event) =>
       output.push({
         stream: event.stream,
@@ -1097,7 +1104,7 @@ test("failed stdin close can be retried", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("cat");
+  const starting = sandbox.run("cat");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
   socket.emit("message", {
@@ -1128,7 +1135,7 @@ test("process exit closes stdin locally", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("cat");
+  const starting = sandbox.run("cat");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
   socket.emit("message", {
@@ -1162,7 +1169,7 @@ test("output callbacks cannot hide runtime connection errors", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("echo hello", {
+  const starting = sandbox.run("echo hello", {
     onOutput: () => {
       throw new Error("callback failed");
     },
@@ -1204,7 +1211,7 @@ test("process output collection can be disabled while streaming", async () => {
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
   const output: string[] = [];
 
-  const starting = sandbox.processes.start("echo hello", {
+  const starting = sandbox.run("echo hello", {
     collectOutput: false,
     onOutput: ({ data }) => output.push(new TextDecoder().decode(data)),
   });
@@ -1243,7 +1250,7 @@ test("process start surfaces runtime rejection", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("");
+  const starting = sandbox.run("");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   TestWebSocket.instances[0].emit("message", {
     data: JSON.stringify({

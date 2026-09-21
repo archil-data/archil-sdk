@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from typing import AsyncIterator, Optional, Union
 
-from ._http import _Transport
+import httpx
+from websockets.asyncio.client import ClientConnection, connect as _websocket_connect
+from websockets.exceptions import WebSocketException
+
+from ._http import _MAX_RETRIES, _Transport, _retry_delay
 from ._models import (
     SandboxData,
     SandboxEndpoint,
@@ -18,7 +23,7 @@ from ._models import (
     SandboxStatus,
     SandboxTerminal,
 )
-from ._sandbox_process import _SandboxProcesses
+from ._sandbox_process import _SandboxProcess
 from .errors import SandboxStartError
 from ._sandbox_files import _SandboxFiles
 
@@ -30,7 +35,7 @@ class _Sandbox:
     def __init__(self, transport: _Transport, data: SandboxData) -> None:
         self._transport = transport
         self._data = data
-        self._processes = _SandboxProcesses(transport, data.id)
+        self._processes = _SandboxProcesses(self)
         self._files = _SandboxFiles(self)
 
     def __repr__(self) -> str:
@@ -106,11 +111,97 @@ class _Sandbox:
 
     @property
     def processes(self) -> "_SandboxProcesses":
+        """Deprecated: use run() and attach(); removed in the next version."""
         return self._processes
 
     @property
     def files(self) -> "_SandboxFiles":
         return self._files
+
+    async def run(
+        self,
+        command: str,
+        *,
+        terminal: Union[bool, SandboxTerminal] = False,
+        env: Optional[dict[str, str]] = None,
+        timeout_seconds: Optional[int] = None,
+        on_output: Optional[SandboxProcessOutputHandler] = None,
+        collect_output: bool = True,
+    ) -> "_SandboxProcess":
+        """Start a process and return its handle without waiting for exit."""
+        process = _SandboxProcess("", 0, on_output, collect_output, self._new_process_connection, self._control_process)
+        terminal_request: Union[bool, dict[str, int]]
+        if isinstance(terminal, SandboxTerminal):
+            terminal_request = {"cols": terminal.cols, "rows": terminal.rows}
+        else:
+            terminal_request = terminal
+        request: dict[str, object] = {
+            "type": "start",
+            "command": command,
+            "terminal": terminal_request,
+            "env": env or {},
+        }
+        if timeout_seconds is not None:
+            request["timeout_seconds"] = timeout_seconds
+        await process._connect(request, "started")
+        return process
+
+    async def attach(
+        self,
+        process_id: str,
+        *,
+        offset: int = 0,
+        on_output: Optional[SandboxProcessOutputHandler] = None,
+        collect_output: bool = True,
+    ) -> "_SandboxProcess":
+        """Reattach to a process, optionally resuming output from a cursor."""
+        process = _SandboxProcess(
+            process_id,
+            offset,
+            on_output,
+            collect_output,
+            self._new_process_connection,
+            self._control_process,
+        )
+        await process._connect(
+            {"type": "attach", "process_id": process_id, "offset": offset},
+            "attached",
+        )
+        return process
+
+    async def _new_process_connection(self) -> ClientConnection:
+        attempt = 0
+        while True:
+            try:
+                data = await self._transport.request_json(
+                    "POST",
+                    f"/api/sandboxes/{self.id}/connections",
+                    retry="transient",
+                )
+                return await _websocket_connect(data["url"])
+            except httpx.TransportError as exc:
+                raise ConnectionError("Process connection failed") from exc
+            except (OSError, WebSocketException) as exc:
+                if attempt >= _MAX_RETRIES:
+                    raise ConnectionError(f"Process connection failed after {attempt + 1} attempts") from exc
+            await asyncio.sleep(_retry_delay(attempt))
+            attempt += 1
+
+    async def _control_process(self, request: dict[str, object]) -> None:
+        socket = await self._new_process_connection()
+        try:
+            await socket.send(json.dumps(request, separators=(",", ":")))
+            response = await socket.recv()
+            if not isinstance(response, str):
+                raise RuntimeError(f"Invalid process {request['type']} response")
+            event = json.loads(response)
+            if event.get("type") == "error":
+                raise RuntimeError(f"{event['error']}: {event['message']}")
+            expected = "killed" if request["type"] == "kill" else "resized"
+            if event != {"type": expected}:
+                raise RuntimeError(f"Invalid process {request['type']} response")
+        finally:
+            await socket.close()
 
     async def exec(
         self,
@@ -122,7 +213,7 @@ class _Sandbox:
         on_output: Optional[SandboxProcessOutputHandler] = None,
         collect_output: bool = True,
     ) -> SandboxProcessResult:
-        process = await self._processes.start(
+        process = await self.run(
             command,
             terminal=terminal,
             env=env,
@@ -328,3 +419,46 @@ class _Sandbox:
 
     async def delete(self) -> None:
         await self._transport.request_empty("DELETE", f"/api/sandboxes/{self.id}", retry="transient")
+
+
+class _SandboxProcesses:
+    """Deprecated: use Sandbox.run() and Sandbox.attach(); removed in the next version."""
+
+    def __init__(self, sandbox: _Sandbox) -> None:
+        self._sandbox = sandbox
+
+    async def start(
+        self,
+        command: str,
+        *,
+        terminal: Union[bool, SandboxTerminal] = False,
+        env: Optional[dict[str, str]] = None,
+        timeout_seconds: Optional[int] = None,
+        on_output: Optional[SandboxProcessOutputHandler] = None,
+        collect_output: bool = True,
+    ) -> _SandboxProcess:
+        """Deprecated: use sandbox.run(); removed in the next version."""
+        return await self._sandbox.run(
+            command,
+            terminal=terminal,
+            env=env,
+            timeout_seconds=timeout_seconds,
+            on_output=on_output,
+            collect_output=collect_output,
+        )
+
+    async def connect(
+        self,
+        process_id: str,
+        *,
+        offset: int = 0,
+        on_output: Optional[SandboxProcessOutputHandler] = None,
+        collect_output: bool = True,
+    ) -> _SandboxProcess:
+        """Deprecated: use sandbox.attach(); removed in the next version."""
+        return await self._sandbox.attach(
+            process_id,
+            offset=offset,
+            on_output=on_output,
+            collect_output=collect_output,
+        )

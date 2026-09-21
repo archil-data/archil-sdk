@@ -100,13 +100,13 @@ class FakeProcess:
         self.disconnected = True
 
 
-class FakeProcesses:
+class FakeSandbox:
     def __init__(self, content: bytes = b"", gap: bool = False) -> None:
         self.content = content
         self.gap = gap
         self.started: list[FakeProcess] = []
 
-    async def start(self, command, *, env, on_output=None, collect_output=True):
+    async def run(self, command, *, env, on_output=None, collect_output=True):
         process = FakeProcess(
             command,
             env,
@@ -117,11 +117,6 @@ class FakeProcesses:
         )
         self.started.append(process)
         return process
-
-
-class FakeSandbox:
-    def __init__(self, content: bytes = b"", gap: bool = False) -> None:
-        self.processes = FakeProcesses(content, gap)
 
 
 def test_sandbox_exposes_public_files_namespace(archil, router):
@@ -140,7 +135,7 @@ async def test_upload_streams_through_process_api(tmp_path):
 
     await _SandboxFiles(sandbox).upload_file(source, "/workspace/source.bin")
 
-    process = sandbox.processes.started[0]
+    process = sandbox.started[0]
     assert b"".join(process.input) == content
     assert all(len(chunk) <= 1024 * 1024 for chunk in process.input)
     assert process.env["ARCHIL_FILE_TARGET"] == "/workspace/source.bin"
@@ -160,7 +155,7 @@ async def test_download_streams_bounded_ranges_and_replaces_target(tmp_path, mon
 
     await _SandboxFiles(sandbox).download_file("/workspace/result.bin", target)
 
-    process = sandbox.processes.started[0]
+    process = sandbox.started[0]
     assert target.read_bytes() == content
     assert process.input == ["4\n", "4\n", "4\n"]
     assert process.env["ARCHIL_FILE_PATH"] == "/workspace/result.bin"
@@ -179,7 +174,7 @@ async def test_download_reads_zero_length_chunk_after_exact_multiple(tmp_path, m
     await _SandboxFiles(sandbox).download_file("/workspace/result.bin", target)
 
     assert target.read_bytes() == b"12345678"
-    assert sandbox.processes.started[0].input == ["4\n", "4\n", "4\n"]
+    assert sandbox.started[0].input == ["4\n", "4\n", "4\n"]
 
 
 @pytest.mark.asyncio
@@ -191,7 +186,7 @@ async def test_download_detects_output_gap_without_replacing_target(tmp_path):
     with pytest.raises(SandboxFileTransferError, match="output gap"):
         await _SandboxFiles(sandbox).download_file("/workspace/result.bin", target)
 
-    process = sandbox.processes.started[0]
+    process = sandbox.started[0]
     assert target.read_bytes() == b"old"
     assert process.killed
     assert process.disconnected
