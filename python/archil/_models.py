@@ -332,10 +332,26 @@ class SandboxEgressRule:
 
 
 @dataclass(frozen=True)
+class SandboxEgressDrainRule:
+    """Match the original host and URL path using * wildcards, excluding queries."""
+
+    host: str
+    path: str
+
+    def to_json(self) -> dict:
+        return {"host": self.host, "path": self.path}
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SandboxEgressDrainRule":
+        return cls(host=d["host"], path=d["path"])
+
+
+@dataclass(frozen=True)
 class SandboxEgressPolicy:
     default: SandboxNetworkAction
     allow: Optional[list[Union[str, SandboxEgressRule]]] = None
     deny: Optional[list[str]] = None
+    drain_on_pause: Optional[list[SandboxEgressDrainRule]] = None
 
     def to_json(self) -> dict:
         return {
@@ -348,6 +364,10 @@ class SandboxEgressPolicy:
                     else None
                 ),
                 "deny": self.deny,
+                "drain_on_pause": (
+                    [rule.to_json() for rule in self.drain_on_pause]
+                    if self.drain_on_pause is not None else None
+                ),
             }.items()
             if value is not None
         }
@@ -363,6 +383,10 @@ class SandboxEgressPolicy:
                 else None
             ),
             deny=d.get("deny"),
+            drain_on_pause=(
+                [SandboxEgressDrainRule.from_json(rule) for rule in d["drain_on_pause"]]
+                if d.get("drain_on_pause") is not None else None
+            ),
         )
 
 

@@ -27,6 +27,7 @@ export type {
   CreateSandboxPortTokenOptions,
   ListSandboxPortTokensOptions,
   SandboxPortTokenPage,
+  SandboxEgressDrainRule,
   SandboxEgressPolicy,
   SandboxEgressRule,
   SandboxEgressTransform,
@@ -93,6 +94,7 @@ export {
   ArchilApiError,
   ArchilS3Error,
   SandboxFileTransferError,
+  SandboxPauseError,
 } from "./errors.js";
 
 export { VERSION, USER_AGENT } from "./version.js";

@@ -59,6 +59,7 @@ from ._models import (
     SandboxPortToken,
     CreatedSandboxPortToken,
     SandboxPortTokenPage,
+    SandboxEgressDrainRule,
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
@@ -90,7 +91,7 @@ from ._wrapped import (
     Workspace,
 )
 from .agent_tools import AgentToolset
-from .errors import ArchilApiError, ArchilError, ArchilS3Error, SandboxFileTransferError, SandboxStartError
+from .errors import ArchilApiError, ArchilError, ArchilS3Error, SandboxFileTransferError, SandboxStartError, SandboxPauseError
 
 __all__ = [
     "__version__",
@@ -114,6 +115,7 @@ __all__ = [
     "ArchilApiError",
     "ArchilS3Error",
     "SandboxStartError",
+    "SandboxPauseError",
     "SandboxFileTransferError",
     # input models
     "MountConfig",
@@ -127,6 +129,7 @@ __all__ = [
     "TokenUser",
     "AwsStsUser",
     "SandboxTerminal",
+    "SandboxEgressDrainRule",
     "SandboxEgressPolicy",
     "SandboxEgressRule",
     "SandboxEgressTransform",

@@ -8,16 +8,29 @@ import {
 } from "./sandbox-process.js";
 import { SandboxFiles } from "./sandbox-files.js";
 import { retryApiRequest } from "./retry.js";
+import { SandboxPauseError } from "./errors.js";
 
 export type SandboxNetworkAction = components["schemas"]["SandboxNetworkAction"];
 
-export type SandboxEgressPolicy = components["schemas"]["SandboxEgressPolicy"];
+export interface SandboxEgressDrainRule {
+  /** Host pattern supporting * anywhere; *.example.com excludes the apex. */
+  host: string;
+  /** Original URL path pattern; * includes slashes. Queries are excluded. */
+  path: string;
+}
+
+export type SandboxEgressPolicy = components["schemas"]["SandboxEgressPolicy"] & {
+  /** Requests to finish before pausing. These selectors do not grant network access. */
+  drain_on_pause?: SandboxEgressDrainRule[];
+};
 
 export type SandboxEgressRule = components["schemas"]["SandboxEgressRule"];
 
 export type SandboxEgressTransform = components["schemas"]["SandboxEgressTransform"];
 
-export type SandboxNetwork = components["schemas"]["SandboxNetwork"];
+export type SandboxNetwork = Omit<components["schemas"]["SandboxNetwork"], "egress"> & {
+  egress?: SandboxEgressPolicy;
+};
 
 /** @internal */
 export type SandboxWire = components["schemas"]["Sandbox"] & {
@@ -308,7 +321,10 @@ export class Sandbox {
       ),
     );
     this._apply(data);
-    return options.wait === false ? this : waitWhileSandboxStatus(this, "pausing");
+    if (options.wait === false) return this;
+    await waitWhileSandboxStatus(this, "pausing");
+    if (this.status !== "paused") throw new SandboxPauseError(this);
+    return this;
   }
 
   /** Resume this sandbox from its preserved CPU and memory state. */
