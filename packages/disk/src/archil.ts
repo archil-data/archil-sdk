@@ -1,4 +1,4 @@
-import { type ApiClient, createApiClient, unwrap } from "./client.js";
+import { type ApiClient, type ArchilTlsOptions, createApiClient, unwrap } from "./client.js";
 import { Disk } from "./disk.js";
 import { Disks } from "./disks.js";
 import { Sandboxes } from "./sandboxes.js";
@@ -20,6 +20,8 @@ export interface ArchilOptions {
    * control plane URL with its `control.` hostname prefix swapped for `s3.`.
    */
   s3BaseUrl?: string;
+  /** Per-client TLS trust for control-plane and S3 requests (Node.js only). */
+  tls?: ArchilTlsOptions;
 }
 
 /**
@@ -131,6 +133,7 @@ export class Archil {
       apiKey,
       region,
       baseUrl: controlBaseUrl,
+      tls: opts.tls,
     });
 
     // Derive the S3 endpoint from the control plane URL when not given

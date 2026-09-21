@@ -105,6 +105,38 @@ await d.removeUser("token", user.identifier!);
 await d.delete();
 ```
 
+### Private certificate authorities (Node.js)
+
+For BYOC endpoints signed by a private CA, configure trust on the client:
+
+```ts
+import { readFileSync } from "node:fs";
+import { getCACertificates } from "node:tls";
+import { Archil } from "disk";
+
+const client = new Archil({
+  apiKey: process.env.ARCHIL_API_KEY,
+  region: "aws-us-east-2",
+  baseUrl: "https://control.archil.example.internal",
+  s3BaseUrl: "https://s3.archil.example.internal",
+  tls: {
+    ca: [...getCACertificates(), readFileSync("archil-ca.pem")],
+  },
+});
+```
+
+`tls.ca` accepts a PEM string, a `Buffer`, or an array of either. As with Node's
+TLS `ca` option, it **replaces** the default trust list. The example includes Node's
+defaults as well as the private CA; `getCACertificates()` requires Node 22.15+.
+Omitting `tls.ca` preserves Node's default trust behavior.
+
+The configuration applies to this client's control-plane and S3-compatible requests,
+with certificate and hostname verification enabled. It does not change Node's global
+dispatcher or default trust. HTTP/2 pooling is preserved, and clients only share pools
+when their endpoint, API key, and CA configuration match. CA arrays and buffers are
+copied at construction; create a new client to change trust settings. Custom CAs are
+not supported in browsers.
+
 ### Sandboxes
 
 Use `Archil.sandboxes` to manage persistent VMs:
