@@ -117,8 +117,15 @@ export const multiplexHttp2Requests: Dispatcher.DispatcherComposeInterceptor = (
   return true;
 };
 
-// Sharing HTTP/2 sessions limits connection pressure across clients. Trust settings
-// must match too: an established connection bypasses subsequent TLS verification.
+// Every Archil instance used to delegate to Node's default global fetch
+// dispatcher. That dispatcher currently negotiates HTTP/1.1, even when the
+// control plane advertises HTTP/2, and a burst of independently constructed
+// clients therefore creates substantial connection pressure. Keep one lazily
+// initialized HTTP/2-capable dispatcher per control-plane origin and credential,
+// shared by every client in this JavaScript process. It opens a single session
+// on demand, then Undici multiplexes concurrent requests over that session.
+// CA settings must also match: TLS verification happens when a connection is
+// established, so reusing it must not let a client inherit another client's trust.
 const sharedDispatchers = new Map<string, Promise<Dispatcher>>();
 
 function dispatcherKey(baseUrl: string, apiKey: string, ca?: Buffer[]): string {
