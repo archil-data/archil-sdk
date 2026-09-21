@@ -1,6 +1,7 @@
 import createClientDefault, { type Client } from "openapi-fetch";
 import type { paths } from "@archildata/api-types";
 import type { Dispatcher } from "undici";
+import type { ConnectionOptions } from "node:tls";
 import { ArchilApiError } from "./errors.js";
 import { resolveBaseUrl } from "./regions.js";
 import { USER_AGENT } from "./version.js";
@@ -18,10 +19,20 @@ const createClient = (
 
 export type ApiClient = Client<paths>;
 
+export interface ArchilTlsOptions {
+  /**
+   * Trusted PEM CA certificates for this client's control-plane and S3 requests
+   * (Node.js only). Replaces Node's default CA list; include those certificates
+   * explicitly to retain them. Certificate and hostname verification stay enabled.
+   */
+  ca?: ConnectionOptions["ca"];
+}
+
 export interface ApiClientOptions {
   apiKey: string;
   region: string;
   baseUrl?: string;
+  tls?: ArchilTlsOptions;
 }
 
 function isNodeRuntime(): boolean {
@@ -113,14 +124,15 @@ export const multiplexHttp2Requests: Dispatcher.DispatcherComposeInterceptor = (
 // initialized HTTP/2-capable dispatcher per control-plane origin and credential,
 // shared by every client in this JavaScript process. It opens a single session
 // on demand, then Undici multiplexes concurrent requests over that session.
+// CA settings must also match: TLS verification happens when a connection is
+// established, so reusing it must not let a client inherit another client's trust.
 const sharedDispatchers = new Map<string, Promise<Dispatcher>>();
 
-function dispatcherKey(baseUrl: string, apiKey: string): string {
-  return `${new URL(baseUrl).origin}\0${apiKey}`;
+function dispatcherKey(baseUrl: string, apiKey: string, ca?: Buffer[]): string {
+  return JSON.stringify([new URL(baseUrl).origin, apiKey, ca?.map((cert) => cert.toString("base64"))]);
 }
 
-function getSharedDispatcher(baseUrl: string, apiKey: string): Promise<Dispatcher> {
-  const key = dispatcherKey(baseUrl, apiKey);
+function getSharedDispatcher(key: string, ca?: Buffer[]): Promise<Dispatcher> {
   const existing = sharedDispatchers.get(key);
   if (existing) return existing;
 
@@ -133,6 +145,7 @@ function getSharedDispatcher(baseUrl: string, apiKey: string): Promise<Dispatche
       pipelining: CONTROL_PLANE_CONCURRENT_STREAMS,
       keepAliveTimeout: 60_000,
       keepAliveMaxTimeout: 600_000,
+      ...(ca === undefined ? {} : { connect: { ca } }),
     }).compose(multiplexHttp2Requests);
   })();
 
@@ -145,11 +158,24 @@ function getSharedDispatcher(baseUrl: string, apiKey: string): Promise<Dispatche
   return dispatcher;
 }
 
-function createPooledFetch(baseUrl: string, apiKey: string): ((request: Request) => Promise<Response>) | undefined {
-  if (!isNodeRuntime()) return undefined;
+function createPooledFetch(
+  baseUrl: string,
+  apiKey: string,
+  tls?: ArchilTlsOptions,
+): ((request: Request) => Promise<Response>) | undefined {
+  if (!isNodeRuntime()) {
+    if (tls?.ca !== undefined) throw new Error("Custom TLS CAs require Node.js");
+    return undefined;
+  }
+
+  // Caller-owned arrays and buffers must not change a client's trust or pool identity.
+  const ca = tls?.ca === undefined
+    ? undefined
+    : (Array.isArray(tls.ca) ? tls.ca : [tls.ca]).map((cert) => Buffer.from(cert));
+  const key = dispatcherKey(baseUrl, apiKey, ca);
 
   return async (request: Request): Promise<Response> => {
-    const dispatcher = await getSharedDispatcher(baseUrl, apiKey);
+    const dispatcher = await getSharedDispatcher(key, ca);
     return globalThis.fetch(request, { dispatcher } as RequestInit);
   };
 }
@@ -159,7 +185,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
   const apiKey = `key-${opts.apiKey.replace(/^key-/, '')}`;
   return createClient<paths>({
     baseUrl,
-    fetch: createPooledFetch(baseUrl, apiKey),
+    fetch: createPooledFetch(baseUrl, apiKey, opts.tls),
     headers: {
       Authorization: apiKey,
       // Identifies the JS SDK (and its version) to the control plane. Honored

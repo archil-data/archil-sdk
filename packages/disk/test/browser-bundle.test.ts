@@ -300,6 +300,15 @@ test("SDK runs in a browser sandbox: control-plane list over fetch", async () =>
   assert.ok(calls.some((c) => c.url.includes("control.") && c.url.includes("/api/disks")));
 });
 
+test("browser clients reject unsupported custom CA configuration", async () => {
+  const { sdk } = await loadSdkInBrowserSandbox(routingFetch([]));
+  assert.throws(() => new sdk.Archil({
+    apiKey: "key-test",
+    region: "aws-us-east-1",
+    tls: { ca: "private CA" },
+  }), /Custom TLS CAs require Node.js/);
+});
+
 test("SDK runs in a browser sandbox: S3 getObject returns bytes", async () => {
   const { sdk } = await loadSdkInBrowserSandbox(routingFetch([]));
   const archil = new sdk.Archil({ apiKey: "key-test", region: "aws-us-east-1" });
