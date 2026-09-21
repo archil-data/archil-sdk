@@ -1,4 +1,5 @@
 import type { ApiClient } from "./client.js";
+import { Sandbox, waitForSandboxStart } from "./sandbox.js";
 import { unwrap, unwrapEmpty } from "./client.js";
 import { ArchilS3Error, parseS3Error } from "./errors.js";
 import { parseXml } from "./s3xml.js";
@@ -560,6 +561,21 @@ export class Disk implements FileSystem {
         body: { command },
       }),
     );
+  }
+
+  /** Create a fresh sandbox with this disk at /mnt/archil and keep it active until disconnect(). */
+  async connect(): Promise<Sandbox> {
+    const data = await unwrap(
+      this._client.POST("/api/disks/{id}/connect", {
+        params: { path: { id: this.id } },
+      }),
+    );
+    const sandbox = await waitForSandboxStart(new Sandbox(data, this._client));
+    if (sandbox.status !== "running") {
+      throw new Error(`Disk session ${sandbox.id} is ${sandbox.status}: ${sandbox.exitReason ?? "startup did not complete"}`);
+    }
+    await sandbox._connect();
+    return sandbox;
   }
 
   /**

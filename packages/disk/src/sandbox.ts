@@ -195,6 +195,7 @@ export class Sandbox {
 
   /** @internal */
   private readonly _client: ApiClient;
+  private _keepalive?: SandboxProcess;
 
   /** @internal */
   constructor(data: SandboxWire, client: ApiClient) {
@@ -246,6 +247,28 @@ export class Sandbox {
       exitReason: this.exitReason,
       checkpoint: this.checkpoint,
     };
+  }
+
+  /** Whether this handle's keepalive process connection is open. */
+  get connected(): boolean {
+    return this._keepalive?.connected ?? false;
+  }
+
+  /** @internal */
+  async _connect(): Promise<void> {
+    this._keepalive = await this.run("exec cat >/dev/null", { collectOutput: false });
+  }
+
+  /** Release this handle's keepalive. Other process connections remain independent. */
+  async disconnect(): Promise<void> {
+    const process = this._keepalive;
+    if (!process) return;
+    this._keepalive = undefined;
+    try {
+      if (process.connected && process.status === "running") await process.closeStdin();
+    } finally {
+      await process.disconnect();
+    }
   }
 
   /** Start a process and return its handle without waiting for exit. */
