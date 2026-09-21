@@ -44,28 +44,30 @@ npx disk api-keys delete key-abc123
 `disk` and `sandbox` share named profiles:
 
 ```bash
-npx disk profile create --profile test-yellow --region aws-us-east-1
-npx sandbox profile use test-yellow
-npx sandbox list
+npx disk profile create --profile my-project --region aws-us-east-1
+npx --package=disk sandbox profile use my-project
+npx --package=disk sandbox list
 ```
 
 `profile create` securely prompts for the API key. Flags override environment variables, which override the selected profile. The library API does not read profiles.
+
+Profile names are local labels you choose. The `--region` option takes a public region ID such as `aws-us-east-1`.
 
 ### Sandbox CLI
 
 The `sandbox` executable manages persistent sandboxes:
 
 ```bash
-npx sandbox list
-npx sandbox create dev --vcpu-count 4 --mem-size-mib 8192 --env NODE_ENV=development
-npx sandbox pause dev
-npx sandbox resume dev --no-wait
-npx sandbox wait dev --status running --timeout 60
-npx sandbox fork dev agent-task
-npx sandbox run dev -- sh -c 'echo "$NODE_ENV"'
-npx sandbox shell dev
-npx sandbox stop dev
-npx sandbox delete dev
+npx --package=disk sandbox list
+npx --package=disk sandbox create dev --vcpu-count 4 --mem-size-mib 8192 --env NODE_ENV=development
+npx --package=disk sandbox pause dev
+npx --package=disk sandbox resume dev --no-wait
+npx --package=disk sandbox wait dev --status running --timeout 60
+npx --package=disk sandbox fork dev agent-task
+npx --package=disk sandbox run dev -- sh -c 'echo "$NODE_ENV"'
+npx --package=disk sandbox shell dev
+npx --package=disk sandbox stop dev
+npx --package=disk sandbox delete dev
 ```
 
 Commands accept an exact ID or unique name. Lifecycle commands wait by default; use `--no-wait` to return once accepted. Use `-o json` for structured output. Starting a paused sandbox discards its memory snapshot and prompts unless `--yes` is passed. In a shell, `Ctrl+]` is the emergency escape.
@@ -250,7 +252,7 @@ Set hard and idle TTLs at creation or edit them while running. All values are
 seconds, matching the Python SDK:
 
 ```ts
-const timed = await archil.sandboxes.create({ maxTtlSeconds: 3600, idleTtlSeconds: 300 });
+const timed = await client.sandboxes.create({ maxTtlSeconds: 3600, idleTtlSeconds: 300 });
 await timed.setTimeout(7200);
 await timed.setTimeout({ idleTtlSeconds: 60 });
 await timed.setTimeout({ timeoutSeconds: 3600, idleTtlSeconds: 300 });
@@ -270,7 +272,8 @@ traffic do not keep it alive. Disable idle TTL for unattended jobs.
 
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB. Sandbox
-timeouts default to 24 hours and can be reset up to 24 hours from now.
+hard timeouts accept 60–86,400 seconds, default to 24 hours, and can be reset
+up to 24 hours from now.
 
 `sandbox.processes.start()` always returns a runtime-owned process immediately.
 Pass `terminal: true` when the command needs terminal behavior, or provide
@@ -287,8 +290,8 @@ separate one-shot process controls, so they do not wait behind stdin.
 `kill()` returns after the control is acknowledged; `wait()` observes exit.
 `maxConcurrentExecs` limits attached process sessions; detached processes and
 one-shot controls do not count. Pausing a sandbox disconnects attachments but
-preserves its processes for reattachment after resume. Processes end when
-their sandbox is stopped or expires.
+preserves its processes for reattachment after resume. Hard and idle expiry
+also pause the sandbox; stopping it ends its processes.
 `sandbox.exec()` is the one-call start-and-wait convenience for ordinary
 commands. It uses `sandbox.processes` internally and does not create a durable
 control-plane exec record; use `sandbox.processes.start()` when you need the
