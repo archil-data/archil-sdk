@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { createApiClient, type ApiClient } from "../src/client.js";
-import { ArchilApiError } from "../src/errors.js";
+import { ArchilApiError, SandboxPauseError } from "../src/errors.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess } from "../src/sandbox-process.js";
 import { Sandbox } from "../src/sandbox.js";
@@ -178,6 +178,9 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
           },
         ],
         deny: ["169.254.0.0/16"],
+        drain_on_pause: [
+          "bedrock-runtime.*.amazonaws.com",
+        ],
       },
     },
   });
@@ -216,6 +219,9 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
                 },
               ],
               deny: ["169.254.0.0/16"],
+              drain_on_pause: [
+                "bedrock-runtime.*.amazonaws.com",
+              ],
             },
           },
         },
@@ -1426,4 +1432,17 @@ test("sandbox token listing follows cursors and caps the total returned", async 
     { limit: "1" },
     { limit: "100", cursor: "token-1" },
   ]);
+});
+
+test("pause reports a snapshot failure with the failed sandbox", async () => {
+  const client = {
+    POST: async () => ok({ ...sandboxWire("failed"), exit_reason: "snapshot failed: snapshot upload timed out" }),
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+  await assert.rejects(sandbox.pause(), (error: unknown) => {
+    assert.ok(error instanceof SandboxPauseError);
+    assert.equal(error.latest.status, "failed");
+    assert.match(error.message, /snapshot upload timed out/);
+    return true;
+  });
 });

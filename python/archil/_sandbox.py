@@ -19,7 +19,7 @@ from ._models import (
     SandboxTerminal,
 )
 from ._sandbox_process import _SandboxProcesses
-from .errors import SandboxStartError
+from .errors import SandboxStartError, SandboxPauseError
 from ._sandbox_files import _SandboxFiles
 
 
@@ -168,7 +168,12 @@ class _Sandbox:
     async def pause(self, *, wait: bool = True) -> "_Sandbox":
         data = await self._transport.request_json("POST", f"/api/sandboxes/{self.id}/pause", retry="transient")
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
-        return await sandbox._wait_while("pausing") if wait else sandbox
+        if not wait:
+            return sandbox
+        sandbox = await sandbox._wait_while("pausing")
+        if sandbox.status != "paused":
+            raise SandboxPauseError(sandbox)
+        return sandbox
 
     async def resume(self, *, wait: bool = True) -> "_Sandbox":
         data = await self._transport.request_json(
