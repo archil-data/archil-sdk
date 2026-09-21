@@ -457,7 +457,8 @@ def test_create_surfaces_terminal_start_failure(archil, router, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_exec_starts_a_process_and_waits(archil, router, monkeypatch):
+@pytest.mark.parametrize("cwd", [None, "/workspace/a 'quote' $literal"])
+async def test_exec_starts_a_process_and_waits(archil, router, monkeypatch, cwd):
     import archil._sandbox as sandbox_module
 
     expected = SandboxProcessResult(
@@ -482,6 +483,7 @@ async def test_exec_starts_a_process_and_waits(archil, router, monkeypatch):
     sandbox = await archil.sandboxes.get.aio("sbx-1")
     result = await sandbox.exec.aio(
         "printf hello",
+        cwd=cwd,
         env={"HELLO": "world"},
         timeout_seconds=10,
     )
@@ -492,6 +494,7 @@ async def test_exec_starts_a_process_and_waits(archil, router, monkeypatch):
             "start",
             "printf hello",
             {
+                "cwd": cwd,
                 "terminal": False,
                 "env": {"HELLO": "world"},
                 "timeout_seconds": 10,
@@ -905,6 +908,7 @@ async def test_run_and_attach_with_streamed_input(archil, router, monkeypatch, l
     attach = sandbox.processes.connect if legacy else sandbox.attach
     process = await run.aio(
         "cat",
+        cwd="/workspace/app",
         env={"HELLO": "world"},
         timeout_seconds=10,
         on_output=output.append,
@@ -918,6 +922,7 @@ async def test_run_and_attach_with_streamed_input(archil, router, monkeypatch, l
     assert json.loads(socket.sent[0]) == {
         "type": "start",
         "command": "cat",
+        "cwd": "/workspace/app",
         "terminal": False,
         "env": {"HELLO": "world"},
         "timeout_seconds": 10,

@@ -293,6 +293,10 @@ Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB. Sandbox
 timeouts default to 24 hours and can be reset up to 24 hours from now.
 
+Pass an absolute `cwd` to `sandbox.run()` or `sandbox.exec()` to choose the
+working directory, for example `sandbox.exec("pytest", { cwd: "/workspace/app" })`.
+Omitting it keeps the sandbox's default working directory.
+
 `sandbox.run()` always returns a runtime-owned process immediately.
 Pass `terminal: true` when the command needs terminal behavior, or provide
 `{ cols, rows }` for an initial size. Terminal processes merge stdout and stderr

@@ -143,6 +143,7 @@ class _Sandbox:
         self,
         command: str,
         *,
+        cwd: Optional[str] = None,
         terminal: Union[bool, SandboxTerminal] = False,
         env: Optional[dict[str, str]] = None,
         timeout_seconds: Optional[int] = None,
@@ -162,6 +163,8 @@ class _Sandbox:
             "terminal": terminal_request,
             "env": env or {},
         }
+        if cwd is not None:
+            request["cwd"] = cwd
         if timeout_seconds is not None:
             request["timeout_seconds"] = timeout_seconds
         await process._connect(request, "started")
@@ -228,6 +231,7 @@ class _Sandbox:
         self,
         command: str,
         *,
+        cwd: Optional[str] = None,
         terminal: Union[bool, SandboxTerminal] = False,
         env: Optional[dict[str, str]] = None,
         timeout_seconds: Optional[int] = None,
@@ -236,6 +240,7 @@ class _Sandbox:
     ) -> SandboxProcessResult:
         process = await self.run(
             command,
+            cwd=cwd,
             terminal=terminal,
             env=env,
             timeout_seconds=timeout_seconds,
@@ -453,6 +458,7 @@ class _SandboxProcesses:
         self,
         command: str,
         *,
+        cwd: Optional[str] = None,
         terminal: Union[bool, SandboxTerminal] = False,
         env: Optional[dict[str, str]] = None,
         timeout_seconds: Optional[int] = None,
@@ -462,6 +468,7 @@ class _SandboxProcesses:
         """Deprecated: use sandbox.run(); removed in the next version."""
         return await self._sandbox.run(
             command,
+            cwd=cwd,
             terminal=terminal,
             env=env,
             timeout_seconds=timeout_seconds,

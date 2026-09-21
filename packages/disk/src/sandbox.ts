@@ -294,6 +294,7 @@ export class Sandbox {
     await process._connect({
       type: "start",
       command,
+      cwd: options.cwd,
       terminal,
       env: options.env ?? {},
       timeout_seconds: options.timeoutSeconds,

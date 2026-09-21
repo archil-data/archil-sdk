@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an optional absolute `cwd` to sandbox `run()`, `exec()`, and the legacy `processes.start()` API, including PTYs. Requires runtime support for the `cwd` connection field.
+
 - Add `sandbox.run()` to start a process and return its handle immediately, including PTYs, and `sandbox.attach()` to reconnect by process ID and output cursor. `sandbox.exec()` still waits for the command result. Keep `sandbox.processes.start()`, `sandbox.processes.connect()`, and the `SandboxProcesses` export as deprecated compatibility APIs until the next version.
 - Add `disk.connect()` returning a fresh `Sandbox` with the disk at `/mnt/archil` and an owned keepalive connection. Use `sandbox.exec()` and `sandbox.run()` for commands, `sandbox.connected` to track the connection, and `sandbox.disconnect()` to release it. The existing 10-second idle TTL begins after the last connection closes.
 
