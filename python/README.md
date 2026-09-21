@@ -49,6 +49,23 @@ d.remove_user("token", user.identifier)
 d.delete()
 ```
 
+### Disk terminals
+
+`disk.connect()` creates a fresh ephemeral Bash PTY with the disk mounted at `/mnt/archil`:
+
+```python
+shell = d.connect(cols=120, rows=40, on_output=lambda event: print(event.data.decode(), end=""))
+shell.send_input("python --version\n")
+shell.resize(cols=160, rows=50)
+shell.disconnect()
+```
+
+An attached connection keeps the VM active. After the last disconnect, the VM expires
+in 10 seconds by default. Every `d.connect()` call creates a new session. Disk files
+persist across sessions, while memory and rootfs changes are temporary.
+Output streams to `on_output`; `collect_output=True`
+also retains it in the process result. These methods also support `.aio`.
+
 ### Sandboxes
 
 Use `Archil.sandboxes` or the module-level helpers to manage persistent microVMs:
@@ -76,7 +93,7 @@ Expose TCP ports publicly when creating a sandbox or later with `expose_port`:
 
 ```python
 web = archil.create_sandbox(base_image="python:3.12-slim", ports=[8080])
-server = web.processes.start("python -m http.server 8080 --bind 0.0.0.0")
+server = web.run("python -m http.server 8080 --bind 0.0.0.0")
 server.disconnect()  # The server keeps running.
 
 hostname = web.expose_port(8080)  # Returns the hostname, including if already public.
@@ -100,7 +117,7 @@ For private HTTP access, create a port token without exposing the port publicly:
 import httpx
 
 private_web = archil.create_sandbox(base_image="python:3.12-slim")
-server = private_web.processes.start("python -m http.server 8080 --bind 0.0.0.0")
+server = private_web.run("python -m http.server 8080 --bind 0.0.0.0")
 server.disconnect()
 
 access = private_web.create_port_token(8080, ttl="1h")
@@ -213,7 +230,7 @@ where the previous connection stopped:
 ```python
 from archil import SandboxTerminal
 
-process = sandbox.processes.start(
+process = sandbox.run(
     "codex",
     terminal=SandboxTerminal(cols=120, rows=40),
     on_output=lambda output: print(output.data.decode(errors="replace"), end=""),
@@ -224,7 +241,7 @@ process_id = process.id
 cursor = process.cursor
 process.disconnect()
 
-resumed = sandbox.processes.connect(process_id, offset=cursor)
+resumed = sandbox.attach(process_id, offset=cursor)
 result = resumed.wait()
 ```
 
@@ -244,8 +261,10 @@ Processes end when their sandbox is stopped or expires. After reconnecting with
 an offset, `wait().stdout` and `wait().stderr` contain the output received by
 that handle from that offset, not output from before it. `sandbox.exec()` is the
 one-call start-and-wait convenience for ordinary commands. It uses
-`sandbox.processes` internally and does not create a durable control-plane exec
-record; use `sandbox.processes.start()` when you need the process handle.
+`sandbox.run()` internally and does not create a durable control-plane exec
+record; use `sandbox.run()` when you need the process handle.
+Replace `sandbox.processes.start()` with `sandbox.run()` and
+`sandbox.processes.connect()` with `sandbox.attach()`; the `processes` object has been removed.
 
 Transfer files directly between the local machine and a running sandbox:
 
@@ -254,7 +273,7 @@ sandbox.files.upload_file("./input.tar.gz", "/workspace/input.tar.gz")
 sandbox.files.download_file("/workspace/result.json", "./result.json")
 ```
 
-Transfers stream through `sandbox.processes` rather than buffering the whole
+Transfers stream through `sandbox.run()` rather than buffering the whole
 file in memory. Downloads request one bounded chunk at a time; a short or empty
 chunk marks end-of-file. Uploads and downloads replace their destination only
 after the transfer succeeds.

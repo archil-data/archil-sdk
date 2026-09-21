@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { createApiClient, type ApiClient } from "../src/client.js";
 import { ArchilApiError } from "../src/errors.js";
+import { Disk } from "../src/disk.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess } from "../src/sandbox-process.js";
 import { Sandbox } from "../src/sandbox.js";
@@ -758,7 +759,7 @@ test("process connections retry API and WebSocket handshake failures", async () 
   TestWebSocket.autoOpen = false;
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("true");
+  const starting = sandbox.run("true");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances.length, 1));
   assert.equal(connectionAttempts, 3);
   const first = TestWebSocket.instances[0];
@@ -783,7 +784,7 @@ test("process connections retry API and WebSocket handshake failures", async () 
   await process.disconnect();
 });
 
-test("processes start directly, disconnect, and resume from their output cursor", async () => {
+test("run returns a process before exit and supports attach", async () => {
   const calls: Array<{ path: string; options: any }> = [];
   const output: Array<{ stream: string; offset: number; data: number[] }> = [];
   const client = {
@@ -799,7 +800,7 @@ test("processes start directly, disconnect, and resume from their output cursor"
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("echo hello", {
+  const starting = sandbox.run("echo hello", {
     terminal: false,
     env: { HELLO: "world" },
     timeoutSeconds: 10,
@@ -842,7 +843,7 @@ test("processes start directly, disconnect, and resume from their output cursor"
   await process.disconnect();
   assert.equal(process.connected, false);
 
-  const connecting = sandbox.processes.connect(process.id, {
+  const connecting = sandbox.attach(process.id, {
     offset: process.cursor,
     onOutput: (event) =>
       output.push({
@@ -923,7 +924,7 @@ test("processes reconnect by ID and an explicit output cursor", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const connecting = sandbox.processes.connect("0198-process", {
+  const connecting = sandbox.attach("0198-process", {
     offset: 1_000,
     onOutput: (event) =>
       output.push({
@@ -984,7 +985,7 @@ test("a terminal is a process with terminal sizing, input, and kill", async () =
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("codex", {
+  const starting = sandbox.run("codex", {
     terminal: { cols: 132, rows: 43 },
   });
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
@@ -1054,7 +1055,7 @@ test("process input is streamed as ordered WebSocket frames", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("cat", {
+  const starting = sandbox.run("cat", {
     onOutput: (event) =>
       output.push({
         stream: event.stream,
@@ -1097,7 +1098,7 @@ test("failed stdin close can be retried", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("cat");
+  const starting = sandbox.run("cat");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
   socket.emit("message", {
@@ -1128,7 +1129,7 @@ test("process exit closes stdin locally", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("cat");
+  const starting = sandbox.run("cat");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
   socket.emit("message", {
@@ -1162,7 +1163,7 @@ test("output callbacks cannot hide runtime connection errors", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("echo hello", {
+  const starting = sandbox.run("echo hello", {
     onOutput: () => {
       throw new Error("callback failed");
     },
@@ -1204,7 +1205,7 @@ test("process output collection can be disabled while streaming", async () => {
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
   const output: string[] = [];
 
-  const starting = sandbox.processes.start("echo hello", {
+  const starting = sandbox.run("echo hello", {
     collectOutput: false,
     onOutput: ({ data }) => output.push(new TextDecoder().decode(data)),
   });
@@ -1243,7 +1244,7 @@ test("process start surfaces runtime rejection", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("");
+  const starting = sandbox.run("");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   TestWebSocket.instances[0].emit("message", {
     data: JSON.stringify({
@@ -1425,5 +1426,55 @@ test("sandbox token listing follows cursors and caps the total returned", async 
     { limit: "1" },
     { limit: "1" },
     { limit: "100", cursor: "token-1" },
+  ]);
+});
+
+test("disk.connect starts a fresh Bash PTY on every call", async () => {
+  const calls: Array<{ path: string; options: any }> = [];
+  let sessionCount = 0;
+  const client = {
+    POST: async (path: string, options: any) => {
+      calls.push({ path, options });
+      return path === "/api/disks/{id}/connect"
+        ? ok(sandboxWire("running", `session-${++sessionCount}`))
+        : ok({ url: "wss://sandbox.example/connect?token=signed", expires_at: now });
+    },
+  } as unknown as ApiClient;
+  const disk = new Disk({
+    id: "dsk-1", name: "disk", organization: "owner", status: "available",
+    provider: "aws", region: "aws-us-east-1", createdAt: now, sandboxDisk: false,
+  }, client, "aws-us-east-1");
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
+  const output: string[] = [];
+  const connecting = disk.connect({ cols: 100, rows: 40, onOutput: (event) => output.push(new TextDecoder().decode(event.data)) });
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
+  const first = TestWebSocket.instances[0];
+  assert.deepEqual(JSON.parse(first.sent[0] as string), {
+    type: "start", command: "exec /bin/bash -i", terminal: { cols: 100, rows: 40 }, env: { TERM: "xterm-256color" },
+  });
+  first.emit("message", { data: JSON.stringify({ type: "started", process_id: "shell-1" }) });
+  const shell = await connecting;
+  first.emit("message", { data: outputFrame(1, 0, "prompt") });
+  await vi.waitFor(() => assert.deepEqual(output, ["prompt"]));
+  assert.equal(shell.stdout, "");
+  shell.sendInput("python\n");
+  assert.deepEqual(first.sent[1], new TextEncoder().encode("python\n"));
+  shell.disconnect();
+  const connectingAgain = disk.connect();
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[1].sent.length, 1));
+  const second = TestWebSocket.instances[1];
+  assert.deepEqual(JSON.parse(second.sent[0] as string), {
+    type: "start", command: "exec /bin/bash -i", terminal: { cols: 80, rows: 24 }, env: { TERM: "xterm-256color" },
+  });
+  second.emit("message", { data: JSON.stringify({ type: "started", process_id: "shell-2" }) });
+  const newShell = await connectingAgain;
+  assert.equal(newShell.id, "shell-2");
+  newShell.disconnect();
+  assert.deepEqual(calls.filter((call) => call.path === "/api/disks/{id}/connect").map((call) => call.options), [
+    { params: { path: { id: "dsk-1" } } }, { params: { path: { id: "dsk-1" } } },
+  ]);
+  assert.deepEqual(calls.filter((call) => call.path === "/api/sandboxes/{sid}/connections").map((call) => call.options.params.path.sid), [
+    "session-1", "session-2",
   ]);
 });
