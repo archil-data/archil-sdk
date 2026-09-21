@@ -204,7 +204,8 @@ traffic do not keep it alive. Disable idle TTL for unattended jobs.
 
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB. Sandbox
-timeouts default to 24 hours and can be reset up to 24 hours from now.
+hard timeouts accept 60–86,400 seconds, default to 24 hours, and can be reset
+up to 24 hours from now.
 
 Runtime-owned processes return immediately and can be disconnected without
 stopping the command. Reconnect by process ID and output cursor to continue
@@ -240,8 +241,8 @@ control is acknowledged; `wait()` observes exit. `max_concurrent_execs`
 limits attached process sessions; detached processes and one-shot controls do not
 count. Pausing a sandbox disconnects attachments but preserves its processes
 for reattachment after resume.
-Processes end when their sandbox is stopped or expires. After reconnecting with
-an offset, `wait().stdout` and `wait().stderr` contain the output received by
+Hard and idle expiry also pause the sandbox; stopping it ends its processes.
+After reconnecting with an offset, `wait().stdout` and `wait().stderr` contain the output received by
 that handle from that offset, not output from before it. `sandbox.exec()` is the
 one-call start-and-wait convenience for ordinary commands. It uses
 `sandbox.processes` internally and does not create a durable control-plane exec
@@ -264,9 +265,10 @@ default. The server handles the initial wait; if its wait budget expires first,
 the SDK continues polling. Pass `wait=False` to return as soon as the lifecycle
 operation is accepted. `sandbox.exec()` always waits for process exit.
 
-`fork` pauses a running sandbox while the snapshot is taken and resumes it once
-the fork is accepted. A paused or stopped sandbox is forked in place and left as
-it is.
+`fork` pauses a running sandbox while the snapshot is taken and attempts to resume
+it once the fork is accepted. Source resume is best effort; call `refresh()` and
+check its status if it must keep running. A paused or stopped sandbox is forked
+in place and left as it is.
 
 ### Delegations
 
