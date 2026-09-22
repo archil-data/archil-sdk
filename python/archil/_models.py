@@ -336,6 +336,7 @@ class SandboxEgressPolicy:
     default: SandboxNetworkAction
     allow: Optional[list[Union[str, SandboxEgressRule]]] = None
     deny: Optional[list[str]] = None
+    drain_on_pause: Optional[list[str]] = None
 
     def to_json(self) -> dict:
         return {
@@ -348,6 +349,7 @@ class SandboxEgressPolicy:
                     else None
                 ),
                 "deny": self.deny,
+                "drain_on_pause": self.drain_on_pause,
             }.items()
             if value is not None
         }
@@ -363,6 +365,7 @@ class SandboxEgressPolicy:
                 else None
             ),
             deny=d.get("deny"),
+            drain_on_pause=d.get("drain_on_pause"),
         )
 
 
