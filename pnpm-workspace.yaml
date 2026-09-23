@@ -1,5 +1,6 @@
 packages:
   - 'packages/*'
+  - 'python'
 allowBuilds:
   '@mongodb-js/zstd': true
   esbuild: true

@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/@changesets/config@4.0.0-next.5/schema.json",
   "baseBranch": "main",
   "access": "public",
-  "ignore": [],
+  "ignore": ["@archildata/eve-e2e", "@archildata/mock"],
   "fixed": [],
   "linked": [],
   "format": "auto",
@@ -10,6 +10,6 @@
   "commit": false,
   "changelog": "@changesets/cli/changelog",
   "privatePackages": {
-    "version": false
+    "version": true
   }
 }

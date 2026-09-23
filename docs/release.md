@@ -1,12 +1,12 @@
 # Release workflows
 
-The JavaScript SDKs are released with [Changesets](https://github.com/changesets/changesets). Versioning and publishing are fully automated by CI — nobody runs `npm publish` from their machine for a normal release.
+The JavaScript and Python SDKs are released with [Changesets](https://github.com/changesets/changesets). CI prepares the version PR and publishes after it merges.
 
 ## Overview
 
 1. When you open a PR that changes a package's public behavior, add a changeset describing the change and the semver bump.
-2. When PRs land on `main`, the [Node Release workflow](../.github/workflows/node-release.yaml) collects pending changesets into a **"Version Packages"** PR that bumps versions and updates changelogs.
-3. When that Version Packages PR is merged, the same workflow builds everything and publishes the bumped packages to npm.
+2. When PRs land on `main`, the [SDK Release workflow](../.github/workflows/node-release.yaml) collects pending changesets into a **"Version Packages"** PR that bumps versions and updates changelogs.
+3. When that Version Packages PR is merged, CI publishes the bumped JavaScript packages to npm and Python's `archil` package to PyPI.
 
 ## Adding a changeset to your PR
 
@@ -18,13 +18,15 @@ pnpm changeset
 
 Pick the package(s) your change affects, choose a bump type (`patch`, `minor`, or `major`), and write a short summary — it becomes the changelog entry. Commit the generated file in `.changeset/` with your PR.
 
-Skip the changeset for changes that don't affect published packages (CI config, docs, tests, private packages) or only affect internals (refactoring, optimization).
+Select `archil` for Python changes, `disk` for the JavaScript SDK, or both when a change affects both SDKs. Python's `package.json` is private because it supplies Changesets metadata; it is never published to npm.
+
+Skip the changeset for changes that don't affect published packages (CI config, docs, tests) or only affect internals (refactoring, optimization).
 
 ## What CI does (`.github/workflows/node-release.yaml`)
 
-The **Node Release** workflow runs when Node package or Changesets files change on `main` (one run at a time per branch, via a concurrency group). It uses [`changesets/action`](https://github.com/changesets/action), which does one of two things:
+The **SDK Release** workflow runs when package metadata or Changesets files change on `main` (one run at a time per branch, via a concurrency group). It uses [`changesets/action`](https://github.com/changesets/action), which does one of two things:
 
-- **Pending changesets exist** → it opens or updates the **Version Packages** PR. That PR consumes the changeset files, bumps `package.json` versions, and updates each package's `CHANGELOG.md`. It stays open and keeps absorbing new changesets until someone merges it.
+- **Pending changesets exist** → it opens or updates the **Version Packages** PR. That PR consumes the changeset files, bumps `package.json` versions, and updates each package's `CHANGELOG.md`. Python's version is also copied to `pyproject.toml` using `uv version`. The PR stays open and keeps absorbing new changesets until someone merges it.
 - **No pending changesets** (i.e., the Version Packages PR was just merged) → it runs `pnpm release`, which is `pnpm build && changeset publish`. Only packages whose local version is ahead of npm get published, and each gets a git tag.
 
 Publishing authenticates via [npm trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC, the `id-token: write` permission) — there is no long-lived npm token in the publish step.
@@ -34,7 +36,7 @@ Publishing authenticates via [npm trusted publishing](https://docs.npmjs.com/tru
 1. Land your PRs (each with a changeset) on `main`.
 2. Wait for the Release workflow to open/update the **Version Packages** PR and review it — check the version bumps and changelog entries.
 3. Merge the Version Packages PR.
-4. The Release workflow runs again, builds all packages, and publishes the bumped ones to npm.
+4. CI builds and publishes the bumped packages to npm and/or PyPI.
 
 ## Publishing a brand-new package (`node-initial-release.yaml`)
 
@@ -48,17 +50,13 @@ After the initial version exists on npm, configure trusted publishing for the pa
 
 ## Publishing the Python SDK
 
-The `archil` Python package has an independent release workflow:
+Add an `archil` changeset with your Python change. The shared **Version Packages** PR handles the version and changelog; no manual version edits or tags are needed.
 
-1. Update `python/pyproject.toml` and `python/CHANGELOG.md` in a release PR.
-2. Merge the release PR to `main`.
-3. Tag that commit as `python/vX.Y.Z`, matching the version in `pyproject.toml`.
-4. The [Python release workflow](../.github/workflows/python-release.yaml) verifies the tag, runs the complete Python test suite, builds the wheel and source distribution, publishes them to PyPI with trusted publishing, and creates a GitHub release.
+The [Python release workflow](../.github/workflows/python-release.yaml) runs when `python/pyproject.toml` changes on `main`. It compares the version before and after the push and skips publishing if it is unchanged. A version bump runs the Python tests, lint, and type checks, builds the wheel and source distribution, publishes to PyPI, and creates the `python/vX.Y.Z` tag and GitHub release at that commit.
 
-The first release from this repository is `python/v0.8.27`. PyPI trusted
-publishing for the `archil` project must point to `archil-data/archil-sdk`,
-workflow `python-release.yaml`, environment `pypi`. The old publisher in
-`archil-data/archil` is disabled.
+If publishing fails partway through, rerun the failed workflow. Already uploaded PyPI files are skipped, and the GitHub release assets can be uploaded again.
+
+PyPI trusted publishing still uses repository `archil-data/archil-sdk`, workflow `python-release.yaml`, environment `pypi`; no publisher configuration change is needed.
 
 ## Troubleshooting
 
