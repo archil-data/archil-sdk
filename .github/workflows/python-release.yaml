@@ -2,22 +2,24 @@ name: Release archil
 
 on:
   push:
-    tags:
-      - 'python/v*'
+    branches:
+      - main
+    paths:
+      - 'python/pyproject.toml'
 
 concurrency:
   group: python-release
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
-  release:
-    name: release archil
+  version:
+    name: Check Python version change
     runs-on: ubuntu-latest
-    environment: pypi
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -26,23 +28,33 @@ jobs:
       - uses: astral-sh/setup-uv@v8.1.0
         with:
           python-version: '3.12'
-          working-directory: python
 
-      - name: Verify release tag
-        working-directory: python
+      - id: version
+        env:
+          BEFORE: ${{ github.event.before }}
         run: |
-          git fetch origin main
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::Release tags must point to a commit on main."
-            exit 1
+          previous="$(git show "$BEFORE:python/pyproject.toml" | python -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])')"
+          version="$(uv version --project python --short)"
+          if [ "$previous" != "$version" ]; then
+            echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
 
-          tag_version="${GITHUB_REF_NAME#python/v}"
-          project_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          if [ "$tag_version" != "$project_version" ]; then
-            echo "::error::Tag version $tag_version does not match pyproject.toml version $project_version."
-            exit 1
-          fi
+  release:
+    name: release archil
+    needs: version
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: '3.12'
+          working-directory: python
 
       - name: Install dependencies
         working-directory: python
@@ -72,12 +84,16 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: python/dist
+          skip-existing: true
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "archil ${GITHUB_REF_NAME#python/v}" \
-            --generate-notes \
-            python/dist/*
+          tag="python/v$VERSION"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" \
+              --title "archil $VERSION" --generate-notes
+          fi
+          gh release upload "$tag" python/dist/* --clobber

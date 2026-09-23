@@ -1,4 +1,4 @@
-name: Node Release
+name: SDK Release
 
 on:
   push:
@@ -6,18 +6,20 @@ on:
       - main
     paths:
       - 'packages/**'
+      - 'python/package.json'
       - '.changeset/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - '.github/workflows/node-release.yaml'
       - '.github/scripts/publish-node.sh'
+      - '.github/scripts/version-packages.sh'
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
-    name: Release Node packages
+    name: Version SDKs and publish Node packages
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -39,10 +41,13 @@ jobs:
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
+      - uses: astral-sh/setup-uv@v8.1.0
+
       - name: Create Release Pull Request or Publish to npm
         id: changesets
         uses: changesets/action@v2.1.2
         with:
+          version-script: bash .github/scripts/version-packages.sh
           publish-script: bash .github/scripts/publish-node.sh
 
       - name: Deprecate @archildata/client (deprecated bridge)

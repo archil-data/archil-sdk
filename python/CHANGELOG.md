@@ -1,10 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Add `drain_on_pause` hostname wildcard selectors.
-- Raise `SandboxPauseError` when a waited pause finishes without reaching paused.
-
 ## 0.13.0
 
 - Add sandbox port tokens for private HTTP access: create, get, list/paginate, and delete tokens with optional expiration, in both sync and async APIs.
