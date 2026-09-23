@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0
+
+### Minor Changes
+
+- 76f5d06: Add opt-in sandbox egress `drain_on_pause` hostname wildcard selectors. Pausing waits for selected HTTP responses, including streams, and raises `SandboxPauseError` if the sandbox does not reach paused.
+
 ## 0.13.0
 
 - Add sandbox port tokens for private HTTP access: create, get, list/paginate, and delete tokens with optional expiration, in both sync and async APIs.
