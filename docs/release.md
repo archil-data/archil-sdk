@@ -52,7 +52,7 @@ After the initial version exists on npm, configure trusted publishing for the pa
 
 Add an `archil` changeset with your Python change. The shared **Version Packages** PR handles the version and changelog; no manual version edits or tags are needed.
 
-The [Python release workflow](../.github/workflows/python-release.yaml) runs when `python/pyproject.toml` changes on `main`. It compares the version before and after the push and skips publishing if it is unchanged. A version bump runs the Python tests, lint, and type checks, builds the wheel and source distribution, publishes to PyPI, and creates the `python/vX.Y.Z` tag and GitHub release at that commit.
+The [Python release workflow](../.github/workflows/python-release.yaml) runs when `python/pyproject.toml` or the workflow changes on `main`. It skips publishing if the `python/vX.Y.Z` tag for the current version already exists. An unreleased version runs the Python tests, lint, and type checks, builds the wheel and source distribution, publishes to PyPI, and creates the `python/vX.Y.Z` tag and GitHub release at that commit.
 
 If publishing fails partway through, rerun the failed workflow. Already uploaded PyPI files are skipped, and the GitHub release assets can be uploaded again.
 
