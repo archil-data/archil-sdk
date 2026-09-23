@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'python/pyproject.toml'
+      - '.github/workflows/python-release.yaml'
 
 concurrency:
   group: python-release
@@ -16,26 +17,17 @@ permissions:
 
 jobs:
   version:
-    name: Check Python version change
+    name: Check for unreleased Python version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - uses: astral-sh/setup-uv@v8.1.0
-        with:
-          python-version: '3.12'
 
       - id: version
-        env:
-          BEFORE: ${{ github.event.before }}
         run: |
-          previous="$(git show "$BEFORE:python/pyproject.toml" | python -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])')"
-          version="$(uv version --project python --short)"
-          if [ "$previous" != "$version" ]; then
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("python/pyproject.toml", "rb"))["project"]["version"])')"
+          if ! git ls-remote --exit-code --tags origin "refs/tags/python/v$version" >/dev/null; then
             echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
 
