@@ -1,5 +1,11 @@
 # disk
 
+## 1.5.0
+
+### Minor Changes
+
+- 76f5d06: Add opt-in sandbox egress `drain_on_pause` hostname wildcard selectors. Pausing waits for selected HTTP responses, including streams, and raises `SandboxPauseError` if the sandbox does not reach paused.
+
 ## 1.4.0
 
 ### Minor Changes

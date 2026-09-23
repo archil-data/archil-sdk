@@ -1,5 +1,12 @@
 # @archildata/client
 
+## 0.8.34
+
+### Patch Changes
+
+- Updated dependencies [76f5d06]
+  - disk@1.5.0
+
 ## 0.8.33
 
 ### Patch Changes
