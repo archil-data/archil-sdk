@@ -1,3 +1,8 @@
+// "transient" repeats the call on transport errors and 429/5xx, so it fits
+// reads and idempotent writes only. "connect" repeats only when no connection
+// was established, so the request never reached the server; creations, execs,
+// and deletes take it, since replaying them could duplicate work or report a
+// lost success as a 404.
 export type RetryMode = "none" | "connect" | "transient";
 
 export const MAX_RETRIES = 3;

@@ -34,16 +34,20 @@ export class Tokens {
     req: CreateApiTokenRequest,
   ): Promise<ApiTokenResponse & { token?: string }> {
     const data = await unwrap(
-      this._client.POST("/api/tokens", { body: req }),
+      retryApiRequest(() => this._client.POST("/api/tokens", { body: req }), "connect"),
     );
     return data as ApiTokenResponse & { token?: string };
   }
 
   async delete(id: string): Promise<void> {
     await unwrapEmpty(
-      this._client.DELETE("/api/tokens/{tokenId}", {
-        params: { path: { tokenId: id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.DELETE("/api/tokens/{tokenId}", {
+            params: { path: { tokenId: id } },
+          }),
+        "connect",
+      ),
     );
   }
 }

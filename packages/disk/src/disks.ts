@@ -125,7 +125,7 @@ export class Disks {
    */
   async create(req: CreateDiskRequest): Promise<CreateDiskResult> {
     const created = await unwrap(
-      this._client.POST("/api/disks", { body: req }),
+      retryApiRequest(() => this._client.POST("/api/disks", { body: req }), "connect"),
     );
     const resp = created as {
       diskId?: string;
@@ -154,10 +154,14 @@ export class Disks {
    */
   async exec(id: string, command: string): Promise<ExecResult> {
     return unwrap<ExecResult>(
-      this._client.POST("/api/disks/{id}/exec", {
-        params: { path: { id } },
-        body: { command },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/disks/{id}/exec", {
+            params: { path: { id } },
+            body: { command },
+          }),
+        "connect",
+      ),
     );
   }
 }

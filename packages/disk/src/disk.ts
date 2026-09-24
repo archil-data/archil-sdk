@@ -436,30 +436,42 @@ export class Disk implements FileSystem {
 
   async addUser(user: DiskUser): Promise<AuthorizedUser> {
     return unwrap(
-      this._client.POST("/api/disks/{id}/users", {
-        params: { path: { id: this.id } },
-        body: user,
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/disks/{id}/users", {
+            params: { path: { id: this.id } },
+            body: user,
+          }),
+        "connect",
+      ),
     );
   }
 
   async removeUser(userType: "token" | "awssts", identifier: string): Promise<void> {
     await unwrapEmpty(
-      this._client.DELETE("/api/disks/{id}/users/{userType}", {
-        params: {
-          path: { id: this.id, userType },
-          query: { identifier },
-        },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.DELETE("/api/disks/{id}/users/{userType}", {
+            params: {
+              path: { id: this.id, userType },
+              query: { identifier },
+            },
+          }),
+        "connect",
+      ),
     );
   }
 
   async createToken(nickname: string): Promise<AuthorizedUser & { token: string; identifier: string }> {
     const user = (await unwrap(
-      this._client.POST("/api/disks/{id}/users", {
-        params: { path: { id: this.id } },
-        body: { type: "token", nickname },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/disks/{id}/users", {
+            params: { path: { id: this.id } },
+            body: { type: "token", nickname },
+          }),
+        "connect",
+      ),
     )) as AuthorizedUser;
     if (!user.token || !user.identifier) {
       throw new Error("Server did not return a generated token");
@@ -509,10 +521,14 @@ export class Disk implements FileSystem {
   async revokeDelegation(delegation: Pick<Delegation, "clientId" | "inodeId">): Promise<void> {
     const { clientId, inodeId } = delegation;
     await unwrap(
-      this._client.POST("/api/disks/{id}/revoke-delegation", {
-        params: { path: { id: this.id } },
-        body: { clientId, inodeId },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/disks/{id}/revoke-delegation", {
+            params: { path: { id: this.id } },
+            body: { clientId, inodeId },
+          }),
+        "connect",
+      ),
     );
   }
 
@@ -531,10 +547,14 @@ export class Disk implements FileSystem {
 
   async setAllowedIPs(allowedIps: string[]): Promise<string[]> {
     const data = await unwrap(
-      this._client.PUT("/api/disks/{id}/allowed-ips", {
-        params: { path: { id: this.id } },
-        body: { allowedIps },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.PUT("/api/disks/{id}/allowed-ips", {
+            params: { path: { id: this.id } },
+            body: { allowedIps },
+          }),
+        "transient",
+      ),
     );
     return (data as { allowedIps: string[] }).allowedIps;
   }
@@ -552,9 +572,13 @@ export class Disk implements FileSystem {
 
   async delete(): Promise<void> {
     await unwrapEmpty(
-      this._client.DELETE("/api/disks/{id}", {
-        params: { path: { id: this.id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.DELETE("/api/disks/{id}", {
+            params: { path: { id: this.id } },
+          }),
+        "connect",
+      ),
     );
   }
 
@@ -564,10 +588,14 @@ export class Disk implements FileSystem {
    */
   async exec(command: string): Promise<ExecResult> {
     return unwrap<ExecResult>(
-      this._client.POST("/api/disks/{id}/exec", {
-        params: { path: { id: this.id } },
-        body: { command },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/disks/{id}/exec", {
+            params: { path: { id: this.id } },
+            body: { command },
+          }),
+        "connect",
+      ),
     );
   }
 
@@ -583,17 +611,21 @@ export class Disk implements FileSystem {
    */
   async grep(opts: GrepOptions): Promise<GrepResult> {
     return unwrap<GrepResult>(
-      this._client.POST("/api/disks/{id}/grep", {
-        params: { path: { id: this.id } },
-        body: {
-          directory: opts.directory,
-          pattern: opts.pattern,
-          recursive: opts.recursive ?? false,
-          maxDurationSeconds: opts.maxDurationSeconds ?? 30,
-          concurrency: opts.concurrency ?? 50,
-          maxResults: opts.maxResults ?? 1000,
-        },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/disks/{id}/grep", {
+            params: { path: { id: this.id } },
+            body: {
+              directory: opts.directory,
+              pattern: opts.pattern,
+              recursive: opts.recursive ?? false,
+              maxDurationSeconds: opts.maxDurationSeconds ?? 30,
+              concurrency: opts.concurrency ?? 50,
+              maxResults: opts.maxResults ?? 1000,
+            },
+          }),
+        "transient",
+      ),
     );
   }
 
