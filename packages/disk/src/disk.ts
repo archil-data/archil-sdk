@@ -5,6 +5,7 @@ import { parseXml } from "./s3xml.js";
 import {
   isTransientStatus,
   MAX_RETRIES,
+  retryApiRequest,
   retrySleep,
 } from "./retry.js";
 import type { FileSystem } from "./filesystem.js";
@@ -481,9 +482,13 @@ export class Disk implements FileSystem {
    */
   async listDelegations(): Promise<Delegation[]> {
     const data = await unwrap(
-      this._client.GET("/api/disks/{id}/delegations", {
-        params: { path: { id: this.id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/disks/{id}/delegations", {
+            params: { path: { id: this.id } },
+          }),
+        "transient",
+      ),
     );
     return data.delegations;
   }
@@ -513,9 +518,13 @@ export class Disk implements FileSystem {
 
   async getAllowedIPs(): Promise<string[]> {
     const data = await unwrap(
-      this._client.GET("/api/disks/{id}/allowed-ips", {
-        params: { path: { id: this.id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/disks/{id}/allowed-ips", {
+            params: { path: { id: this.id } },
+          }),
+        "transient",
+      ),
     );
     return (data as { allowedIps: string[] }).allowedIps;
   }

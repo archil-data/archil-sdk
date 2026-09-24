@@ -1,33 +1,29 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { Archil } from "../src/index.js";
+import { json, startOrigin } from "./helpers/origin.js";
+
+const execResult = {
+  success: true,
+  data: {
+    exitCode: 0,
+    stdout: "",
+    stderr: "",
+    timing: { totalMs: 0, queueMs: 0, executeMs: 0 },
+  },
+};
 
 test("exec forwards multi-disk mount options", async () => {
-  const originalFetch = globalThis.fetch;
-  let capturedBody: unknown;
-  globalThis.fetch = async (input, init = {}) => {
-    const req = input instanceof Request ? input : new Request(input, init);
-    const url = new URL(req.url);
-    if (url.host === "cp.test" && url.pathname === "/api/exec") {
-      capturedBody = JSON.parse(await req.text());
-      return json({
-        success: true,
-        data: {
-          exitCode: 0,
-          stdout: "",
-          stderr: "",
-          timing: { totalMs: 0, queueMs: 0, executeMs: 0 },
-        },
-      });
-    }
-    return json({ success: false, error: `unexpected request: ${req.method} ${req.url}` }, 500);
-  };
+  const control = await startOrigin((request) => {
+    if (request.url.pathname === "/api/exec") return json(execResult);
+    return json({ success: false, error: `unexpected request: ${request.method} ${request.url}` }, 500);
+  });
 
   try {
     const archil = new Archil({
       apiKey: "key-test",
       region: "aws-us-east-1",
-      baseUrl: "http://cp.test",
+      baseUrl: control.url,
       s3BaseUrl: "http://s3.test",
     });
 
@@ -43,7 +39,9 @@ test("exec forwards multi-disk mount options", async () => {
       },
     });
 
-    assert.deepEqual(capturedBody, {
+    const exec = control.requests.find((request) => request.url.pathname === "/api/exec");
+    assert.ok(exec, "expected a POST /api/exec request");
+    assert.deepEqual(JSON.parse(exec.body), {
       command: "npm test",
       disks: {
         data: {
@@ -56,57 +54,47 @@ test("exec forwards multi-disk mount options", async () => {
       },
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    await control.close();
   }
 });
 
 test("disks.exec runs against an id without fetching the disk", async () => {
-  const originalFetch = globalThis.fetch;
-  const requests: Array<{ method: string; pathname: string; body: unknown }> = [];
-  globalThis.fetch = async (input, init = {}) => {
-    const req = input instanceof Request ? input : new Request(input, init);
-    requests.push({
-      method: req.method,
-      pathname: new URL(req.url).pathname,
-      body: req.method === "POST" ? JSON.parse(await req.text()) : undefined,
-    });
-    return json({
-      success: true,
-      data: {
-        exitCode: 0,
-        stdout: "hello\n",
-        stderr: "",
-        timing: { totalMs: 12, queueMs: 3, executeMs: 9 },
-      },
-    });
-  };
+  const control = await startOrigin(() => json({
+    success: true,
+    data: {
+      exitCode: 0,
+      stdout: "hello\n",
+      stderr: "",
+      timing: { totalMs: 12, queueMs: 3, executeMs: 9 },
+    },
+  }));
 
   try {
     const archil = new Archil({
       apiKey: "key-test",
       region: "aws-us-east-1",
-      baseUrl: "http://cp.test",
+      baseUrl: control.url,
       s3BaseUrl: "http://s3.test",
     });
 
     const result = await archil.disks.exec("dsk-existing", "printf hello");
 
     assert.equal(result.stdout, "hello\n");
-    assert.deepEqual(requests, [
-      {
-        method: "POST",
-        pathname: "/api/disks/dsk-existing/exec",
-        body: { command: "printf hello" },
-      },
-    ]);
+    assert.deepEqual(
+      control.requests.map((request) => ({
+        method: request.method,
+        pathname: request.url.pathname,
+        body: request.method === "POST" ? JSON.parse(request.body) : undefined,
+      })),
+      [
+        {
+          method: "POST",
+          pathname: "/api/disks/dsk-existing/exec",
+          body: { command: "printf hello" },
+        },
+      ],
+    );
   } finally {
-    globalThis.fetch = originalFetch;
+    await control.close();
   }
 });
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}

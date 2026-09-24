@@ -48,8 +48,12 @@ const undiciModule = isNodeRuntime()
   ? import(undiciSpecifier) as Promise<typeof import("undici")>
   : undefined;
 
+type Undici = typeof import("undici");
+
 const CONTROL_PLANE_CONNECTIONS = 1;
-const CONTROL_PLANE_CONCURRENT_STREAMS = 100;
+// ALBs close a connection idle for 60 s and do not count HTTP/2 PING frames as
+// activity, so retire idle sessions first instead of racing that close.
+const IDLE_SESSION_TIMEOUT_MS = 30_000;
 
 function isAsyncIterableBody(
   body: Dispatcher.DispatchOptions["body"],
@@ -67,44 +71,19 @@ async function bufferBody(body: AsyncIterable<Uint8Array | string>): Promise<Buf
   return Buffer.concat(chunks);
 }
 
-// Undici deliberately serializes non-idempotent requests and streaming request
-// bodies, including the async iterable created internally for a fetch() POST.
-// The control-plane API needs POSTs (notably disk exec) to share HTTP/2 sessions,
-// so buffer the already-bounded request body and opt it into multiplexing. Guard
-// onConnect so Undici can never replay a request that reached a socket: a dropped
-// shared session fails in-flight operations instead of potentially running an
-// exec or another mutation twice.
-export const multiplexHttp2Requests: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (
+// Undici replays a request that a GOAWAY refused (its stream id is above the
+// frame's lastStreamID, so the server never processed it) only when the body is
+// a Buffer or Blob, but fetch() hands it a streaming async iterable. Buffer the
+// already-bounded body so refused control-plane requests, POSTs included, are
+// replayed on a fresh session instead of failing.
+export const bufferRequestBodies: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (
   options,
   handler,
 ) => {
-  let requestStarted = false;
-  const guardedHandler: Dispatcher.DispatchHandler = {
-    onRequestStart(controller, context) {
-      if (requestStarted) {
-        controller.abort(new Error("Archil control-plane requests are not replayed after a connection failure"));
-        return;
-      }
-      requestStarted = true;
-      handler.onRequestStart?.(controller, context);
-    },
-    onRequestUpgrade: handler.onRequestUpgrade?.bind(handler),
-    onResponseStart: handler.onResponseStart?.bind(handler),
-    onResponseData: handler.onResponseData?.bind(handler),
-    onResponseEnd: handler.onResponseEnd?.bind(handler),
-    onResponseError: handler.onResponseError?.bind(handler),
-  };
-
-  const dispatchBody = (body: Dispatcher.DispatchOptions["body"]): boolean => dispatch({
-    ...options,
-    body,
-    idempotent: true,
-  }, guardedHandler);
-
-  if (!isAsyncIterableBody(options.body)) return dispatchBody(options.body);
+  if (!isAsyncIterableBody(options.body)) return dispatch(options, handler);
 
   void bufferBody(options.body).then(
-    dispatchBody,
+    (body) => dispatch({ ...options, body }, handler),
     (error: unknown) => handler.onResponseError?.({
       aborted: false,
       paused: false,
@@ -117,45 +96,49 @@ export const multiplexHttp2Requests: Dispatcher.DispatcherComposeInterceptor = (
   return true;
 };
 
-// Every Archil instance used to delegate to Node's default global fetch
-// dispatcher. That dispatcher currently negotiates HTTP/1.1, even when the
-// control plane advertises HTTP/2, and a burst of independently constructed
-// clients therefore creates substantial connection pressure. Keep one lazily
-// initialized HTTP/2-capable dispatcher per control-plane origin and credential,
+// Node's global fetch negotiates HTTP/1.1 even when the control plane
+// advertises HTTP/2, and its bundled Undici cannot drive an Undici 8
+// dispatcher, so control-plane and S3 requests go through Undici's own fetch
+// over one lazily initialized HTTP/2 dispatcher per origin and credential,
 // shared by every client in this JavaScript process. It opens a single session
-// on demand, then Undici multiplexes concurrent requests over that session.
-// CA settings must also match: TLS verification happens when a connection is
-// established, so reusing it must not let a client inherit another client's trust.
-const sharedDispatchers = new Map<string, Promise<Dispatcher>>();
+// on demand and multiplexes concurrent requests over it, up to the stream limit
+// the server advertises. CA settings must also match: TLS verification happens
+// when a connection is established, so reusing it must not let a client
+// inherit another client's trust.
+interface PooledTransport {
+  fetch: Undici["fetch"];
+  dispatcher: Dispatcher;
+}
+
+const sharedTransports = new Map<string, Promise<PooledTransport>>();
 
 function dispatcherKey(baseUrl: string, apiKey: string, ca?: Buffer[]): string {
   return JSON.stringify([new URL(baseUrl).origin, apiKey, ca?.map((cert) => cert.toString("base64"))]);
 }
 
-function getSharedDispatcher(key: string, ca?: Buffer[]): Promise<Dispatcher> {
-  const existing = sharedDispatchers.get(key);
+function getSharedTransport(key: string, ca?: Buffer[]): Promise<PooledTransport> {
+  const existing = sharedTransports.get(key);
   if (existing) return existing;
 
-  const dispatcher = (async () => {
+  const transport = (async () => {
     if (!undiciModule) throw new Error("The pooled control-plane transport requires Node.js");
-    const { Agent } = await undiciModule;
-    return new Agent({
+    const { Agent, fetch } = await undiciModule;
+    const dispatcher = new Agent({
       allowH2: true,
       connections: CONTROL_PLANE_CONNECTIONS,
-      pipelining: CONTROL_PLANE_CONCURRENT_STREAMS,
-      keepAliveTimeout: 60_000,
-      keepAliveMaxTimeout: 600_000,
+      keepAliveTimeout: IDLE_SESSION_TIMEOUT_MS,
       ...(ca === undefined ? {} : { connect: { ca } }),
-    }).compose(multiplexHttp2Requests);
+    }).compose(bufferRequestBodies);
+    return { fetch, dispatcher };
   })();
 
-  sharedDispatchers.set(key, dispatcher);
-  void dispatcher.catch(() => {
+  sharedTransports.set(key, transport);
+  void transport.catch(() => {
     // A transient module/initialization failure should not poison this pool
     // key permanently; let the next request retry initialization.
-    if (sharedDispatchers.get(key) === dispatcher) sharedDispatchers.delete(key);
+    if (sharedTransports.get(key) === transport) sharedTransports.delete(key);
   });
-  return dispatcher;
+  return transport;
 }
 
 function createPooledFetch(
@@ -175,8 +158,20 @@ function createPooledFetch(
   const key = dispatcherKey(baseUrl, apiKey, ca);
 
   return async (request: Request): Promise<Response> => {
-    const dispatcher = await getSharedDispatcher(key, ca);
-    return globalThis.fetch(request, { dispatcher } as RequestInit);
+    const { fetch, dispatcher } = await getSharedTransport(key, ca);
+    // openapi-fetch builds the global Request, which Undici's fetch does not
+    // accept as input, so hand over its parts. SDK request bodies are bounded.
+    const body = request.body === null ? null : new Uint8Array(await request.arrayBuffer());
+    const response = await fetch(request.url, {
+      method: request.method,
+      headers: [...request.headers],
+      body,
+      redirect: request.redirect,
+      signal: request.signal,
+      dispatcher,
+    });
+    // Undici's Response is the web class Node exposes; only its typings differ.
+    return response as unknown as Response;
   };
 }
 

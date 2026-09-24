@@ -1,5 +1,6 @@
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty } from "./client.js";
+import { retryApiRequest } from "./retry.js";
 import type { CreateApiTokenRequest, ApiTokenResponse } from "./types.js";
 
 export interface ListTokensOptions {
@@ -18,9 +19,13 @@ export class Tokens {
 
   async list(opts?: ListTokensOptions): Promise<ApiTokenResponse[]> {
     const data = await unwrap(
-      this._client.GET("/api/tokens", {
-        params: { query: { limit: opts?.limit, cursor: opts?.cursor } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/tokens", {
+            params: { query: { limit: opts?.limit, cursor: opts?.cursor } },
+          }),
+        "transient",
+      ),
     );
     return (data as { tokens?: ApiTokenResponse[] }).tokens ?? [];
   }

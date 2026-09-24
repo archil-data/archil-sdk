@@ -1,5 +1,6 @@
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapPage } from "./client.js";
+import { retryApiRequest } from "./retry.js";
 import { Disk, type ExecResult } from "./disk.js";
 import type { AuthorizedUser, CreateDiskRequest, DiskResponse } from "./types.js";
 
@@ -83,9 +84,13 @@ export class Disks {
    */
   async listPage(opts?: ListDisksOptions): Promise<DiskListPage> {
     const { data, nextCursor } = await unwrapPage(
-      this._client.GET("/api/disks", {
-        params: { query: { limit: opts?.limit, cursor: opts?.cursor, name: opts?.name } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/disks", {
+            params: { query: { limit: opts?.limit, cursor: opts?.cursor, name: opts?.name } },
+          }),
+        "transient",
+      ),
     );
     // `?? []`: an empty account serializes as JSON null (Go nil slice).
     const disks = ((data ?? []) as DiskResponse[]).map(
@@ -96,9 +101,13 @@ export class Disks {
 
   async get(id: string): Promise<Disk> {
     const data = await unwrap(
-      this._client.GET("/api/disks/{id}", {
-        params: { path: { id } },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/disks/{id}", {
+            params: { path: { id } },
+          }),
+        "transient",
+      ),
     );
     return new Disk(data as DiskResponse, this._client, this._region, this._s3BaseUrl);
   }
