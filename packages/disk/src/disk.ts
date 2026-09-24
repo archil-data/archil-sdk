@@ -656,7 +656,9 @@ export class Disk implements FileSystem {
       response: Response;
     }>;
 
-    return unwrap<ShareUrlResult>(call(`/api/disks/${this.id}/share`, { body }));
+    return unwrap<ShareUrlResult>(
+      retryApiRequest(() => call(`/api/disks/${this.id}/share`, { body }), "connect"),
+    );
   }
 
   /**

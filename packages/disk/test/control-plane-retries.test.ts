@@ -60,6 +60,7 @@ test("creations, execs, and deletes surface a transient failure without a second
       ["DELETE /api/disks/dsk-1/users/token", () => disk.removeUser("token", "tok-1")],
       ["POST /api/disks/dsk-1/revoke-delegation", () => disk.revokeDelegation({ clientId: "c", inodeId: 1 } as unknown as Pick<Delegation, "clientId" | "inodeId">)],
       ["DELETE /api/disks/dsk-1", () => disk.delete()],
+      ["POST /api/disks/dsk-1/share", () => disk.share("reports/a.pdf")],
     ];
     for (const [expected, attempt] of attempts) {
       const before = control.requests.length;
