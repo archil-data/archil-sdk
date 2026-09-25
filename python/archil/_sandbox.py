@@ -35,6 +35,7 @@ class _Sandbox:
     def __init__(self, transport: _Transport, data: SandboxData) -> None:
         self._transport = transport
         self._data = data
+        self._keepalive: Optional[_SandboxProcess] = None
         self._processes = _SandboxProcesses(self)
         self._files = _SandboxFiles(self)
 
@@ -117,6 +118,26 @@ class _Sandbox:
     @property
     def files(self) -> "_SandboxFiles":
         return self._files
+
+    @property
+    def connected(self) -> bool:
+        """Whether this handle's keepalive process connection is open."""
+        return self._keepalive is not None and self._keepalive.connected
+
+    async def _connect(self) -> None:
+        self._keepalive = await self.run("exec cat >/dev/null", collect_output=False)
+
+    async def disconnect(self) -> None:
+        """Release this handle's keepalive. Other process connections remain independent."""
+        process = self._keepalive
+        if process is None:
+            return
+        self._keepalive = None
+        try:
+            if process.connected and process.status == "running":
+                await process.close_stdin()
+        finally:
+            await process.disconnect()
 
     async def run(
         self,
@@ -225,7 +246,8 @@ class _Sandbox:
 
     async def refresh(self) -> "_Sandbox":
         data = await self._transport.request_json("GET", f"/api/sandboxes/{self.id}", retry="transient")
-        return _Sandbox(self._transport, SandboxData.from_json(data))
+        self._data = SandboxData.from_json(data)
+        return self
 
     async def _wait_for_start(self) -> "_Sandbox":
         sandbox = self

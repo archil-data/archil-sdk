@@ -137,6 +137,27 @@ when their endpoint, API key, and CA configuration match. CA arrays and buffers 
 copied at construction; create a new client to change trust settings. Custom CAs are
 not supported in browsers.
 
+### Disk sandboxes
+
+`disk.connect()` creates a fresh sandbox with the disk mounted at `/mnt/archil`.
+The returned `Sandbox` keeps a connection open between commands:
+
+```ts
+const sandbox = await d.connect();
+try {
+  const result = await sandbox.exec("python --version");
+  console.log(result.stdout);
+} finally {
+  await sandbox.disconnect();
+}
+```
+
+Use `sandbox.run()` for process handles and `sandbox.run("bash -i", { terminal: true })` for a PTY.
+`sandbox.connected` tracks the keepalive connection. `sandbox.disconnect()` releases
+it; other process connections remain independent. After the last connection closes,
+the sandbox expires in 10 seconds by default. Every `d.connect()` creates a fresh
+sandbox. Disk files persist; memory and rootfs changes are temporary.
+
 ### Sandboxes
 
 Use `Archil.sandboxes` to manage persistent VMs:

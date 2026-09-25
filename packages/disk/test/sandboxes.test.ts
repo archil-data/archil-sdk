@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { createApiClient, type ApiClient } from "../src/client.js";
 import { ArchilApiError, SandboxPauseError } from "../src/errors.js";
+import { Disk } from "../src/disk.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess, SandboxProcesses } from "../src/index.js";
 import { Sandbox } from "../src/sandbox.js";
@@ -1454,4 +1455,94 @@ test("pause reports a snapshot failure with the failed sandbox", async () => {
     assert.match(error.message, /snapshot upload timed out/);
     return true;
   });
+});
+
+test("disk.connect returns fresh sandboxes whose keepalive is independent of commands", async () => {
+  let sessionCount = 0;
+  const calls: Array<{ path: string; options: any }> = [];
+  const client = {
+    POST: async (path: string, options: any) => {
+      calls.push({ path, options });
+      return path === "/api/disks/{id}/connect"
+        ? ok(sandboxWire("running", `session-${++sessionCount}`))
+        : ok({ url: "wss://sandbox.example/connect?token=signed", expires_at: now });
+    },
+  } as unknown as ApiClient;
+  const disk = new Disk({
+    id: "dsk-1", name: "disk", organization: "owner", status: "available",
+    provider: "aws", region: "aws-us-east-1", createdAt: now, sandboxDisk: false,
+  }, client, "aws-us-east-1");
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
+  const connecting = disk.connect();
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
+  const keepalive = TestWebSocket.instances[0];
+  assert.deepEqual(JSON.parse(keepalive.sent[0] as string), { type: "start", command: "exec cat >/dev/null", env: {} });
+  keepalive.emit("message", { data: JSON.stringify({ type: "started", process_id: "keepalive-1" }) });
+  const sandbox = await connecting;
+  assert.ok(sandbox instanceof Sandbox);
+  assert.equal(sandbox.id, "session-1");
+  assert.equal(sandbox.connected, true);
+
+  const executing = sandbox.exec("printf hello");
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[1].sent.length, 1));
+  const command = TestWebSocket.instances[1];
+  assert.deepEqual(JSON.parse(command.sent[0] as string), {
+    type: "start", command: "printf hello", env: {},
+  });
+  command.emit("message", { data: JSON.stringify({ type: "started", process_id: "command-1" }) });
+  command.emit("message", { data: outputFrame(1, 0, "hello") });
+  command.emit("message", { data: JSON.stringify({ type: "exit", status: "completed", exit_code: 0, cursor: 5 }) });
+  command.close();
+  assert.equal((await executing).stdout, "hello");
+  assert.equal(sandbox.connected, true);
+  assert.equal(keepalive.readyState, WebSocket.OPEN);
+
+  const starting = sandbox.run("bash -i", { terminal: { cols: 100, rows: 40 } });
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[2].sent.length, 1));
+  const terminal = TestWebSocket.instances[2];
+  assert.deepEqual(JSON.parse(terminal.sent[0] as string), {
+    type: "start", command: "bash -i", terminal: { cols: 100, rows: 40 }, env: {},
+  });
+  terminal.emit("message", { data: JSON.stringify({ type: "started", process_id: "shell-1" }) });
+  const shell = await starting;
+  await sandbox.disconnect();
+  await sandbox.disconnect();
+  assert.equal(sandbox.connected, false);
+  assert.equal(shell.connected, true);
+  assert.deepEqual(JSON.parse(keepalive.sent[1] as string), { type: "close_stdin" });
+  await shell.sendInput("python\n");
+  assert.deepEqual(terminal.sent[1], new TextEncoder().encode("python\n"));
+  await shell.disconnect();
+
+  const reconnecting = disk.connect();
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[3].sent.length, 1));
+  const second = TestWebSocket.instances[3];
+  second.emit("message", { data: JSON.stringify({ type: "started", process_id: "keepalive-2" }) });
+  const fresh = await reconnecting;
+  assert.equal(fresh.id, "session-2");
+  second.close();
+  assert.equal(fresh.connected, false);
+  await fresh.disconnect();
+  assert.deepEqual(calls.filter((call) => call.path === "/api/disks/{id}/connect").map((call) => call.options), [
+    { params: { path: { id: "dsk-1" } } }, { params: { path: { id: "dsk-1" } } },
+  ]);
+});
+
+test.each(["error", "closed", "invalid"])("sandbox keepalive cleans up a %s handshake", async (response) => {
+  const client = { POST: async () => ok({ url: "wss://sandbox.example/connect" }) } as unknown as ApiClient;
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+  const connecting = sandbox._connect();
+  const rejected = assert.rejects(connecting, /unsupported|closed before ready|Expected started/);
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
+  const socket = TestWebSocket.instances[0];
+  if (response === "closed") socket.close();
+  else socket.emit("message", { data: JSON.stringify(response === "error"
+    ? { type: "error", error: "invalid_request", message: "unsupported" }
+    : { type: "attached", process_id: "unexpected" }) });
+  await rejected;
+  assert.equal(sandbox.connected, false);
+  assert.equal(socket.readyState, 3);
 });

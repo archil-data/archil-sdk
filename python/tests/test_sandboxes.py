@@ -1274,3 +1274,103 @@ def test_pause_reports_snapshot_failure(archil, router):
     with pytest.raises(SandboxPauseError, match="snapshot upload timed out") as error:
         sandbox.pause()
     assert error.value.latest.status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_disk_connect_returns_sandboxes_with_independent_keepalive(archil, router, monkeypatch):
+    import archil._sandbox as sandbox_module
+    from test_disk_ops import DISK_JSON
+
+    sockets = []
+    session_count = 0
+
+    class CommandWebSocket(FakeProcessWebSocket):
+        async def send(self, data):
+            await super().send(data)
+            if isinstance(data, str) and json.loads(data).get("command") == "printf hello":
+                await self.push(process_output_frame(1, 0, b"hello"))
+                await self.push(json.dumps({"type": "exit", "status": "completed", "exit_code": 0, "cursor": 5}))
+                await self.finish("")
+
+    async def connect(url):
+        socket = CommandWebSocket()
+        sockets.append(socket)
+        return socket
+
+    def handler(request):
+        nonlocal session_count
+        if request.url.path == "/api/disks/dsk-1":
+            return ok_envelope(DISK_JSON)
+        if request.url.path.endswith("/connections"):
+            return ok_envelope({"url": "wss://sandbox.example/connect?token=signed", "expires_at": NOW})
+        if request.method == "GET":
+            return ok_envelope(sandbox_json(sandbox_id="session-1"))
+        session_count += 1
+        return ok_envelope(sandbox_json(sandbox_id=f"session-{session_count}"))
+
+    router.set(handler)
+    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
+    disk = await archil.disks.get.aio("dsk-1")
+    sandbox = await disk.connect.aio()
+    assert isinstance(sandbox, Sandbox)
+    assert sandbox.id == "session-1"
+    assert sandbox.connected
+    assert json.loads(sockets[0].sent[0]) == {"type": "start", "command": "exec cat >/dev/null", "env": {}, "terminal": False}
+    sandbox = await sandbox.refresh.aio()
+    assert sandbox.connected
+
+    result = await sandbox.exec.aio("printf hello")
+    assert result.stdout == "hello"
+    assert sandbox.connected
+    assert sockets[0].close_reason is None
+
+    shell = await sandbox.run.aio("bash -i", terminal=SandboxTerminal(cols=100, rows=40))
+    assert json.loads(sockets[2].sent[0]) == {
+        "type": "start", "command": "bash -i", "terminal": {"cols": 100, "rows": 40}, "env": {},
+    }
+    await sandbox.disconnect.aio()
+    await sandbox.disconnect.aio()
+    assert not sandbox.connected
+    assert shell.connected
+    assert json.loads(sockets[0].sent[1]) == {"type": "close_stdin"}
+    await shell.send_input.aio("python\n")
+    assert sockets[2].sent[1] == b"python\n"
+    await shell.disconnect.aio()
+
+    fresh = await disk.connect.aio()
+    assert fresh.id == "session-2"
+    await sockets[3].close()
+    await sandbox.refresh.aio()
+    assert not fresh.connected
+    await fresh.disconnect.aio()
+    assert [req.json for req in router.requests if req.path == "/api/disks/dsk-1/connect"] == [None, None]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event", [
+    {"type": "error", "error": "invalid_request", "message": "unsupported"},
+    {"type": "attached", "process_id": "unexpected"},
+])
+async def test_sandbox_keepalive_closes_failed_handshake(archil, router, monkeypatch, event):
+    import archil._sandbox as sandbox_module
+    from test_disk_ops import DISK_JSON
+
+    socket = FakeWebSocket()
+    await socket.push(json.dumps(event))
+
+    async def connect(url):
+        return socket
+
+    def handler(request):
+        if request.url.path == "/api/disks/dsk-1":
+            return ok_envelope(DISK_JSON)
+        if request.url.path.endswith("/connections"):
+            return ok_envelope({"url": "wss://sandbox.example/connect", "expires_at": NOW})
+        return ok_envelope(sandbox_json())
+
+    router.set(handler)
+    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
+    disk = await archil.disks.get.aio("dsk-1")
+    with pytest.raises(RuntimeError, match="unsupported|Expected started"):
+        await disk.connect.aio()
+    assert socket.close_reason is not None

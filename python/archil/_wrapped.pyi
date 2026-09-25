@@ -593,6 +593,17 @@ class Disk:
 
     exec: __exec_spec
 
+    class __connect_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> Sandbox:
+            """Create a fresh sandbox with this disk at /mnt/archil and keep it active until disconnect()."""
+            ...
+
+        async def aio(self, /) -> Sandbox:
+            """Create a fresh sandbox with this disk at /mnt/archil and keep it active until disconnect()."""
+            ...
+
+    connect: __connect_spec
+
     class __grep_spec(typing_extensions.Protocol):
         def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
             """Constant-time parallel grep across files on this disk. The returned
@@ -1211,6 +1222,31 @@ class Sandbox:
     @property
     def files(self) -> SandboxFiles:
         ...
+
+    @property
+    def connected(self) -> bool:
+        """Whether this handle's keepalive process connection is open."""
+        ...
+
+    class ___connect_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> None:
+            ...
+
+        async def aio(self, /) -> None:
+            ...
+
+    _connect: ___connect_spec
+
+    class __disconnect_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> None:
+            """Release this handle's keepalive. Other process connections remain independent."""
+            ...
+
+        async def aio(self, /) -> None:
+            """Release this handle's keepalive. Other process connections remain independent."""
+            ...
+
+    disconnect: __disconnect_spec
 
     class __run_spec(typing_extensions.Protocol):
         def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:

@@ -110,6 +110,10 @@ def sync_usage() -> None:
         ],
     )
     d = client.disks.get(created.disk.id)
+    disk_sandbox: Sandbox = d.connect()
+    _connected: bool = disk_sandbox.connected
+    disk_sandbox.exec("echo ready")
+    disk_sandbox.disconnect()
     d = d.wait_until_ready(timeout=60)
     d = d.refresh()
     if d.status == "available":  # DiskStatus literal — typos would be a type error
@@ -168,6 +172,10 @@ async def async_usage() -> None:
         legacy_process = await sandbox.processes.connect.aio(legacy_process.id, offset=legacy_process.cursor)
         await legacy_process.kill.aio()
         d = await client.disks.get.aio("dsk-1")
+        disk_sandbox: Sandbox = await d.connect.aio()
+        _connected: bool = disk_sandbox.connected
+        await disk_sandbox.exec.aio("echo ready")
+        await disk_sandbox.disconnect.aio()
         await d.put_object.aio("k", b"y")
         data: bytes = await d.get_object.aio("k")
         _ = data
