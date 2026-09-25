@@ -15,6 +15,8 @@ from archil import (
     ArchilS3Error,
     Delegation,
     FileSystem,
+    ImageData,
+    RegistryAuth,
     S3CompatibleMount,
     S3Mount,
     Sandbox,
@@ -139,8 +141,22 @@ def sync_usage() -> None:
         _status: int = e.status
 
 
+def image_usage() -> None:
+    client = Archil(api_key="key-x", region="aws-us-east-1")
+    image: ImageData = client.images.create(
+        "ghcr.io/acme/app:v1", registry_auth=RegistryAuth(username="octocat", password="ghp_x")
+    )
+    _digest: Optional[str] = image.digest
+    _refreshed: ImageData = client.images.get(image.id)
+    _from_image: Sandbox = client.sandboxes.create(image=image)
+    _from_digest: Sandbox = client.sandboxes.create(image=image.digest or "")
+    _image_digest: Optional[str] = _from_image.image_digest
+    _module_image: ImageData = archil.create_image("node:24", wait=False)
+
+
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
+        _building: ImageData = await client.images.create.aio("node:24", wait=False)
         sandbox = await client.sandboxes.create.aio(name="trial", idle_ttl_seconds=300, ports=[3000])
         _hostname: str = await sandbox.expose_port.aio(3000)
         _ports: list[SandboxEndpoint] = await sandbox.list_ports.aio()

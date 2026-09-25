@@ -72,6 +72,22 @@ all_sandboxes = archil.list_sandboxes()
 using_disk = archil.list_sandboxes(disk="dsk-abc123")
 ```
 
+To boot an image from a private registry, build it with registry credentials first.
+`create_image` waits until the image is ready and raises `ImageBuildError` if the
+image is missing or the registry rejects the credentials. The credentials are used
+only for the build, and the image is visible only to your account.
+
+```python
+import os
+from archil import RegistryAuth
+
+image = archil.create_image(
+    "ghcr.io/acme/app:v3",
+    registry_auth=RegistryAuth(username="octocat", password=os.environ["GHCR_TOKEN"]),  # read:packages
+)
+sandbox = archil.create_sandbox(image=image)  # or image=image.digest
+```
+
 Expose TCP ports publicly when creating a sandbox or later with `expose_port`:
 
 ```python

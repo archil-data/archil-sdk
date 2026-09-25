@@ -1,4 +1,5 @@
 import { parseXml } from "./s3xml.js";
+import type { Image } from "./images.js";
 import type { Sandbox } from "./sandbox.js";
 
 /**
@@ -36,6 +37,17 @@ export class SandboxPauseError extends ArchilError {
       "SANDBOX_PAUSE_FAILED",
     );
     this.name = "SandboxPauseError";
+  }
+}
+
+export class ImageBuildError extends ArchilError {
+  constructor(readonly latest: Image) {
+    super(
+      `Image build failed${latest.failureReason ? `: ${latest.failureReason}` : ""}`,
+      400,
+      "IMAGE_BUILD_FAILED",
+    );
+    this.name = "ImageBuildError";
   }
 }
 

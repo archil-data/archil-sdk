@@ -3,6 +3,7 @@ import type { ApiClient } from "./client.js";
 import { unwrap } from "./client.js";
 import { retryApiRequest } from "./retry.js";
 import type { Disk } from "./disk.js";
+import type { Image } from "./images.js";
 import {
   Sandbox,
   type SandboxNetwork,
@@ -28,6 +29,11 @@ export interface CreateSandboxRequest {
    * `alpine@sha256:<digest>`.
    */
   baseImage?: string;
+  /**
+   * Boot a prebuilt image instead of `baseImage`, such as a private-registry
+   * image from `archil.images.create`. Pass the ready image or its digest.
+   */
+  image?: Image | string;
   env?: Record<string, string>;
   maxTtlSeconds?: number;
   /** Seconds without a direct process connection before pausing. Omitted or zero disables idle expiry. */
@@ -89,11 +95,16 @@ export class Sandboxes {
     request: CreateSandboxRequest = {},
     options: SandboxWaitOptions = {},
   ): Promise<Sandbox> {
+    if (typeof request.image === "object" && !request.image.digest) {
+      throw new Error(`Image ${request.image.id} is ${request.image.status}, not ready`);
+    }
+    const imageDigest = typeof request.image === "string" ? request.image : request.image?.digest;
     const body = {
       name: request.name,
       vcpu_count: request.vcpuCount,
       mem_size_mib: request.memSizeMiB,
       base_image: request.baseImage,
+      image_digest: imageDigest,
       env: request.env,
       max_ttl_seconds: request.maxTtlSeconds,
       idle_ttl_seconds: request.idleTtlSeconds,
