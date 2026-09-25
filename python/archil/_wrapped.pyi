@@ -1105,11 +1105,11 @@ class SandboxProcesses:
         ...
 
     class __start_spec(typing_extensions.Protocol):
-        def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+        def __call__(self, /, command: str, *, cwd: str | None = None, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
             """Deprecated: use sandbox.run(); removed in the next version."""
             ...
 
-        async def aio(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+        async def aio(self, /, command: str, *, cwd: str | None = None, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
             """Deprecated: use sandbox.run(); removed in the next version."""
             ...
 
@@ -1213,11 +1213,11 @@ class Sandbox:
         ...
 
     class __run_spec(typing_extensions.Protocol):
-        def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+        def __call__(self, /, command: str, *, cwd: str | None = None, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
             """Start a process and return its handle without waiting for exit."""
             ...
 
-        async def aio(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+        async def aio(self, /, command: str, *, cwd: str | None = None, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
             """Start a process and return its handle without waiting for exit."""
             ...
 
@@ -1253,10 +1253,10 @@ class Sandbox:
     _control_process: ___control_process_spec
 
     class __exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> archil._models.SandboxProcessResult:
+        def __call__(self, /, command: str, *, cwd: str | None = None, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> archil._models.SandboxProcessResult:
             ...
 
-        async def aio(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> archil._models.SandboxProcessResult:
+        async def aio(self, /, command: str, *, cwd: str | None = None, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> archil._models.SandboxProcessResult:
             ...
 
     exec: __exec_spec

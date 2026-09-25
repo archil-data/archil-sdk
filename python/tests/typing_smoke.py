@@ -82,12 +82,13 @@ def sync_usage() -> None:
     _idle_ttl: int = sandbox.idle_ttl_seconds
     _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
     module_sandbox = archil.get_sandbox(module_sandbox.id)
-    sandbox_result: SandboxProcessResult = sandbox.exec("echo ready")
+    sandbox_result: SandboxProcessResult = sandbox.exec("echo ready", cwd="/workspace")
     _sandbox_exit: Optional[int] = sandbox_result.exit_code
     sandbox.files.upload_file("local.txt", "/workspace/remote.txt", mode=0o640)
     sandbox.files.download_file("/workspace/remote.txt", "downloaded.txt")
     process: SandboxProcess = sandbox.run(
         "codex",
+        cwd="/workspace",
         terminal=SandboxTerminal(cols=120, rows=40),
         on_output=consume_process_output,
         collect_output=False,
@@ -160,7 +161,7 @@ async def async_usage() -> None:
         await sandbox.files.upload_file.aio("local.txt", "/workspace/remote.txt")
         await sandbox.files.download_file.aio("/workspace/remote.txt", "downloaded.txt")
         await (await sandbox.stop.aio()).delete.aio()
-        process = await sandbox.run.aio("cat")
+        process = await sandbox.run.aio("cat", cwd="/workspace")
         await process.close_stdin.aio()
         _process_result = await process.wait.aio()
         legacy_process: SandboxProcess = await sandbox.processes.start.aio("cat", collect_output=False)
