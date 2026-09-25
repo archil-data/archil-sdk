@@ -695,7 +695,7 @@ test("sandbox delete accepts 204", async () => {
   ]);
 });
 
-test("exec starts a process and waits for its result", async () => {
+test.each([undefined, "/workspace/a 'quote' $literal"])("exec forwards cwd=%s and waits for its result", async (cwd) => {
   const calls: Array<{ path: string; options: any }> = [];
   const client = {
     POST: async (path: string, options: any) => {
@@ -711,6 +711,7 @@ test("exec starts a process and waits for its result", async () => {
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   const executing = sandbox.exec("printf hello", {
+    cwd,
     env: { HELLO: "world" },
     timeoutSeconds: 10,
   });
@@ -745,6 +746,7 @@ test("exec starts a process and waits for its result", async () => {
   assert.deepEqual(JSON.parse(socket.sent[0] as string), {
     type: "start",
     command: "printf hello",
+    ...(cwd === undefined ? {} : { cwd }),
     env: { HELLO: "world" },
     timeout_seconds: 10,
   });
@@ -823,6 +825,7 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
     ? sandbox.processes.connect.bind(sandbox.processes)
     : sandbox.attach.bind(sandbox);
   const starting = start("echo hello", {
+    cwd: "/workspace/app",
     terminal: false,
     env: { HELLO: "world" },
     timeoutSeconds: 10,
@@ -851,6 +854,7 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
   assert.deepEqual(JSON.parse(first.sent[0] as string), {
     type: "start",
     command: "echo hello",
+    cwd: "/workspace/app",
     terminal: false,
     env: { HELLO: "world" },
     timeout_seconds: 10,

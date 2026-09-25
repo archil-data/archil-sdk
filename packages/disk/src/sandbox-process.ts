@@ -31,6 +31,8 @@ export interface SandboxProcessConnectOptions {
 }
 
 export interface SandboxProcessStartOptions {
+  /** Absolute working directory inside the sandbox. */
+  cwd?: string;
   /** Enables a PTY. PTY output is merged into stdout and stderr remains empty. */
   terminal?: boolean | SandboxTerminalOptions;
   env?: Record<string, string>;
@@ -52,6 +54,7 @@ type ProcessConnectionRequest =
   | {
       type: "start";
       command: string;
+      cwd?: string;
       terminal?: boolean | { cols: number; rows: number };
       env: Record<string, string>;
       timeout_seconds?: number;

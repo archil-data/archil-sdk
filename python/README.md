@@ -228,6 +228,10 @@ resumed = sandbox.attach(process_id, offset=cursor)
 result = resumed.wait()
 ```
 
+Pass an absolute `cwd` to `sandbox.run()` or `sandbox.exec()` to choose the
+working directory, for example `sandbox.exec("pytest", cwd="/workspace/app")`.
+Omitting it keeps the sandbox's default working directory.
+
 Terminal processes merge output into stdout; non-terminal processes keep
 stdout and stderr separate. `on_output` receives raw bytes with their stream
 and absolute offset. `close_stdin()` delivers EOF to a non-terminal process.
