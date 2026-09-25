@@ -82,6 +82,10 @@ class _Sandbox:
         return self._data.base_image
 
     @property
+    def image_digest(self) -> Optional[str]:
+        return self._data.image_digest
+
+    @property
     def platform(self) -> Optional[SandboxPlatform]:
         return self._data.platform
 

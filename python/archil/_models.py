@@ -401,6 +401,7 @@ class SandboxData:
     exit_reason: Optional[str] = None
     idle_ttl_seconds: int = 0
     checkpoint: Optional[str] = None
+    image_digest: Optional[str] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "SandboxData":
@@ -422,6 +423,49 @@ class SandboxData:
             last_active_at=_parse_datetime(d["last_active_at"]),
             exit_reason=d.get("exit_reason"),
             checkpoint=d.get("checkpoint"),
+            image_digest=d.get("image_digest"),
+        )
+
+
+ImageStatus = Literal["building", "ready", "failed"]
+
+
+@dataclass(frozen=True)
+class RegistryAuth:
+    """Private-registry credentials, such as a GitHub token with ``read:packages``
+    for ghcr.io. Used only while an image builds and never returned."""
+
+    username: str
+    password: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ImageData:
+    """A sandbox image build. ``digest`` is set once ready; pass the image, or the
+    digest, as ``image`` when creating a sandbox."""
+
+    id: str
+    source: str
+    private: bool
+    status: ImageStatus
+    created_at: datetime
+    updated_at: datetime
+    digest: Optional[str] = None
+    canonical_source: Optional[str] = None
+    failure_reason: Optional[str] = None
+
+    @classmethod
+    def from_json(cls, d: dict) -> "ImageData":
+        return cls(
+            id=d["image_id"],
+            source=d["source"],
+            private=d["private"],
+            status=d["status"],
+            created_at=_parse_datetime(d["created_at"]),
+            updated_at=_parse_datetime(d["updated_at"]),
+            digest=d.get("digest"),
+            canonical_source=d.get("canonical_source"),
+            failure_reason=d.get("failure_reason"),
         )
 
 

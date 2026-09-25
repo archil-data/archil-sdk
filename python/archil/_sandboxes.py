@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Union
 
 from ._http import _Transport
-from ._models import SandboxData, SandboxNetwork
+from ._models import ImageData, SandboxData, SandboxNetwork
 from ._sandbox import _Sandbox
 
 
@@ -31,6 +31,7 @@ class _Sandboxes:
         vcpu_count: Optional[int] = None,
         mem_size_mib: Optional[int] = None,
         base_image: Optional[str] = None,
+        image: Optional[Union[ImageData, str]] = None,
         env: Optional[dict[str, str]] = None,
         max_ttl_seconds: Optional[int] = None,
         idle_ttl_seconds: Optional[int] = None,
@@ -39,6 +40,10 @@ class _Sandboxes:
         ports: Optional[list[int]] = None,
         wait: bool = True,
     ) -> _Sandbox:
+        """``image`` boots a prebuilt image instead of ``base_image``, such as a
+        private-registry image from ``images.create``: the ready image or its digest."""
+        if isinstance(image, ImageData) and image.digest is None:
+            raise ValueError(f"Image {image.id} is {image.status}, not ready")
         body = {
             key: value
             for key, value in {
@@ -46,6 +51,7 @@ class _Sandboxes:
                 "vcpu_count": vcpu_count,
                 "mem_size_mib": mem_size_mib,
                 "base_image": base_image,
+                "image_digest": image.digest if isinstance(image, ImageData) else image,
                 "env": env,
                 "max_ttl_seconds": max_ttl_seconds,
                 "idle_ttl_seconds": idle_ttl_seconds,

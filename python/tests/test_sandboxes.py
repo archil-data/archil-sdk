@@ -866,6 +866,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "vcpu_count": None,
                 "mem_size_mib": None,
                 "base_image": None,
+                "image": None,
                 "env": None,
                 "max_ttl_seconds": None,
                 "idle_ttl_seconds": 0,

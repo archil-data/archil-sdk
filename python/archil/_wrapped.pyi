@@ -33,6 +33,10 @@ class Archil:
         ...
 
     @property
+    def images(self) -> Images:
+        ...
+
+    @property
     def sandboxes(self) -> Sandboxes:
         ...
 
@@ -198,6 +202,47 @@ class Disks:
             ...
 
     create: __create_spec
+
+
+class Images:
+    """Sandbox images built from public or private registries."""
+    def __init__(self, transport: archil._http._Transport) -> None:
+        ...
+
+    class __create_spec(typing_extensions.Protocol):
+        def __call__(self, /, source: str, *, registry_auth: archil._models.RegistryAuth | None = None, wait: bool = True) -> archil._models.ImageData:
+            """Build an image that sandboxes can boot. Requesting a source that is
+            already building joins that build. By default this waits until the image
+            is ready and raises ``ImageBuildError`` if the build fails.
+            """
+            ...
+
+        async def aio(self, /, source: str, *, registry_auth: archil._models.RegistryAuth | None = None, wait: bool = True) -> archil._models.ImageData:
+            """Build an image that sandboxes can boot. Requesting a source that is
+            already building joins that build. By default this waits until the image
+            is ready and raises ``ImageBuildError`` if the build fails.
+            """
+            ...
+
+    create: __create_spec
+
+    class __get_spec(typing_extensions.Protocol):
+        def __call__(self, /, id: str) -> archil._models.ImageData:
+            ...
+
+        async def aio(self, /, id: str) -> archil._models.ImageData:
+            ...
+
+    get: __get_spec
+
+    class ___wait_for_build_spec(typing_extensions.Protocol):
+        def __call__(self, /, image: archil._models.ImageData) -> archil._models.ImageData:
+            ...
+
+        async def aio(self, /, image: archil._models.ImageData) -> archil._models.ImageData:
+            ...
+
+    _wait_for_build: ___wait_for_build_spec
 
 
 class Multipart:
@@ -1176,6 +1221,10 @@ class Sandbox:
         ...
 
     @property
+    def image_digest(self) -> str | None:
+        ...
+
+    @property
     def platform(self) -> typing.Literal['arm64', 'amd64'] | None:
         ...
 
@@ -1523,10 +1572,16 @@ class Sandboxes:
     get: __get_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
+        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, image: archil._models.ImageData | str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
+            """``image`` boots a prebuilt image instead of ``base_image``, such as a
+            private-registry image from ``images.create``: the ready image or its digest.
+            """
             ...
 
-        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
+        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, image: archil._models.ImageData | str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
+            """``image`` boots a prebuilt image instead of ``base_image``, such as a
+            private-registry image from ``images.create``: the ready image or its digest.
+            """
             ...
 
     create: __create_spec

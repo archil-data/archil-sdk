@@ -183,6 +183,19 @@ const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
 
+To boot an image from a private registry, build it with registry credentials first.
+`images.create` waits until the image is ready and throws `ImageBuildError` if the
+image is missing or the registry rejects the credentials. The credentials are used
+only for the build, and the image is visible only to your account.
+
+```ts
+const image = await client.images.create({
+  source: "ghcr.io/acme/app:v3",
+  registryAuth: { username: "octocat", password: process.env.GHCR_TOKEN! }, // read:packages
+});
+const sandbox = await client.sandboxes.create({ image }); // or { image: image.digest }
+```
+
 Expose TCP ports publicly when creating a sandbox or later with `exposePort`:
 
 ```ts
