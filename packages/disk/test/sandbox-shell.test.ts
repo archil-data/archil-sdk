@@ -54,14 +54,12 @@ function harness(processOverrides: Partial<SandboxProcess> = {}, startError?: Er
     ...processOverrides,
   } as unknown as SandboxProcess;
   const sandbox = {
-    processes: {
-      start: vi.fn(async (_command: string, options: { onOutput?: typeof output }) => {
-        if (startError) throw startError;
-        await startGate;
-        output = options.onOutput;
-        return remote;
-      }),
-    },
+    run: vi.fn(async (_command: string, options: { onOutput?: typeof output }) => {
+      if (startError) throw startError;
+      await startGate;
+      output = options.onOutput;
+      return remote;
+    }),
   } as unknown as Sandbox;
   return { stdin, stdout, stderr, signals, remote, sandbox, getOutput: () => output };
 }
@@ -85,8 +83,8 @@ test("normal shell exit restores raw mode and removes every listener", async () 
   assert.equal(h.signals.listenerCount("SIGTERM"), 0);
   assert.equal(h.signals.listenerCount("SIGHUP"), 0);
   assert.match(String(h.stderr.writes[0]), /process-123/);
-  assert.deepEqual((h.sandbox.processes.start as ReturnType<typeof vi.fn>).mock.calls[0]![0], "/bin/sh -l");
-  assert.deepEqual((h.sandbox.processes.start as ReturnType<typeof vi.fn>).mock.calls[0]![1].terminal, { cols: 100, rows: 30 });
+  assert.deepEqual((h.sandbox.run as ReturnType<typeof vi.fn>).mock.calls[0]![0], "/bin/sh -l");
+  assert.deepEqual((h.sandbox.run as ReturnType<typeof vi.fn>).mock.calls[0]![1].terminal, { cols: 100, rows: 30 });
   assert.equal((h.remote.disconnect as ReturnType<typeof vi.fn>).mock.calls.length, 1);
 });
 
@@ -110,7 +108,7 @@ test("input typed during startup is buffered until the remote handle exists", as
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const h = harness({}, undefined, gate);
   const shell = runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
-  await vi.waitFor(() => assert.equal((h.sandbox.processes.start as ReturnType<typeof vi.fn>).mock.calls.length, 1));
+  await vi.waitFor(() => assert.equal((h.sandbox.run as ReturnType<typeof vi.fn>).mock.calls.length, 1));
   assert.deepEqual(h.stdin.rawChanges, []);
   assert.equal(h.stdin.listenerCount("data"), 0);
   assert.equal(h.signals.listenerCount("SIGINT"), 0);

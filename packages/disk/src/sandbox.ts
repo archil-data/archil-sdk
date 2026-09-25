@@ -2,7 +2,11 @@ import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty, unwrapPage } from "./client.js";
 import {
+  SandboxProcess,
   SandboxProcesses,
+  openProcessSocket,
+  type ProcessControlRequest,
+  type SandboxProcessConnectOptions,
   type SandboxProcessResult,
   type SandboxProcessStartOptions,
 } from "./sandbox-process.js";
@@ -191,6 +195,7 @@ export class Sandbox {
   lastActiveAt!: Date;
   exitReason?: string;
   checkpoint?: string;
+  /** @deprecated Use run() and attach(). Removed in the next version. */
   readonly processes: SandboxProcesses;
   readonly files: SandboxFiles;
 
@@ -201,8 +206,8 @@ export class Sandbox {
   constructor(data: SandboxWire, client: ApiClient) {
     this._client = client;
     this._apply(data);
-    this.processes = new SandboxProcesses(this.id, client);
-    this.files = new SandboxFiles(this.processes);
+    this.processes = new SandboxProcesses(this);
+    this.files = new SandboxFiles(this);
   }
 
   /** @internal Overwrite this sandbox's fields in place from a fresh wire snapshot. */
@@ -249,12 +254,109 @@ export class Sandbox {
     };
   }
 
+  /** Start a process and return its handle without waiting for exit. */
+  async run(
+    command: string,
+    options: SandboxProcessStartOptions = {},
+  ): Promise<SandboxProcess> {
+    const process = new SandboxProcess(
+      "",
+      0,
+      options.onOutput,
+      options.collectOutput ?? true,
+      () => this._connectionUrl(),
+      (request) => this._control(request),
+    );
+    const terminal =
+      typeof options.terminal === "object"
+        ? {
+            cols: options.terminal.cols ?? 80,
+            rows: options.terminal.rows ?? 24,
+          }
+        : options.terminal;
+    await process._connect({
+      type: "start",
+      command,
+      terminal,
+      env: options.env ?? {},
+      timeout_seconds: options.timeoutSeconds,
+    });
+    return process;
+  }
+
+  /** Reattach to a process, optionally resuming output from a cursor. */
+  async attach(
+    processId: string,
+    options: SandboxProcessConnectOptions = {},
+  ): Promise<SandboxProcess> {
+    const offset = options.offset ?? 0;
+    const process = new SandboxProcess(
+      processId,
+      offset,
+      options.onOutput,
+      options.collectOutput ?? true,
+      () => this._connectionUrl(),
+      (request) => this._control(request),
+    );
+    await process._connect({ type: "attach", process_id: processId, offset });
+    return process;
+  }
+
+  private async _connectionUrl(): Promise<string> {
+    const data = await unwrap(
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes/{sid}/connections", {
+            params: { path: { sid: this.id } },
+          }),
+        "transient",
+      ),
+    );
+    return data.url;
+  }
+
+  private async _control(request: ProcessControlRequest): Promise<void> {
+    const socket = await openProcessSocket(() => this._connectionUrl());
+    const expected = request.type === "kill" ? "killed" : "resized";
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener("message", (message) => {
+        try {
+          const event = JSON.parse(message.data as string) as
+            | { type: "killed" | "resized" }
+            | { type: "error"; error: string; message: string };
+          if (event.type === "error") {
+            reject(new Error(`${event.error}: ${event.message}`));
+          } else if (event.type !== expected) {
+            reject(new Error(`Expected ${expected}, received ${event.type}`));
+          } else {
+            resolve();
+          }
+        } catch (error) {
+          reject(error);
+        } finally {
+          socket.close();
+        }
+      }, { once: true });
+      socket.addEventListener("error", () =>
+        reject(new Error(`Process ${request.type} request failed`)),
+      );
+      socket.addEventListener("close", () =>
+        reject(
+          new Error(
+            `Process ${request.type} connection closed before confirmation`,
+          ),
+        ),
+      );
+      socket.send(JSON.stringify(request));
+    });
+  }
+
   /** Run a process and wait for it to exit. */
   async exec(
     command: string,
     options: SandboxProcessStartOptions = {},
   ): Promise<SandboxProcessResult> {
-    const process = await this.processes.start(command, options);
+    const process = await this.run(command, options);
     return process.wait();
   }
 

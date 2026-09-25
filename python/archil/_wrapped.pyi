@@ -1100,45 +1100,31 @@ class SandboxProcess:
 
 
 class SandboxProcesses:
-
-    def __init__(self, transport: archil._http._Transport, sandbox_id: str) -> None:
+    """Deprecated: use Sandbox.run() and Sandbox.attach(); removed in the next version."""
+    def __init__(self, sandbox: Sandbox) -> None:
         ...
 
     class __start_spec(typing_extensions.Protocol):
         def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+            """Deprecated: use sandbox.run(); removed in the next version."""
             ...
 
         async def aio(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+            """Deprecated: use sandbox.run(); removed in the next version."""
             ...
 
     start: __start_spec
 
     class __connect_spec(typing_extensions.Protocol):
         def __call__(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+            """Deprecated: use sandbox.attach(); removed in the next version."""
             ...
 
         async def aio(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+            """Deprecated: use sandbox.attach(); removed in the next version."""
             ...
 
     connect: __connect_spec
-
-    class ___new_connection_spec(typing_extensions.Protocol):
-        def __call__(self, /) -> websockets.asyncio.client.ClientConnection:
-            ...
-
-        async def aio(self, /) -> websockets.asyncio.client.ClientConnection:
-            ...
-
-    _new_connection: ___new_connection_spec
-
-    class ___control_spec(typing_extensions.Protocol):
-        def __call__(self, /, request: dict[str, object]) -> None:
-            ...
-
-        async def aio(self, /, request: dict[str, object]) -> None:
-            ...
-
-    _control: ___control_spec
 
 
 class Sandbox:
@@ -1175,6 +1161,10 @@ class Sandbox:
 
     @property
     def idle_ttl_seconds(self) -> int:
+        ...
+
+    @property
+    def checkpoint(self) -> str | None:
         ...
 
     @property
@@ -1215,11 +1205,52 @@ class Sandbox:
 
     @property
     def processes(self) -> SandboxProcesses:
+        """Deprecated: use run() and attach(); removed in the next version."""
         ...
 
     @property
     def files(self) -> SandboxFiles:
         ...
+
+    class __run_spec(typing_extensions.Protocol):
+        def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+            """Start a process and return its handle without waiting for exit."""
+            ...
+
+        async def aio(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+            """Start a process and return its handle without waiting for exit."""
+            ...
+
+    run: __run_spec
+
+    class __attach_spec(typing_extensions.Protocol):
+        def __call__(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+            """Reattach to a process, optionally resuming output from a cursor."""
+            ...
+
+        async def aio(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
+            """Reattach to a process, optionally resuming output from a cursor."""
+            ...
+
+    attach: __attach_spec
+
+    class ___new_process_connection_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> websockets.asyncio.client.ClientConnection:
+            ...
+
+        async def aio(self, /) -> websockets.asyncio.client.ClientConnection:
+            ...
+
+    _new_process_connection: ___new_process_connection_spec
+
+    class ___control_process_spec(typing_extensions.Protocol):
+        def __call__(self, /, request: dict[str, object]) -> None:
+            ...
+
+        async def aio(self, /, request: dict[str, object]) -> None:
+            ...
+
+    _control_process: ___control_process_spec
 
     class __exec_spec(typing_extensions.Protocol):
         def __call__(self, /, command: str, *, terminal: bool | archil._models.SandboxTerminal = False, env: dict[str, str] | None = None, timeout_seconds: int | None = None, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> archil._models.SandboxProcessResult:
@@ -1295,9 +1326,25 @@ class Sandbox:
 
     class __fork_spec(typing_extensions.Protocol):
         def __call__(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+            """Fork this sandbox's current state. A running sandbox is paused for the
+            snapshot and resumed once the fork is accepted; a paused or stopped
+            sandbox is left as it is. The fork names the checkpoint the pause
+            returned, so it does not depend on the source still being paused when
+            the request lands. Resuming the source is best effort: the child is
+            returned even if the source could not be resumed, and this sandbox is
+            updated in place with the source's state after the fork.
+            """
             ...
 
         async def aio(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+            """Fork this sandbox's current state. A running sandbox is paused for the
+            snapshot and resumed once the fork is accepted; a paused or stopped
+            sandbox is left as it is. The fork names the checkpoint the pause
+            returned, so it does not depend on the source still being paused when
+            the request lands. Resuming the source is best effort: the child is
+            returned even if the source could not be resumed, and this sandbox is
+            updated in place with the source's state after the fork.
+            """
             ...
 
     fork: __fork_spec
@@ -1336,7 +1383,7 @@ class Sandbox:
     unexpose_port: __unexpose_port_spec
 
     class __create_port_token_spec(typing_extensions.Protocol):
-        def __call__(self, /, port: int, *, ttl: typing.Optional[str] = None) -> archil._models.CreatedSandboxPortToken:
+        def __call__(self, /, port: int, *, ttl: str | None = None) -> archil._models.CreatedSandboxPortToken:
             """Authorize HTTP access to one port without making it public.
 
             ``ttl`` is a duration such as "1h" or "30m", up to "8760h" (365 days).
@@ -1345,7 +1392,7 @@ class Sandbox:
             """
             ...
 
-        async def aio(self, /, port: int, *, ttl: typing.Optional[str] = None) -> archil._models.CreatedSandboxPortToken:
+        async def aio(self, /, port: int, *, ttl: str | None = None) -> archil._models.CreatedSandboxPortToken:
             """Authorize HTTP access to one port without making it public.
 
             ``ttl`` is a duration such as "1h" or "30m", up to "8760h" (365 days).
@@ -1368,34 +1415,34 @@ class Sandbox:
     get_port_token: __get_port_token_spec
 
     class ___port_token_page_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, limit: int, cursor: typing.Optional[str]) -> archil._models.SandboxPortTokenPage:
+        def __call__(self, /, *, limit: int, cursor: str | None) -> archil._models.SandboxPortTokenPage:
             ...
 
-        async def aio(self, /, *, limit: int, cursor: typing.Optional[str]) -> archil._models.SandboxPortTokenPage:
+        async def aio(self, /, *, limit: int, cursor: str | None) -> archil._models.SandboxPortTokenPage:
             ...
 
     _port_token_page: ___port_token_page_spec
 
     class __list_port_tokens_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil._models.SandboxPortToken]:
+        def __call__(self, /, *, limit: int | None = None, cursor: str | None = None) -> list[archil._models.SandboxPortToken]:
             """List token metadata across pages. ``limit`` caps the total returned."""
             ...
 
-        async def aio(self, /, *, limit: typing.Optional[int] = None, cursor: typing.Optional[str] = None) -> list[archil._models.SandboxPortToken]:
+        async def aio(self, /, *, limit: int | None = None, cursor: str | None = None) -> list[archil._models.SandboxPortToken]:
             """List token metadata across pages. ``limit`` caps the total returned."""
             ...
 
     list_port_tokens: __list_port_tokens_spec
 
     class __list_port_token_pages_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, cursor: typing.Optional[str] = None, page_size: int = 100) -> typing.Iterator[archil._models.SandboxPortTokenPage]:
+        def __call__(self, /, *, cursor: str | None = None, page_size: int = 100) -> typing.Iterator[archil._models.SandboxPortTokenPage]:
             """Yield token metadata pages. Use each page's ``next_cursor`` to resume.
 
             Async iteration: ``async for page in sandbox.list_port_token_pages.aio(): ...``.
             """
             ...
 
-        def aio(self, /, *, cursor: typing.Optional[str] = None, page_size: int = 100) -> typing.AsyncIterator[archil._models.SandboxPortTokenPage]:
+        def aio(self, /, *, cursor: str | None = None, page_size: int = 100) -> typing.AsyncIterator[archil._models.SandboxPortTokenPage]:
             """Yield token metadata pages. Use each page's ``next_cursor`` to resume.
 
             Async iteration: ``async for page in sandbox.list_port_token_pages.aio(): ...``.
@@ -1405,11 +1452,11 @@ class Sandbox:
     list_port_token_pages: __list_port_token_pages_spec
 
     class __delete_port_token_spec(typing_extensions.Protocol):
-        def __call__(self, /, token: typing.Union[archil._models.SandboxPortToken, str]) -> None:
+        def __call__(self, /, token: archil._models.SandboxPortToken | str) -> None:
             """Revoke a token for new connections. Existing connections remain open."""
             ...
 
-        async def aio(self, /, token: typing.Union[archil._models.SandboxPortToken, str]) -> None:
+        async def aio(self, /, token: archil._models.SandboxPortToken | str) -> None:
             """Revoke a token for new connections. Existing connections remain open."""
             ...
 
