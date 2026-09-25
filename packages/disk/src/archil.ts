@@ -5,6 +5,7 @@ import { Sandboxes } from "./sandboxes.js";
 import { Tokens } from "./tokens.js";
 import { Workspace } from "./workspace.js";
 import { deriveS3BaseUrl, resolveBaseUrl } from "./regions.js";
+import { retryApiRequest } from "./retry.js";
 import type { ExecDiskResult } from "./types.js";
 
 export interface ArchilOptions {
@@ -182,9 +183,13 @@ export class Archil {
       }
     }
     return unwrap<ExecDiskResult>(
-      this._client.POST("/api/exec", {
-        body: { disks, command: opts.command },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/exec", {
+            body: { disks, command: opts.command },
+          }),
+        "connect",
+      ),
     );
   }
 

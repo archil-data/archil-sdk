@@ -2,24 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import { Archil, Workspace } from "../src/index.js";
 import type { Disk } from "../src/index.js";
+import { json, startOrigin, xml, type RecordedRequest } from "./helpers/origin.js";
 
-interface CapturedRequest {
-  method: string;
-  url: URL;
-  headers: Headers;
-}
-
-// Serve the control-plane disk list from cp.test and a permissive S3 gateway
-// from s3.test, capturing every S3 request so tests can assert on its headers.
+// Serve the control-plane disk list from one local origin and a permissive S3
+// gateway from another, recording every S3 request so tests can assert on its headers.
 async function withMockedS3(
-  run: (disk: Disk, requests: CapturedRequest[]) => Promise<void>,
+  run: (disk: Disk, requests: RecordedRequest[]) => Promise<void>,
 ): Promise<void> {
-  const originalFetch = globalThis.fetch;
-  const requests: CapturedRequest[] = [];
-  globalThis.fetch = async (input, init = {}) => {
-    const req = input instanceof Request ? input : new Request(input, init);
-    const url = new URL(req.url);
-    if (url.host === "cp.test" && url.pathname === "/api/disks") {
+  const control = await startOrigin((request) => {
+    if (request.url.pathname === "/api/disks") {
       return json({
         success: true,
         data: [
@@ -35,46 +26,32 @@ async function withMockedS3(
         ],
       });
     }
-    if (url.host === "s3.test") {
-      requests.push({ method: req.method, url, headers: req.headers });
-      if (req.method === "POST" && url.searchParams.has("uploads")) {
-        return xml(
-          "<InitiateMultipartUploadResult><UploadId>up-1</UploadId><Key>k</Key><Bucket>dsk-1</Bucket></InitiateMultipartUploadResult>",
-        );
-      }
-      if (req.method === "POST" && url.searchParams.has("uploadId")) {
-        return xml(
-          '<CompleteMultipartUploadResult><ETag>"composite-1"</ETag></CompleteMultipartUploadResult>',
-        );
-      }
-      return new Response(null, { status: 200, headers: { etag: '"ok"' } });
+    return json({ success: false, error: `unexpected request: ${request.method} ${request.url}` }, 500);
+  });
+  const s3 = await startOrigin((request) => {
+    if (request.method === "POST" && request.url.searchParams.has("uploads")) {
+      return xml(
+        "<InitiateMultipartUploadResult><UploadId>up-1</UploadId><Key>k</Key><Bucket>dsk-1</Bucket></InitiateMultipartUploadResult>",
+      );
     }
-    return json({ success: false, error: `unexpected request: ${req.method} ${req.url}` }, 500);
-  };
+    if (request.method === "POST" && request.url.searchParams.has("uploadId")) {
+      return xml('<CompleteMultipartUploadResult><ETag>"composite-1"</ETag></CompleteMultipartUploadResult>');
+    }
+    return { status: 200, headers: { etag: '"ok"' } };
+  });
 
   try {
     const archil = new Archil({
       apiKey: "key-test",
       region: "aws-us-east-1",
-      baseUrl: "http://cp.test",
-      s3BaseUrl: "http://s3.test",
+      baseUrl: control.url,
+      s3BaseUrl: s3.url,
     });
     const [disk] = await archil.disks.list();
-    await run(disk, requests);
+    await run(disk, s3.requests);
   } finally {
-    globalThis.fetch = originalFetch;
+    await Promise.all([control.close(), s3.close()]);
   }
-}
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-function xml(body: string): Response {
-  return new Response(body, { status: 200, headers: { "content-type": "application/xml" } });
 }
 
 test("putObject sends x-archil POSIX headers, mode in octal", async () => {
