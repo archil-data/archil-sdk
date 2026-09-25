@@ -17,6 +17,7 @@ from archil import (
     SandboxEgressTransform,
     SandboxNetwork,
     SandboxProcess,
+    SandboxProcesses,
     SandboxProcessOutput,
     SandboxProcessResult,
     SandboxStartError,
@@ -85,7 +86,7 @@ class FakeProcessWebSocket(FakeWebSocket):
 
 @pytest.mark.asyncio
 async def test_process_connection_retries_transient_control_plane_failures(archil, router, monkeypatch):
-    import archil._sandbox_process as process_module
+    import archil._sandbox as sandbox_module
     import archil._http as http_module
 
     connection_attempts = 0
@@ -105,11 +106,11 @@ async def test_process_connection_retries_transient_control_plane_failures(archi
         return FakeProcessWebSocket()
 
     router.set(handler)
-    monkeypatch.setattr(process_module, "_websocket_connect", connect)
+    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
     monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
     sandbox = await archil.sandboxes.get.aio("sbx-1")
 
-    process = await sandbox.processes.start.aio("true")
+    process = await sandbox.run.aio("true")
 
     assert connection_attempts == 3
     await process.disconnect.aio()
@@ -130,7 +131,7 @@ async def test_process_connection_does_not_retry_non_transient_api_errors(archil
     sandbox = await archil.sandboxes.get.aio("sbx-1")
 
     with pytest.raises(ArchilApiError) as exc_info:
-        await sandbox.processes.start.aio("true")
+        await sandbox.run.aio("true")
 
     assert exc_info.value.status == 409
     assert connection_attempts == 1
@@ -138,7 +139,7 @@ async def test_process_connection_does_not_retry_non_transient_api_errors(archil
 
 @pytest.mark.asyncio
 async def test_process_connection_retries_websocket_handshake_failures(archil, router, monkeypatch):
-    import archil._sandbox_process as process_module
+    import archil._sandbox as sandbox_module
 
     connection_urls = []
 
@@ -160,11 +161,11 @@ async def test_process_connection_retries_websocket_handshake_failures(archil, r
         return FakeProcessWebSocket()
 
     router.set(handler)
-    monkeypatch.setattr(process_module, "_websocket_connect", connect)
-    monkeypatch.setattr(process_module, "_retry_delay", lambda _attempt: 0)
+    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
+    monkeypatch.setattr(sandbox_module, "_retry_delay", lambda _attempt: 0)
     sandbox = await archil.sandboxes.get.aio("sbx-1")
 
-    process = await sandbox.processes.start.aio("true")
+    process = await sandbox.run.aio("true")
 
     assert connection_urls == [
         "wss://sandbox.example/ws?token=1",
@@ -191,7 +192,7 @@ async def test_process_connection_gives_up_after_retry_budget(archil, router, mo
     sandbox = await archil.sandboxes.get.aio("sbx-1")
 
     with pytest.raises(ConnectionError, match="Process connection failed") as exc_info:
-        await sandbox.processes.start.aio("true")
+        await sandbox.run.aio("true")
 
     assert isinstance(exc_info.value.__cause__, httpx.ConnectError)
     assert connection_attempts == 4
@@ -459,8 +460,9 @@ def test_create_surfaces_terminal_start_failure(archil, router, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_exec_starts_a_process_and_waits(archil, router, monkeypatch):
-    import archil._sandbox_process as process_module
+@pytest.mark.parametrize("cwd", [None, "/workspace/a 'quote' $literal"])
+async def test_exec_starts_a_process_and_waits(archil, router, monkeypatch, cwd):
+    import archil._sandbox as sandbox_module
 
     expected = SandboxProcessResult(
         status="completed",
@@ -479,11 +481,12 @@ async def test_exec_starts_a_process_and_waits(archil, router, monkeypatch):
         calls.append(("start", command, kwargs))
         return Process()
 
-    monkeypatch.setattr(process_module._SandboxProcesses, "start", start)
+    monkeypatch.setattr(sandbox_module._Sandbox, "run", start)
     router.set(lambda request: ok_envelope(sandbox_json()))
     sandbox = await archil.sandboxes.get.aio("sbx-1")
     result = await sandbox.exec.aio(
         "printf hello",
+        cwd=cwd,
         env={"HELLO": "world"},
         timeout_seconds=10,
     )
@@ -494,6 +497,7 @@ async def test_exec_starts_a_process_and_waits(archil, router, monkeypatch):
             "start",
             "printf hello",
             {
+                "cwd": cwd,
                 "terminal": False,
                 "env": {"HELLO": "world"},
                 "timeout_seconds": 10,
@@ -862,6 +866,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "vcpu_count": None,
                 "mem_size_mib": None,
                 "base_image": None,
+                "image": None,
                 "env": None,
                 "max_ttl_seconds": None,
                 "idle_ttl_seconds": 0,
@@ -877,8 +882,9 @@ def test_module_level_sandbox_helpers(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_process_disconnect_and_resume_with_streamed_input(archil, router, monkeypatch):
-    import archil._sandbox_process as process_module
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_run_and_attach_with_streamed_input(archil, router, monkeypatch, legacy):
+    import archil._sandbox as sandbox_module
 
     sockets = []
 
@@ -898,12 +904,16 @@ async def test_process_disconnect_and_resume_with_streamed_input(archil, router,
             )
         return ok_envelope(sandbox_json())
 
-    monkeypatch.setattr(process_module, "_websocket_connect", connect)
+    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
     router.set(handler)
     output = []
     sandbox = await archil.sandboxes.get.aio("sbx-1")
-    process = await sandbox.processes.start.aio(
+    assert isinstance(sandbox.processes, SandboxProcesses)
+    run = sandbox.processes.start if legacy else sandbox.run
+    attach = sandbox.processes.connect if legacy else sandbox.attach
+    process = await run.aio(
         "cat",
+        cwd="/workspace/app",
         env={"HELLO": "world"},
         timeout_seconds=10,
         on_output=output.append,
@@ -917,6 +927,7 @@ async def test_process_disconnect_and_resume_with_streamed_input(archil, router,
     assert json.loads(socket.sent[0]) == {
         "type": "start",
         "command": "cat",
+        "cwd": "/workspace/app",
         "terminal": False,
         "env": {"HELLO": "world"},
         "timeout_seconds": 10,
@@ -946,7 +957,7 @@ async def test_process_disconnect_and_resume_with_streamed_input(archil, router,
     await process.disconnect.aio()
     assert not process.connected
 
-    resumed = await sandbox.processes.connect.aio(process.id, offset=cursor)
+    resumed = await attach.aio(process.id, offset=cursor)
     resumed_socket = sockets[1]
     assert json.loads(resumed_socket.sent[0]) == {
         "type": "attach",
@@ -1012,7 +1023,7 @@ async def test_process_stdin_close_waits_for_writes():
 
 @pytest.mark.asyncio
 async def test_terminal_process_input_resize_and_kill(archil, router, monkeypatch):
-    import archil._sandbox_process as process_module
+    import archil._sandbox as sandbox_module
 
     sockets = []
 
@@ -1028,10 +1039,10 @@ async def test_terminal_process_input_resize_and_kill(archil, router, monkeypatc
             else sandbox_json()
         )
     )
-    monkeypatch.setattr(process_module, "_websocket_connect", connect)
+    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
     sandbox = await archil.sandboxes.get.aio("sbx-1")
     output = []
-    process = await sandbox.processes.start.aio(
+    process = await sandbox.run.aio(
         "codex",
         terminal=SandboxTerminal(cols=132, rows=43),
         on_output=output.append,
@@ -1064,7 +1075,7 @@ async def test_terminal_process_input_resize_and_kill(archil, router, monkeypatc
 
 @pytest.mark.asyncio
 async def test_process_exit_closes_stdin_locally(archil, router, monkeypatch):
-    import archil._sandbox_process as process_module
+    import archil._sandbox as sandbox_module
 
     socket = FakeProcessWebSocket()
 
@@ -1078,9 +1089,9 @@ async def test_process_exit_closes_stdin_locally(archil, router, monkeypatch):
             else sandbox_json()
         )
     )
-    monkeypatch.setattr(process_module, "_websocket_connect", connect)
+    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
     sandbox = await archil.sandboxes.get.aio("sbx-1")
-    process = await sandbox.processes.start.aio("cat")
+    process = await sandbox.run.aio("cat")
 
     await process.send_input.aio(b"input")
     await socket.push(

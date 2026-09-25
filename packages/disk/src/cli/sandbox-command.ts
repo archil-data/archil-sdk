@@ -291,7 +291,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
         const shellCommand = command.map((argument) => argument === ""
           ? "''"
           : `'${argument.replaceAll("'", `'"'"'`)}'`).join(" ");
-        remote = await sandbox.processes.start(shellCommand, {
+        remote = await sandbox.run(shellCommand, {
           ...runOptions,
           collectOutput: options.output === "json",
           onOutput: options.output === "json" ? undefined : ({ stream, data }) => {

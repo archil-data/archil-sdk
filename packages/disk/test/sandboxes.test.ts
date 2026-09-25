@@ -3,9 +3,10 @@ import { afterEach, test, vi } from "vitest";
 import { createApiClient, type ApiClient } from "../src/client.js";
 import { ArchilApiError, SandboxPauseError } from "../src/errors.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
-import { SandboxProcess } from "../src/sandbox-process.js";
+import { SandboxProcess, SandboxProcesses } from "../src/index.js";
 import { Sandbox } from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
+import { json, startOrigin, type CannedResponse, type Respond } from "./helpers/origin.js";
 
 const now = "2026-07-22T12:00:00Z";
 const nowDate = new Date(now);
@@ -51,11 +52,25 @@ function ok(data: unknown) {
   };
 }
 
-afterEach(() => {
+// Local control-plane origins started by tests, closed after each one.
+const origins: Array<Awaited<ReturnType<typeof startOrigin>>> = [];
+
+async function origin(respond: Respond) {
+  const started = await startOrigin(respond);
+  origins.push(started);
+  return started;
+}
+
+function recorded(control: Awaited<ReturnType<typeof startOrigin>>) {
+  return control.requests.map(({ method, url, body }) => ({ method, path: url.pathname, body }));
+}
+
+afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   TestWebSocket.autoOpen = true;
+  await Promise.all(origins.splice(0).map((started) => started.close()));
 });
 
 class TestWebSocket {
@@ -142,6 +157,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     vcpuCount: 2,
     memSizeMiB: 4096,
     baseImage: "ubuntu:26.04",
+    imageDigest: undefined,
     platform: "arm64",
     maxTtlSeconds: 3600,
     idleTtlSeconds: 30,
@@ -201,6 +217,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
           vcpu_count: 8,
           mem_size_mib: 16384,
           base_image: "ubuntu:26.04",
+          image_digest: undefined,
           env: { NODE_ENV: "test" },
           max_ttl_seconds: 600,
           idle_ttl_seconds: 30,
@@ -232,20 +249,16 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
 
 test("sandbox public ports use the expose/list/unexpose API", async () => {
   const endpoint = { port: 3000, hostname: "3000-sandbox.example.com" };
-  const requests: Array<{ method: string; path: string; body: string }> = [];
-  const responses = [
-    Response.json({ success: true, data: endpoint }, { status: 201 }),
-    Response.json({ success: true, data: endpoint }),
-    Response.json({ success: true, data: { ports: [endpoint] } }),
-    new Response(null, { status: 204 }),
-    Response.json({ success: true, data: { ports: [] } }),
-    Response.json({ success: false, error: "port not found" }, { status: 404 }),
+  const responses: CannedResponse[] = [
+    json({ success: true, data: endpoint }, 201),
+    json({ success: true, data: endpoint }),
+    json({ success: true, data: { ports: [endpoint] } }),
+    { status: 204 },
+    json({ success: true, data: { ports: [] } }),
+    json({ success: false, error: "port not found" }, 404),
   ];
-  vi.stubGlobal("fetch", async (request: Request) => {
-    requests.push({ method: request.method, path: new URL(request.url).pathname, body: await request.text() });
-    return responses.shift()!;
-  });
-  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  const control = await origin(() => responses.shift() ?? json({ success: false, error: "unexpected request" }, 500));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   assert.equal(await sandbox.exposePort(3000), endpoint.hostname);
@@ -255,7 +268,7 @@ test("sandbox public ports use the expose/list/unexpose API", async () => {
   assert.deepEqual(await sandbox.listPorts(), []);
   await assert.rejects(sandbox.unexposePort(3000), (error: unknown) => error instanceof ArchilApiError && error.status === 404);
   assert.deepEqual(sandbox.endpoints, sandboxWire().endpoints);
-  assert.deepEqual(requests, [
+  assert.deepEqual(recorded(control), [
     { method: "PUT", path: "/api/sandboxes/0198-sandbox/ports/3000", body: "" },
     { method: "PUT", path: "/api/sandboxes/0198-sandbox/ports/3000", body: "" },
     { method: "GET", path: "/api/sandboxes/0198-sandbox/ports", body: "" },
@@ -336,14 +349,13 @@ test("sandbox getNetwork and updateNetwork use the active runtime policy", async
 });
 
 test.each([undefined, 0, 30])("sandbox creation serializes idle TTL %s", async (idleTtlSeconds) => {
-  vi.stubGlobal("fetch", async (request: Request) => {
-    assert.equal(request.method, "POST");
-    assert.equal(new URL(request.url).pathname, "/api/sandboxes");
-    assert.deepEqual(await request.json(), idleTtlSeconds === undefined ? {} : { idle_ttl_seconds: idleTtlSeconds });
-    return Response.json({ success: true, data: sandboxWire("running") });
-  });
-  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  const control = await origin(() => json({ success: true, data: sandboxWire("running") }));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
   await new Sandboxes(client).create({ idleTtlSeconds });
+  const [request] = control.requests;
+  assert.equal(request.method, "POST");
+  assert.equal(request.url.pathname, "/api/sandboxes");
+  assert.deepEqual(JSON.parse(request.body), idleTtlSeconds === undefined ? {} : { idle_ttl_seconds: idleTtlSeconds });
 });
 
 test("sandbox snapshots from older servers default idle TTL to disabled", () => {
@@ -367,31 +379,31 @@ test.each([
     max_ttl_seconds: body.timeout ?? 3600,
     idle_ttl_seconds: body.idle_ttl_seconds ?? 30,
   };
-  vi.stubGlobal("fetch", async (request: Request) => {
-    assert.equal(request.method, "POST");
-    assert.equal(new URL(request.url).pathname, "/api/sandboxes/0198-sandbox/timeout");
-    assert.deepEqual(await request.json(), body);
+  const control = await origin(() => {
     attempts++;
-    if (attempts === 1) throw new TypeError("fetch failed");
-    if (attempts < 4) {
-      return Response.json({ success: false, error: "unavailable" }, { status: attempts === 2 ? 429 : 503 });
-    }
-    return Response.json({ success: true, data: updated });
+    // Dropping the connection stands in for a transport failure.
+    if (attempts === 1) return { destroy: true };
+    if (attempts < 4) return json({ success: false, error: "unavailable" }, attempts === 2 ? 429 : 503);
+    return json({ success: true, data: updated });
   });
-  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   assert.equal(await sandbox.setTimeout(input), sandbox);
   assert.equal(attempts, 4);
+  for (const request of control.requests) {
+    assert.equal(request.method, "POST");
+    assert.equal(request.url.pathname, "/api/sandboxes/0198-sandbox/timeout");
+    assert.deepEqual(JSON.parse(request.body), body);
+  }
   assert.equal(sandbox.maxTtlSeconds, updated.max_ttl_seconds);
   assert.equal(sandbox.idleTtlSeconds, updated.idle_ttl_seconds);
   assert.equal(sandbox.toJSON().idleTtlSeconds, updated.idle_ttl_seconds);
 });
 
 test.each([400, 409])("sandbox setTimeout surfaces %s without retrying or changing its fields", async (status) => {
-  const fetch = vi.fn(async () => Response.json({ success: false, error: "invalid TTL" }, { status }));
-  vi.stubGlobal("fetch", fetch);
-  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: "https://api.example.com" });
+  const control = await origin(() => json({ success: false, error: "invalid TTL" }, status));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
   const before = sandbox.toJSON();
   await assert.rejects(sandbox.setTimeout({ idleTtlSeconds: -1 }), (error: unknown) => {
@@ -400,7 +412,7 @@ test.each([400, 409])("sandbox setTimeout surfaces %s without retrying or changi
     assert.equal(error.message, "invalid TTL");
     return true;
   });
-  assert.equal(fetch.mock.calls.length, 1);
+  assert.equal(control.requests.length, 1);
   assert.deepEqual(sandbox.toJSON(), before);
 });
 
@@ -685,7 +697,7 @@ test("sandbox delete accepts 204", async () => {
   ]);
 });
 
-test("exec starts a process and waits for its result", async () => {
+test.each([undefined, "/workspace/a 'quote' $literal"])("exec forwards cwd=%s and waits for its result", async (cwd) => {
   const calls: Array<{ path: string; options: any }> = [];
   const client = {
     POST: async (path: string, options: any) => {
@@ -701,6 +713,7 @@ test("exec starts a process and waits for its result", async () => {
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   const executing = sandbox.exec("printf hello", {
+    cwd,
     env: { HELLO: "world" },
     timeoutSeconds: 10,
   });
@@ -735,6 +748,7 @@ test("exec starts a process and waits for its result", async () => {
   assert.deepEqual(JSON.parse(socket.sent[0] as string), {
     type: "start",
     command: "printf hello",
+    ...(cwd === undefined ? {} : { cwd }),
     env: { HELLO: "world" },
     timeout_seconds: 10,
   });
@@ -764,7 +778,7 @@ test("process connections retry API and WebSocket handshake failures", async () 
   TestWebSocket.autoOpen = false;
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("true");
+  const starting = sandbox.run("true");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances.length, 1));
   assert.equal(connectionAttempts, 3);
   const first = TestWebSocket.instances[0];
@@ -789,7 +803,7 @@ test("process connections retry API and WebSocket handshake failures", async () 
   await process.disconnect();
 });
 
-test("processes start directly, disconnect, and resume from their output cursor", async () => {
+test.each(["sandbox", "processes"] as const)("%s API returns a process before exit and supports reattachment", async (api) => {
   const calls: Array<{ path: string; options: any }> = [];
   const output: Array<{ stream: string; offset: number; data: number[] }> = [];
   const client = {
@@ -805,7 +819,15 @@ test("processes start directly, disconnect, and resume from their output cursor"
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("echo hello", {
+  assert.ok(sandbox.processes instanceof SandboxProcesses);
+  const start = api === "processes"
+    ? sandbox.processes.start.bind(sandbox.processes)
+    : sandbox.run.bind(sandbox);
+  const attach = api === "processes"
+    ? sandbox.processes.connect.bind(sandbox.processes)
+    : sandbox.attach.bind(sandbox);
+  const starting = start("echo hello", {
+    cwd: "/workspace/app",
     terminal: false,
     env: { HELLO: "world" },
     timeoutSeconds: 10,
@@ -834,6 +856,7 @@ test("processes start directly, disconnect, and resume from their output cursor"
   assert.deepEqual(JSON.parse(first.sent[0] as string), {
     type: "start",
     command: "echo hello",
+    cwd: "/workspace/app",
     terminal: false,
     env: { HELLO: "world" },
     timeout_seconds: 10,
@@ -848,7 +871,7 @@ test("processes start directly, disconnect, and resume from their output cursor"
   await process.disconnect();
   assert.equal(process.connected, false);
 
-  const connecting = sandbox.processes.connect(process.id, {
+  const connecting = attach(process.id, {
     offset: process.cursor,
     onOutput: (event) =>
       output.push({
@@ -929,7 +952,7 @@ test("processes reconnect by ID and an explicit output cursor", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const connecting = sandbox.processes.connect("0198-process", {
+  const connecting = sandbox.attach("0198-process", {
     offset: 1_000,
     onOutput: (event) =>
       output.push({
@@ -990,7 +1013,7 @@ test("a terminal is a process with terminal sizing, input, and kill", async () =
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("codex", {
+  const starting = sandbox.run("codex", {
     terminal: { cols: 132, rows: 43 },
   });
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
@@ -1060,7 +1083,7 @@ test("process input is streamed as ordered WebSocket frames", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("cat", {
+  const starting = sandbox.run("cat", {
     onOutput: (event) =>
       output.push({
         stream: event.stream,
@@ -1103,7 +1126,7 @@ test("failed stdin close can be retried", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("cat");
+  const starting = sandbox.run("cat");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
   socket.emit("message", {
@@ -1134,7 +1157,7 @@ test("process exit closes stdin locally", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("cat");
+  const starting = sandbox.run("cat");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
   socket.emit("message", {
@@ -1168,7 +1191,7 @@ test("output callbacks cannot hide runtime connection errors", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("echo hello", {
+  const starting = sandbox.run("echo hello", {
     onOutput: () => {
       throw new Error("callback failed");
     },
@@ -1210,7 +1233,7 @@ test("process output collection can be disabled while streaming", async () => {
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
   const output: string[] = [];
 
-  const starting = sandbox.processes.start("echo hello", {
+  const starting = sandbox.run("echo hello", {
     collectOutput: false,
     onOutput: ({ data }) => output.push(new TextDecoder().decode(data)),
   });
@@ -1249,7 +1272,7 @@ test("process start surfaces runtime rejection", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.processes.start("");
+  const starting = sandbox.run("");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   TestWebSocket.instances[0].emit("message", {
     data: JSON.stringify({
@@ -1296,9 +1319,8 @@ test.each(["created", "metadata", "id"])("port token lifecycle: delete by %s", a
     created_at: now,
     expires_at: "2026-07-22T13:00:00Z",
   };
-  const requests: Array<{ method: string; path: string; body: string }> = [];
-  const responses = [
-    Response.json(
+  const responses: CannedResponse[] = [
+    json(
       {
         success: true,
         data: {
@@ -1307,25 +1329,18 @@ test.each(["created", "metadata", "id"])("port token lifecycle: delete by %s", a
           token: "secret",
         },
       },
-      { status: 201 },
+      201,
     ),
-    Response.json({ success: true, data: metadata }),
-    new Response(null, { status: 204 }),
-    Response.json({ success: false, error: "port token not found" }, { status: 404 }),
-    Response.json({ success: false, error: "backend unavailable" }, { status: 503 }),
+    json({ success: true, data: metadata }),
+    { status: 204 },
+    json({ success: false, error: "port token not found" }, 404),
+    json({ success: false, error: "backend unavailable" }, 503),
   ];
-  vi.stubGlobal("fetch", async (request: Request) => {
-    requests.push({
-      method: request.method,
-      path: new URL(request.url).pathname,
-      body: await request.text(),
-    });
-    return responses.shift()!;
-  });
+  const control = await origin(() => responses.shift() ?? json({ success: false, error: "unexpected request" }, 500));
   const client = createApiClient({
     apiKey: "test",
     region: "aws-us-east-1",
-    baseUrl: "https://api.example.com",
+    baseUrl: control.url,
   });
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
@@ -1358,7 +1373,7 @@ test.each(["created", "metadata", "id"])("port token lifecycle: delete by %s", a
     sandbox.createPortToken(8080),
     (error: unknown) => error instanceof ArchilApiError && error.status === 503,
   );
-  assert.deepEqual(requests, [
+  assert.deepEqual(recorded(control), [
     {
       method: "POST",
       path: "/api/sandboxes/0198-sandbox/port-tokens",
@@ -1394,10 +1409,10 @@ test("sandbox token listing follows cursors and caps the total returned", async 
     created_at: now,
   }));
   const queries: Array<Record<string, string>> = [];
-  vi.stubGlobal("fetch", async (request: Request) => {
-    const query = Object.fromEntries(new URL(request.url).searchParams);
+  const control = await origin((request) => {
+    const query = Object.fromEntries(request.url.searchParams);
     queries.push(query);
-    return Response.json({
+    return json({
       success: true,
       data: { tokens: [query.cursor ? tokens[1] : tokens[0]] },
       ...(query.cursor ? {} : { nextCursor: "token-1" }),
@@ -1406,7 +1421,7 @@ test("sandbox token listing follows cursors and caps the total returned", async 
   const client = createApiClient({
     apiKey: "test",
     region: "aws-us-east-1",
-    baseUrl: "https://api.example.com",
+    baseUrl: control.url,
   });
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 

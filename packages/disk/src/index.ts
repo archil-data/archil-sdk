@@ -2,6 +2,7 @@ import { Archil, type ArchilOptions, type ExecMount, type ExecOptions } from "./
 import type { CreateDiskRequest, ApiTokenResponse, CreateApiTokenRequest, ExecDiskResult } from "./types.js";
 import type { CreateDiskResult, ListDisksOptions } from "./disks.js";
 import type { Disk } from "./disk.js";
+import type { CreateImageRequest, Image, ImageWaitOptions } from "./images.js";
 import type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
 import type { Sandbox, SandboxWaitOptions } from "./sandbox.js";
 import type { ListTokensOptions } from "./tokens.js";
@@ -16,6 +17,9 @@ export type { ListDisksOptions, CreateDiskResult, DiskListPage } from "./disks.j
 
 export { Tokens } from "./tokens.js";
 export type { ListTokensOptions } from "./tokens.js";
+
+export { Images } from "./images.js";
+export type { CreateImageRequest, Image, ImageStatus, ImageWaitOptions, RegistryAuth } from "./images.js";
 
 export { Sandboxes } from "./sandboxes.js";
 export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
@@ -93,6 +97,7 @@ export {
   ArchilError,
   ArchilApiError,
   ArchilS3Error,
+  ImageBuildError,
   SandboxFileTransferError,
   SandboxPauseError,
 } from "./errors.js";
@@ -163,6 +168,14 @@ export function createSandbox(
   opts: SandboxWaitOptions = {},
 ): Promise<Sandbox> {
   return archil().sandboxes.create(req, opts);
+}
+
+export function createImage(req: CreateImageRequest, opts: ImageWaitOptions = {}): Promise<Image> {
+  return archil().images.create(req, opts);
+}
+
+export function getImage(id: string): Promise<Image> {
+  return archil().images.get(id);
 }
 
 export function listSandboxes(opts?: ListSandboxesOptions): Promise<Sandbox[]> {

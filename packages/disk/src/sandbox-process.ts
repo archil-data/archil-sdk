@@ -1,6 +1,5 @@
-import type { ApiClient } from "./client.js";
-import { unwrap } from "./client.js";
-import { MAX_RETRIES, retryApiRequest, retrySleep } from "./retry.js";
+import { MAX_RETRIES, retrySleep } from "./retry.js";
+import type { Sandbox } from "./sandbox.js";
 
 export type SandboxProcessStatus =
   | "running"
@@ -32,6 +31,8 @@ export interface SandboxProcessConnectOptions {
 }
 
 export interface SandboxProcessStartOptions {
+  /** Absolute working directory inside the sandbox. */
+  cwd?: string;
   /** Enables a PTY. PTY output is merged into stdout and stderr remains empty. */
   terminal?: boolean | SandboxTerminalOptions;
   env?: Record<string, string>;
@@ -53,13 +54,14 @@ type ProcessConnectionRequest =
   | {
       type: "start";
       command: string;
+      cwd?: string;
       terminal?: boolean | { cols: number; rows: number };
       env: Record<string, string>;
       timeout_seconds?: number;
     }
   | { type: "attach"; process_id: string; offset: number };
 
-type ProcessControlRequest =
+export type ProcessControlRequest =
   | { type: "kill"; process_id: string }
   | {
       type: "resize";
@@ -107,7 +109,7 @@ async function waitForSocketOpen(socket: WebSocket): Promise<void> {
   });
 }
 
-async function openProcessSocket(
+export async function openProcessSocket(
   connectionUrl: () => Promise<string>,
 ): Promise<WebSocket> {
   for (let attempt = 0; ; attempt++) {
@@ -132,109 +134,25 @@ async function openProcessSocket(
   }
 }
 
+/** @deprecated Use Sandbox.run() and Sandbox.attach(). Removed in the next version. */
 export class SandboxProcesses {
-  private readonly _sandboxId: string;
-  private readonly _client: ApiClient;
-
   /** @internal */
-  constructor(sandboxId: string, client: ApiClient) {
-    this._sandboxId = sandboxId;
-    this._client = client;
-  }
+  constructor(private readonly _sandbox: Pick<Sandbox, "run" | "attach">) {}
 
-  async start(
+  /** @deprecated Use sandbox.run(). Removed in the next version. */
+  start(
     command: string,
     options: SandboxProcessStartOptions = {},
   ): Promise<SandboxProcess> {
-    const process = new SandboxProcess(
-      "",
-      0,
-      options.onOutput,
-      options.collectOutput ?? true,
-      () => this._connectionUrl(),
-      (request) => this._control(request),
-    );
-    const terminal =
-      typeof options.terminal === "object"
-        ? {
-            cols: options.terminal.cols ?? 80,
-            rows: options.terminal.rows ?? 24,
-          }
-        : options.terminal;
-    await process._connect({
-      type: "start",
-      command,
-      terminal,
-      env: options.env ?? {},
-      timeout_seconds: options.timeoutSeconds,
-    });
-    return process;
+    return this._sandbox.run(command, options);
   }
 
-  async connect(
+  /** @deprecated Use sandbox.attach(). Removed in the next version. */
+  connect(
     processId: string,
     options: SandboxProcessConnectOptions = {},
   ): Promise<SandboxProcess> {
-    const offset = options.offset ?? 0;
-    const process = new SandboxProcess(
-      processId,
-      offset,
-      options.onOutput,
-      options.collectOutput ?? true,
-      () => this._connectionUrl(),
-      (request) => this._control(request),
-    );
-    await process._connect({ type: "attach", process_id: processId, offset });
-    return process;
-  }
-
-  private async _connectionUrl(): Promise<string> {
-    const data = await unwrap(
-      retryApiRequest(
-        () =>
-          this._client.POST("/api/sandboxes/{sid}/connections", {
-            params: { path: { sid: this._sandboxId } },
-          }),
-        "transient",
-      ),
-    );
-    return data.url;
-  }
-
-  private async _control(request: ProcessControlRequest): Promise<void> {
-    const socket = await openProcessSocket(() => this._connectionUrl());
-    const expected = request.type === "kill" ? "killed" : "resized";
-    await new Promise<void>((resolve, reject) => {
-      socket.addEventListener("message", (message) => {
-        try {
-          const event = JSON.parse(message.data as string) as
-            | { type: "killed" | "resized" }
-            | { type: "error"; error: string; message: string };
-          if (event.type === "error") {
-            reject(new Error(`${event.error}: ${event.message}`));
-          } else if (event.type !== expected) {
-            reject(new Error(`Expected ${expected}, received ${event.type}`));
-          } else {
-            resolve();
-          }
-        } catch (error) {
-          reject(error);
-        } finally {
-          socket.close();
-        }
-      }, { once: true });
-      socket.addEventListener("error", () =>
-        reject(new Error(`Process ${request.type} request failed`)),
-      );
-      socket.addEventListener("close", () =>
-        reject(
-          new Error(
-            `Process ${request.type} connection closed before confirmation`,
-          ),
-        ),
-      );
-      socket.send(JSON.stringify(request));
-    });
+    return this._sandbox.attach(processId, options);
   }
 }
 

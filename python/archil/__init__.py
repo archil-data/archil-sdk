@@ -28,6 +28,9 @@ from ._models import (
     DeleteObjectsError,
     DeleteObjectsResult,
     DiskData,
+    ImageData,
+    ImageStatus,
+    RegistryAuth,
     DiskMetrics,
     DiskPage,
     DiskStatus,
@@ -80,6 +83,7 @@ from ._wrapped import (
     Archil,
     Disk,
     Disks,
+    Images,
     Multipart,
     Sandbox,
     SandboxFiles,
@@ -90,7 +94,15 @@ from ._wrapped import (
     Workspace,
 )
 from .agent_tools import AgentToolset
-from .errors import ArchilApiError, ArchilError, ArchilS3Error, SandboxFileTransferError, SandboxStartError, SandboxPauseError
+from .errors import (
+    ArchilApiError,
+    ArchilError,
+    ArchilS3Error,
+    ImageBuildError,
+    SandboxFileTransferError,
+    SandboxPauseError,
+    SandboxStartError,
+)
 
 __all__ = [
     "__version__",
@@ -100,6 +112,7 @@ __all__ = [
     "Multipart",
     "Tokens",
     "Workspace",
+    "Images",
     "Sandboxes",
     "Sandbox",
     "SandboxFiles",
@@ -116,8 +129,10 @@ __all__ = [
     "SandboxStartError",
     "SandboxPauseError",
     "SandboxFileTransferError",
+    "ImageBuildError",
     # input models
     "MountConfig",
+    "RegistryAuth",
     "S3Mount",
     "GCSMount",
     "R2Mount",
@@ -153,6 +168,8 @@ __all__ = [
     "PutObjectResult",
     "ListObjectsResult",
     "ShareUrl",
+    "ImageData",
+    "ImageStatus",
     "UploadPart",
     "MultipartUpload",
     "CompletedMultipartUpload",
@@ -181,6 +198,8 @@ __all__ = [
     "create_disk",
     "list_disks",
     "get_disk",
+    "create_image",
+    "get_image",
     "create_sandbox",
     "list_sandboxes",
     "get_sandbox",
@@ -259,6 +278,7 @@ def create_sandbox(
     vcpu_count: Optional[int] = None,
     mem_size_mib: Optional[int] = None,
     base_image: Optional[str] = None,
+    image: Optional[Union[ImageData, str]] = None,
     env: Optional[dict[str, str]] = None,
     max_ttl_seconds: Optional[int] = None,
     idle_ttl_seconds: Optional[int] = None,
@@ -272,6 +292,7 @@ def create_sandbox(
         vcpu_count=vcpu_count,
         mem_size_mib=mem_size_mib,
         base_image=base_image,
+        image=image,
         env=env,
         max_ttl_seconds=max_ttl_seconds,
         idle_ttl_seconds=idle_ttl_seconds,
@@ -280,6 +301,14 @@ def create_sandbox(
         ports=ports,
         wait=wait,
     )
+
+
+def create_image(source: str, *, registry_auth: Optional[RegistryAuth] = None, wait: bool = True) -> ImageData:
+    return _client().images.create(source, registry_auth=registry_auth, wait=wait)
+
+
+def get_image(id: str) -> ImageData:
+    return _client().images.get(id)
 
 
 def list_sandboxes(*, disk: Optional[Union[Disk, str]] = None) -> list[Sandbox]:

@@ -15,6 +15,8 @@ from archil import (
     ArchilS3Error,
     Delegation,
     FileSystem,
+    ImageData,
+    RegistryAuth,
     S3CompatibleMount,
     S3Mount,
     Sandbox,
@@ -27,6 +29,7 @@ from archil import (
     SandboxEgressTransform,
     SandboxNetwork,
     SandboxProcess,
+    SandboxProcesses,
     SandboxProcessOutput,
     SandboxProcessResult,
     SandboxTerminal,
@@ -81,12 +84,13 @@ def sync_usage() -> None:
     _idle_ttl: int = sandbox.idle_ttl_seconds
     _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
     module_sandbox = archil.get_sandbox(module_sandbox.id)
-    sandbox_result: SandboxProcessResult = sandbox.exec("echo ready")
+    sandbox_result: SandboxProcessResult = sandbox.exec("echo ready", cwd="/workspace")
     _sandbox_exit: Optional[int] = sandbox_result.exit_code
     sandbox.files.upload_file("local.txt", "/workspace/remote.txt", mode=0o640)
     sandbox.files.download_file("/workspace/remote.txt", "downloaded.txt")
-    process: SandboxProcess = sandbox.processes.start(
+    process: SandboxProcess = sandbox.run(
         "codex",
+        cwd="/workspace",
         terminal=SandboxTerminal(cols=120, rows=40),
         on_output=consume_process_output,
         collect_output=False,
@@ -94,8 +98,13 @@ def sync_usage() -> None:
     process.send_input(b"Review this repository\n")
     cursor: int = process.cursor
     process.disconnect()
-    resumed = sandbox.processes.connect(process.id, offset=cursor)
+    resumed = sandbox.attach(process.id, offset=cursor)
     resumed.kill()
+    legacy_processes: SandboxProcesses = sandbox.processes
+    legacy_process: SandboxProcess = legacy_processes.start("cat", collect_output=False)
+    legacy_process.disconnect()
+    legacy_process = legacy_processes.connect(legacy_process.id, offset=legacy_process.cursor)
+    legacy_process.kill()
     sandbox.stop().delete()
     created = client.disks.create(
         name="d2",
@@ -132,8 +141,22 @@ def sync_usage() -> None:
         _status: int = e.status
 
 
+def image_usage() -> None:
+    client = Archil(api_key="key-x", region="aws-us-east-1")
+    image: ImageData = client.images.create(
+        "ghcr.io/acme/app:v1", registry_auth=RegistryAuth(username="octocat", password="ghp_x")
+    )
+    _digest: Optional[str] = image.digest
+    _refreshed: ImageData = client.images.get(image.id)
+    _from_image: Sandbox = client.sandboxes.create(image=image)
+    _from_digest: Sandbox = client.sandboxes.create(image=image.digest or "")
+    _image_digest: Optional[str] = _from_image.image_digest
+    _module_image: ImageData = archil.create_image("node:24", wait=False)
+
+
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
+        _building: ImageData = await client.images.create.aio("node:24", wait=False)
         sandbox = await client.sandboxes.create.aio(name="trial", idle_ttl_seconds=300, ports=[3000])
         _hostname: str = await sandbox.expose_port.aio(3000)
         _ports: list[SandboxEndpoint] = await sandbox.list_ports.aio()
@@ -154,9 +177,13 @@ async def async_usage() -> None:
         await sandbox.files.upload_file.aio("local.txt", "/workspace/remote.txt")
         await sandbox.files.download_file.aio("/workspace/remote.txt", "downloaded.txt")
         await (await sandbox.stop.aio()).delete.aio()
-        process = await sandbox.processes.start.aio("cat")
+        process = await sandbox.run.aio("cat", cwd="/workspace")
         await process.close_stdin.aio()
         _process_result = await process.wait.aio()
+        legacy_process: SandboxProcess = await sandbox.processes.start.aio("cat", collect_output=False)
+        await legacy_process.disconnect.aio()
+        legacy_process = await sandbox.processes.connect.aio(legacy_process.id, offset=legacy_process.cursor)
+        await legacy_process.kill.aio()
         d = await client.disks.get.aio("dsk-1")
         await d.put_object.aio("k", b"y")
         data: bytes = await d.get_object.aio("k")

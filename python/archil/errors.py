@@ -45,6 +45,16 @@ class SandboxPauseError(ArchilError):
         self.latest = sandbox
 
 
+class ImageBuildError(ArchilError):
+    """The image build failed; latest holds its final state."""
+
+    def __init__(self, image: object) -> None:
+        reason = getattr(image, "failure_reason", None)
+        detail = f": {reason}" if reason else ""
+        super().__init__(f"Image build failed{detail}", 400, "IMAGE_BUILD_FAILED")
+        self.latest = image
+
+
 class SandboxFileTransferError(ArchilError):
     def __init__(self, operation: str, path: str, detail: str) -> None:
         super().__init__(

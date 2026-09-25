@@ -155,7 +155,7 @@ const sandbox = await client.sandboxes.create({
 const result = await sandbox.exec("uname -a");
 console.log(result.stdout);
 
-const terminal = await sandbox.processes.start("codex", {
+const terminal = await sandbox.run("codex", {
   terminal: { cols: 120, rows: 40 },
   onOutput: ({ data }) => process.stdout.write(data),
 });
@@ -165,7 +165,7 @@ await terminal.resize({ cols: 160, rows: 50 });
 const cursor = terminal.cursor;
 await terminal.disconnect();
 
-const resumed = await sandbox.processes.connect(processId, {
+const resumed = await sandbox.attach(processId, {
   offset: cursor,
   onOutput: ({ data }) => process.stdout.write(data),
 });
@@ -183,11 +183,24 @@ const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
 
+To boot an image from a private registry, build it with registry credentials first.
+`images.create` waits until the image is ready and throws `ImageBuildError` if the
+image is missing or the registry rejects the credentials. The credentials are used
+only for the build, and the image is visible only to your account.
+
+```ts
+const image = await client.images.create({
+  source: "ghcr.io/acme/app:v3",
+  registryAuth: { username: "octocat", password: process.env.GHCR_TOKEN! }, // read:packages
+});
+const sandbox = await client.sandboxes.create({ image }); // or { image: image.digest }
+```
+
 Expose TCP ports publicly when creating a sandbox or later with `exposePort`:
 
 ```ts
 const web = await client.sandboxes.create({ baseImage: "python:3.12-slim", ports: [8080] });
-const server = await web.processes.start("python -m http.server 8080 --bind 0.0.0.0");
+const server = await web.run("python -m http.server 8080 --bind 0.0.0.0");
 await server.disconnect(); // The server keeps running.
 
 const hostname = await web.exposePort(8080); // Returns the hostname, including if already public.
@@ -211,7 +224,7 @@ For private HTTP access, create a port token without exposing the port publicly:
 
 ```ts
 const privateWeb = await client.sandboxes.create({ baseImage: "python:3.12-slim" });
-const server = await privateWeb.processes.start("python -m http.server 8080 --bind 0.0.0.0");
+const server = await privateWeb.run("python -m http.server 8080 --bind 0.0.0.0");
 await server.disconnect();
 
 const access = await privateWeb.createPortToken(8080, { ttl: "1h" });
@@ -304,11 +317,15 @@ Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB. Sandbox
 timeouts default to 24 hours and can be reset up to 24 hours from now.
 
-`sandbox.processes.start()` always returns a runtime-owned process immediately.
+Pass an absolute `cwd` to `sandbox.run()` or `sandbox.exec()` to choose the
+working directory, for example `sandbox.exec("pytest", { cwd: "/workspace/app" })`.
+Omitting it keeps the sandbox's default working directory.
+
+`sandbox.run()` always returns a runtime-owned process immediately.
 Pass `terminal: true` when the command needs terminal behavior, or provide
 `{ cols, rows }` for an initial size. Terminal processes merge stdout and stderr
 into `stdout`; non-terminal processes keep the streams separate. Disconnecting
-leaves the process running. Reconnect with `sandbox.processes.connect(id)` to
+leaves the process running. Reconnect with `sandbox.attach(id)` to
 replay buffered output from the beginning, or pass `{ offset: process.cursor }`
 to continue where the previous connection stopped. `onOutput` receives raw
 bytes with their stream and absolute offset. Call `closeStdin()` to deliver EOF
@@ -322,9 +339,12 @@ one-shot controls do not count. Pausing a sandbox disconnects attachments but
 preserves its processes for reattachment after resume. Processes end when
 their sandbox is stopped or expires.
 `sandbox.exec()` is the one-call start-and-wait convenience for ordinary
-commands. It uses `sandbox.processes` internally and does not create a durable
-control-plane exec record; use `sandbox.processes.start()` when you need the
-process handle.
+commands. It uses `sandbox.run()` internally and does not create a durable
+control-plane exec record; use `sandbox.run()` when you need the
+process handle. Replace `sandbox.processes.start()` with `sandbox.run()` and
+`sandbox.processes.connect()` with `sandbox.attach()`. The old methods and the
+`SandboxProcesses` export remain available as deprecated compatibility APIs and will
+be removed in the next version.
 
 Transfer files through the sandbox process connection without buffering the
 whole file in memory:

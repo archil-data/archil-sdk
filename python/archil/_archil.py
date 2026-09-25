@@ -8,6 +8,7 @@ from ._disks import _Disks
 from ._http import _Transport
 from ._models import ExecResult
 from ._regions import derive_s3_base_url, resolve_base_url
+from ._images import _Images
 from ._sandboxes import _Sandboxes
 from ._tokens import _Tokens
 
@@ -81,6 +82,7 @@ class _Archil:
 
         self._transport = _Transport(control_base_url, api_key, s3, transport=_http_transport, timeout=timeout)
         self._disks = _Disks(self._transport, region)
+        self._images = _Images(self._transport)
         self._sandboxes = _Sandboxes(self._transport)
         self._tokens = _Tokens(self._transport)
 
@@ -91,6 +93,10 @@ class _Archil:
     @property
     def tokens(self) -> "_Tokens":
         return self._tokens
+
+    @property
+    def images(self) -> "_Images":
+        return self._images
 
     @property
     def sandboxes(self) -> "_Sandboxes":

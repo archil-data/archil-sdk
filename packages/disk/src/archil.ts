@@ -1,10 +1,12 @@
 import { type ApiClient, type ArchilTlsOptions, createApiClient, unwrap } from "./client.js";
 import { Disk } from "./disk.js";
 import { Disks } from "./disks.js";
+import { Images } from "./images.js";
 import { Sandboxes } from "./sandboxes.js";
 import { Tokens } from "./tokens.js";
 import { Workspace } from "./workspace.js";
 import { deriveS3BaseUrl, resolveBaseUrl } from "./regions.js";
+import { retryApiRequest } from "./retry.js";
 import type { ExecDiskResult } from "./types.js";
 
 export interface ArchilOptions {
@@ -108,6 +110,7 @@ function diskIdFromMount(m: Disk | string): string {
 
 export class Archil {
   readonly disks: Disks;
+  readonly images: Images;
   readonly sandboxes: Sandboxes;
   readonly tokens: Tokens;
   /** @internal */
@@ -143,6 +146,7 @@ export class Archil {
 
     this._client = client;
     this.disks = new Disks(client, region, s3BaseUrl);
+    this.images = new Images(client);
     this.sandboxes = new Sandboxes(client);
     this.tokens = new Tokens(client);
   }
@@ -182,9 +186,13 @@ export class Archil {
       }
     }
     return unwrap<ExecDiskResult>(
-      this._client.POST("/api/exec", {
-        body: { disks, command: opts.command },
-      }),
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/exec", {
+            body: { disks, command: opts.command },
+          }),
+        "connect",
+      ),
     );
   }
 
