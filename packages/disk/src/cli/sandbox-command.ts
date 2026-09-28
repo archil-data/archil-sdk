@@ -188,14 +188,20 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   addLifecycleCommand("resume");
   addLifecycleCommand("stop");
 
-  waitOption(formatOption(program.command("fork <id|name> [new-name]").description("Fork a sandbox"))).action(
-    async (target: string, name: string | undefined, options: { output: OutputFormat; wait: boolean }) => {
+  waitOption(formatOption(program.command("fork <id|name> [new-name]").description("Fork a sandbox")
+    .option("--checkpoint <name>", "Fork a checkpoint from an earlier pause or stop instead of the current state"))).action(
+    async (
+      target: string,
+      name: string | undefined,
+      options: { output: OutputFormat; wait: boolean; checkpoint?: string },
+    ) => {
       const sandbox = await resolveSandbox(requireService(), target);
-      if (!SANDBOX_ACTIONS[sandbox.status].includes("fork")) {
+      // A checkpoint fork leaves the source untouched, so its current status does not matter.
+      if (options.checkpoint === undefined && !SANDBOX_ACTIONS[sandbox.status].includes("fork")) {
         throw new Error(`Cannot fork sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       }
       const fork = await withSpinner("Forking sandbox", options.wait, () =>
-        sandbox.fork({ name: validateSandboxName(name), wait: options.wait }));
+        sandbox.fork({ name: validateSandboxName(name), checkpoint: options.checkpoint, wait: options.wait }));
       output(formatSandbox(fork, options.output));
     },
   );

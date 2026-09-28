@@ -1325,7 +1325,7 @@ class Sandbox:
     resume: __resume_spec
 
     class __fork_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+        def __call__(self, /, *, name: str | None = None, checkpoint: str | None = None, wait: bool = True) -> Sandbox:
             """Fork this sandbox's current state. A running sandbox is paused for the
             snapshot and resumed once the fork is accepted; a paused or stopped
             sandbox is left as it is. The fork names the checkpoint the pause
@@ -1333,10 +1333,15 @@ class Sandbox:
             the request lands. Resuming the source is best effort: the child is
             returned even if the source could not be resumed, and this sandbox is
             updated in place with the source's state after the fork.
+
+            Pass ``checkpoint`` (the ``checkpoint`` of an earlier pause or stop, from
+            any session) to fork that saved state instead; the source is then left
+            untouched. The fork resumes with memory if that session ended in a
+            pause and cold-boots otherwise.
             """
             ...
 
-        async def aio(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+        async def aio(self, /, *, name: str | None = None, checkpoint: str | None = None, wait: bool = True) -> Sandbox:
             """Fork this sandbox's current state. A running sandbox is paused for the
             snapshot and resumed once the fork is accepted; a paused or stopped
             sandbox is left as it is. The fork names the checkpoint the pause
@@ -1344,10 +1349,24 @@ class Sandbox:
             the request lands. Resuming the source is best effort: the child is
             returned even if the source could not be resumed, and this sandbox is
             updated in place with the source's state after the fork.
+
+            Pass ``checkpoint`` (the ``checkpoint`` of an earlier pause or stop, from
+            any session) to fork that saved state instead; the source is then left
+            untouched. The fork resumes with memory if that session ended in a
+            pause and cold-boots otherwise.
             """
             ...
 
     fork: __fork_spec
+
+    class ___post_fork_spec(typing_extensions.Protocol):
+        def __call__(self, /, name: str | None, checkpoint: str | None, wait: bool) -> Sandbox:
+            ...
+
+        async def aio(self, /, name: str | None, checkpoint: str | None, wait: bool) -> Sandbox:
+            ...
+
+    _post_fork: ___post_fork_spec
 
     class __expose_port_spec(typing_extensions.Protocol):
         def __call__(self, /, port: int) -> str:

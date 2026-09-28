@@ -276,6 +276,18 @@ operation is accepted. `sandbox.exec()` always waits for process exit.
 the fork is accepted. A paused or stopped sandbox is forked in place and left as
 it is.
 
+To fork an earlier state, pass the `checkpoint` that pause or stop returned, from
+any session. The source is left untouched, and the fork resumes with memory if
+that session ended in a pause, or cold-boots otherwise:
+
+```python
+paused = sandbox.pause()
+step = paused.checkpoint
+sandbox.resume()
+# ... later, even after more pauses and resumes:
+replay = sandbox.fork(name="replay-step", checkpoint=step)
+```
+
 ### Delegations
 
 A delegation grants a client exclusive write access to an inode on a shared

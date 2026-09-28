@@ -544,6 +544,36 @@ test("fork creates a named branch and waits for it to start", async () => {
   });
 });
 
+test("fork of a named checkpoint posts it without pausing or resuming the source", async () => {
+  vi.useFakeTimers();
+  const posts: { path: string; options: any }[] = [];
+  const client = {
+    POST: async (path: string, options: unknown) => {
+      posts.push({ path, options });
+      return ok(sandboxWire("pending", "0198-fork"));
+    },
+    GET: async () => ok(sandboxWire("running", "0198-fork")),
+  } as unknown as ApiClient;
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const forking = sandbox.fork({ checkpoint: "sandbox-0198-sandbox-epoch-1" });
+  await vi.advanceTimersByTimeAsync(500);
+  const fork = await forking;
+
+  assert.equal(fork.id, "0198-fork");
+  assert.equal(fork.status, "running");
+  assert.equal(sandbox.status, "running");
+  assert.deepEqual(posts, [
+    {
+      path: "/api/sandboxes/{sid}/fork",
+      options: {
+        params: { path: { sid: "0198-sandbox" }, query: { wait: true } },
+        body: { name: undefined, checkpoint: "sandbox-0198-sandbox-epoch-1" },
+      },
+    },
+  ]);
+});
+
 test("fork pauses a running sandbox and resumes it once the fork is accepted", async () => {
   vi.useFakeTimers();
   const calls: Array<{ method: string; path: string; sid: string; wait?: boolean }> = [];

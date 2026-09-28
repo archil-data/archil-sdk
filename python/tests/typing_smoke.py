@@ -79,6 +79,7 @@ def sync_usage() -> None:
     sandbox = sandbox.set_timeout(3600)
     sandbox = sandbox.set_timeout(idle_ttl_seconds=300)
     sandbox = sandbox.set_timeout(3600, idle_ttl_seconds=0)
+    _checkpoint_fork: Sandbox = sandbox.fork(name="branch", checkpoint="sandbox-trial-epoch-1")
     _idle_ttl: int = sandbox.idle_ttl_seconds
     _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
     module_sandbox = archil.get_sandbox(module_sandbox.id)
@@ -143,6 +144,7 @@ async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
         sandbox = await client.sandboxes.create.aio(name="trial", idle_ttl_seconds=300, ports=[3000])
         _hostname: str = await sandbox.expose_port.aio(3000)
+        _async_fork: Sandbox = await sandbox.fork.aio(checkpoint="sandbox-trial-epoch-1", wait=False)
         _ports: list[SandboxEndpoint] = await sandbox.list_ports.aio()
         await sandbox.unexpose_port.aio(3000)
         port_token: CreatedSandboxPortToken = await sandbox.create_port_token.aio(3000, ttl="1h")
