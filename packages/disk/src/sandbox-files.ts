@@ -23,23 +23,26 @@ export interface SandboxFileUploadOptions {
 
 const DOWNLOAD_CHUNK_BYTES = 512 * 1024;
 
+// mktemp creates each temp file 0600, so other guest users never see
+// transfer contents, even from a temp file a killed transfer leaves behind.
 const UPLOAD_COMMAND = `set -eu
 mkdir -p "$ARCHIL_FILE_PARENT"
-trap 'rm -f "$ARCHIL_FILE_TEMP"' EXIT HUP INT TERM
-: > "$ARCHIL_FILE_TEMP"
-cat > "$ARCHIL_FILE_TEMP"
-chmod "$ARCHIL_FILE_MODE" "$ARCHIL_FILE_TEMP"
-mv -f "$ARCHIL_FILE_TEMP" "$ARCHIL_FILE_TARGET"
+temp=$(mktemp "$ARCHIL_FILE_PARENT/.archil-upload.XXXXXX")
+trap 'rm -f "$temp"' EXIT HUP INT TERM
+cat > "$temp"
+chmod "$ARCHIL_FILE_MODE" "$temp"
+mv -f "$temp" "$ARCHIL_FILE_TARGET"
 trap - EXIT HUP INT TERM`;
 
 const DOWNLOAD_COMMAND = `set -eu
-trap 'rm -f "$ARCHIL_FILE_TEMP"' EXIT HUP INT TERM
+temp=$(mktemp "\${TMPDIR:-/tmp}/.archil-download.XXXXXX")
+trap 'rm -f "$temp"' EXIT HUP INT TERM
 exec 3< "$ARCHIL_FILE_PATH"
 while IFS= read -r count; do
-    dd bs="$count" count=1 <&3 > "$ARCHIL_FILE_TEMP" 2>/dev/null
-    size=$(wc -c < "$ARCHIL_FILE_TEMP")
+    dd bs="$count" count=1 <&3 > "$temp" 2>/dev/null
+    size=$(wc -c < "$temp")
     printf '%s\n' "$size"
-    cat "$ARCHIL_FILE_TEMP"
+    cat "$temp"
     [ "$size" -eq "$count" ] || break
 done`;
 
@@ -160,7 +163,6 @@ export class SandboxFiles {
         env: {
           ARCHIL_FILE_PARENT: parent,
           ARCHIL_FILE_TARGET: path,
-          ARCHIL_FILE_TEMP: `${parent}/.archil-upload-${transferId()}`,
           ARCHIL_FILE_MODE: mode.toString(8),
         },
       });
@@ -187,10 +189,7 @@ export class SandboxFiles {
     let process: SandboxProcess | undefined;
     try {
       process = await this._sandbox.run(DOWNLOAD_COMMAND, {
-        env: {
-          ARCHIL_FILE_PATH: path,
-          ARCHIL_FILE_TEMP: `/tmp/.archil-download-${transferId()}`,
-        },
+        env: { ARCHIL_FILE_PATH: path },
         onOutput: reader.onOutput,
         collectOutput: false,
       });
@@ -281,10 +280,6 @@ async function abort(process: SandboxProcess): Promise<void> {
   try {
     await process.kill();
   } catch {}
-}
-
-function transferId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
