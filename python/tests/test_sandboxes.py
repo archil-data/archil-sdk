@@ -23,7 +23,7 @@ from archil import (
     SandboxStartError,
     SandboxTerminal,
 )
-from conftest import error_envelope, ok_envelope
+from conftest import CP_BASE, S3_BASE, error_envelope, ok_envelope
 
 
 NOW = "2026-08-14T12:00:00Z"
@@ -249,8 +249,8 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
     calls = []
 
     class RecordingTransport:
-        async def request_json(self, method, path, *, retry="none", **_kwargs):
-            calls.append((method, path, retry))
+        async def request_json(self, method, path, *, retry="none", retry_throttled=False, **_kwargs):
+            calls.append((method, path, retry, retry_throttled))
             if method == "GET" and path == "/api/sandboxes":
                 return {"sandboxes": []}
             if path.endswith("/network"):
@@ -258,7 +258,7 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
             return sandbox_json()
 
         async def request_empty(self, method, path, *, retry="none", **_kwargs):
-            calls.append((method, path, retry))
+            calls.append((method, path, retry, False))
 
     transport = RecordingTransport()
     sandboxes = _Sandboxes(transport)
@@ -279,20 +279,20 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
     await sandbox.delete()
 
     assert calls == [
-        ("GET", "/api/sandboxes", "transient"),
-        ("GET", "/api/sandboxes/sbx-1", "transient"),
-        ("POST", "/api/sandboxes", "connect"),
-        ("GET", "/api/sandboxes/sbx-1", "transient"),
-        ("POST", "/api/sandboxes/sbx-1/start", "transient"),
-        ("POST", "/api/sandboxes/sbx-1/stop", "transient"),
-        ("POST", "/api/sandboxes/sbx-1/pause", "transient"),
-        ("POST", "/api/sandboxes/sbx-1/resume", "transient"),
-        ("POST", "/api/sandboxes/sbx-1/pause", "transient"),
-        ("POST", "/api/sandboxes/sbx-1/fork", "connect"),
-        ("GET", "/api/sandboxes/sbx-1/network", "transient"),
-        ("PUT", "/api/sandboxes/sbx-1/network", "transient"),
-        ("POST", "/api/sandboxes/sbx-1/timeout", "transient"),
-        ("DELETE", "/api/sandboxes/sbx-1", "transient"),
+        ("GET", "/api/sandboxes", "transient", False),
+        ("GET", "/api/sandboxes/sbx-1", "transient", False),
+        ("POST", "/api/sandboxes", "connect", True),
+        ("GET", "/api/sandboxes/sbx-1", "transient", False),
+        ("POST", "/api/sandboxes/sbx-1/start", "transient", True),
+        ("POST", "/api/sandboxes/sbx-1/stop", "transient", False),
+        ("POST", "/api/sandboxes/sbx-1/pause", "transient", False),
+        ("POST", "/api/sandboxes/sbx-1/resume", "transient", True),
+        ("POST", "/api/sandboxes/sbx-1/pause", "transient", False),
+        ("POST", "/api/sandboxes/sbx-1/fork", "connect", True),
+        ("GET", "/api/sandboxes/sbx-1/network", "transient", False),
+        ("PUT", "/api/sandboxes/sbx-1/network", "transient", False),
+        ("POST", "/api/sandboxes/sbx-1/timeout", "transient", False),
+        ("DELETE", "/api/sandboxes/sbx-1", "transient", False),
     ]
 
 
@@ -355,6 +355,165 @@ async def test_sandbox_lifecycle_retries_transient_failures(archil, router, monk
 
     assert stopped.status == "stopped"
     assert stop_attempts == 2
+
+
+def _capacity_error(code: str = "no_capacity") -> httpx.Response:
+    return httpx.Response(503, json={"success": False, "error": "No sandbox capacity is available; retry", "code": code})
+
+
+def _client(router, **kwargs):
+    return archil_module.Archil(
+        api_key="key-test",
+        region="aws-us-east-1",
+        base_url=CP_BASE,
+        s3_base_url=S3_BASE,
+        _http_transport=httpx.MockTransport(router.handle),
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["no_capacity", "runtime_retryable"])
+async def test_sandbox_create_waits_out_capacity_errors(archil, router, monkeypatch, code):
+    import archil._http as http_module
+
+    attempts = 0
+
+    def handler(_request):
+        nonlocal attempts
+        attempts += 1
+        return _capacity_error(code) if attempts < 4 else ok_envelope(sandbox_json())
+
+    monkeypatch.setattr(http_module, "_throttle_backoff", lambda _attempt, _retry_after: 0)
+    router.set(handler)
+
+    sandbox = await archil.sandboxes.create.aio(wait=False)
+
+    assert sandbox.id == "sbx-1"
+    assert attempts == 4
+
+
+@pytest.mark.asyncio
+async def test_sandbox_resume_waits_out_capacity_errors(archil, router, monkeypatch):
+    import archil._http as http_module
+
+    resumes = 0
+
+    def handler(request):
+        nonlocal resumes
+        if not request.url.path.endswith("/resume"):
+            return ok_envelope(sandbox_json("paused"))
+        resumes += 1
+        return _capacity_error("runtime_retryable") if resumes < 3 else ok_envelope(sandbox_json("pending"))
+
+    monkeypatch.setattr(http_module, "_throttle_backoff", lambda _attempt, _retry_after: 0)
+    router.set(handler)
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+
+    resumed = await sandbox.resume.aio(wait=False)
+
+    assert resumed.status == "pending"
+    assert resumes == 3
+
+
+@pytest.mark.parametrize(
+    ("configure", "backoff"),
+    [({"max_throttle_wait": 0}, 1.0), ({"max_throttle_wait": 5}, 10.0), ({"env": "0"}, 1.0)],
+)
+def test_max_throttle_wait_bounds_capacity_retries(router, monkeypatch, configure, backoff):
+    import archil._http as http_module
+
+    attempts = 0
+
+    def handler(_request):
+        nonlocal attempts
+        attempts += 1
+        return _capacity_error()
+
+    monkeypatch.setattr(http_module, "_throttle_backoff", lambda _attempt, _retry_after: backoff)
+    router.set(handler)
+    if "env" in configure:
+        monkeypatch.setenv("ARCHIL_MAX_THROTTLE_WAIT", configure["env"])
+        client = _client(router)
+    else:
+        client = _client(router, **configure)
+
+    with pytest.raises(ArchilApiError) as exc_info:
+        client.sandboxes.create(wait=False)
+
+    assert exc_info.value.code == "no_capacity"
+    assert attempts == 1
+
+
+def test_sandbox_create_does_not_wait_out_other_503s(archil, router):
+    attempts = 0
+
+    def handler(_request):
+        nonlocal attempts
+        attempts += 1
+        return error_envelope(503, "temporarily unavailable")
+
+    router.set(handler)
+
+    with pytest.raises(ArchilApiError):
+        archil.sandboxes.create(wait=False)
+
+    assert attempts == 1
+
+
+def test_fork_of_paused_source_waits_for_capacity(archil, router, monkeypatch):
+    import archil._http as http_module
+
+    forks = 0
+
+    def handler(request):
+        nonlocal forks
+        if request.url.path.endswith("/fork"):
+            forks += 1
+            return _capacity_error() if forks < 3 else ok_envelope(sandbox_json(sandbox_id="sbx-fork", name="forked"))
+        return ok_envelope(sandbox_json("paused"))
+
+    monkeypatch.setattr(http_module, "_throttle_backoff", lambda _attempt, _retry_after: 0)
+    router.set(handler)
+
+    fork = archil.sandboxes.get("sbx-1").fork(wait=False)
+
+    assert fork.id == "sbx-fork"
+    assert forks == 3
+
+
+def test_fork_of_running_source_does_not_wait_for_capacity(archil, router, monkeypatch):
+    import archil._http as http_module
+    import archil._sandbox as sandbox_module
+
+    monkeypatch.setattr(sandbox_module, "_POLL_INTERVAL_SECONDS", 0)
+    monkeypatch.setattr(http_module, "_throttle_backoff", lambda _attempt, _retry_after: 0)
+
+    def handler(request):
+        if request.url.path.endswith("/pause"):
+            return ok_envelope(sandbox_json("pausing"))
+        if request.url.path.endswith("/fork"):
+            return _capacity_error()
+        if request.url.path.endswith("/resume"):
+            return ok_envelope(sandbox_json("pending"))
+        return ok_envelope(sandbox_json("paused"))
+
+    router.set(handler)
+
+    with pytest.raises(ArchilApiError) as exc_info:
+        archil.sandboxes.get("sbx-1").fork()
+
+    assert exc_info.value.code == "no_capacity"
+    posts = [request.path.rsplit("/", 1)[-1] for request in router.requests if request.method == "POST"]
+    assert posts == ["pause", "fork", "resume"]
+
+
+def test_throttle_backoff_prefers_retry_after():
+    from archil._http import _throttle_backoff
+
+    assert _throttle_backoff(0, "7") == 7
+    assert 0.25 <= _throttle_backoff(0, None) <= 0.5
+    assert 5 <= _throttle_backoff(10, "soon") <= 10
 
 
 def test_create_and_list_sandboxes(archil, router):

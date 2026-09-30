@@ -72,6 +72,12 @@ all_sandboxes = archil.list_sandboxes()
 using_disk = archil.list_sandboxes(disk="dsk-abc123")
 ```
 
+When the region has no capacity, sandbox create, start, resume, and fork back off
+and retry until it does, logging a warning. Bound the wait with
+`Archil(max_throttle_wait=seconds)` or `ARCHIL_MAX_THROTTLE_WAIT`; `0` raises the
+503 immediately. Forking a running sandbox never waits, so the source is not left
+paused.
+
 Expose TCP ports publicly when creating a sandbox or later with `expose_port`:
 
 ```python

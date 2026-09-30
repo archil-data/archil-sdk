@@ -20,8 +20,12 @@ class Archil:
     directly to block, or use the ``.aio`` attribute for a coroutine
     (e.g. ``await archil.exec.aio(...)``). Also usable as an (async) context
     manager: ``with Archil(...) as a:`` / ``async with Archil(...) as a:``.
+
+    Sandbox create, start, resume, and fork keep retrying while the region has
+    no capacity. ``max_throttle_wait`` (or ``ARCHIL_MAX_THROTTLE_WAIT``) bounds
+    that wait in seconds; unset waits indefinitely and ``0`` raises at once.
     """
-    def __init__(self, *, api_key: str | None = None, region: str | None = None, base_url: str | None = None, s3_base_url: str | None = None, timeout: float | None = 30.0, _http_transport=None) -> None:
+    def __init__(self, *, api_key: str | None = None, region: str | None = None, base_url: str | None = None, s3_base_url: str | None = None, timeout: float | None = 30.0, max_throttle_wait: float | None = None, _http_transport=None) -> None:
         ...
 
     @property
