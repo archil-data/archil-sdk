@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import threading
+import time
 import weakref
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
@@ -28,6 +30,16 @@ _RETRY_BASE_SECONDS = 0.1
 _RETRY_CAP_SECONDS = 2.0
 _TRANSIENT_STATUSES = frozenset({429, 500, 502, 503, 504})
 _CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+# A capacity 503 leaves no sandbox behind (the control plane deletes one the
+# runtime rejected), so resending is safe for as long as the caller will wait.
+_THROTTLED_CODES = frozenset({"no_capacity", "runtime_retryable"})
+_THROTTLE_BASE_SECONDS = 0.5
+_THROTTLE_CAP_SECONDS = 10.0
+_THROTTLE_WARNING_INTERVAL_SECONDS = 60.0
+DEFAULT_MAX_THROTTLE_WAIT = 120.0
+
+logger = logging.getLogger("archil")
 
 _CONTROL_PLANE_LIMITS = httpx.Limits(
     max_connections=100,
@@ -56,6 +68,23 @@ _shared_cp_clients_lock = threading.Lock()
 def _retry_delay(attempt: int) -> float:
     ceiling = min(_RETRY_CAP_SECONDS, _RETRY_BASE_SECONDS * (2**attempt))
     return random.random() * ceiling
+
+
+def _throttle_backoff(attempt: int, retry_after: Optional[str]) -> float:
+    if retry_after is not None:
+        try:
+            return max(float(retry_after), 0.1)
+        except ValueError:
+            pass
+    ceiling = min(_THROTTLE_CAP_SECONDS, _THROTTLE_BASE_SECONDS * (2**attempt))
+    return ceiling * (0.5 + random.random() / 2)
+
+
+def _json_body(resp: httpx.Response) -> Optional[dict]:
+    try:
+        return resp.json()
+    except ValueError:
+        return None
 
 
 def _auth_header(api_key: str) -> str:
@@ -132,8 +161,10 @@ class _Transport:
         s3_base_url: Optional[str],
         transport: Optional[httpx.AsyncBaseTransport] = None,
         timeout: Optional[float] = DEFAULT_TIMEOUT,
+        max_throttle_wait: float = DEFAULT_MAX_THROTTLE_WAIT,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._max_throttle_wait = max_throttle_wait
         self._s3_base_url = (s3_base_url or "").rstrip("/")
         self._headers = {"Authorization": _auth_header(api_key), "User-Agent": USER_AGENT}
         # An injected transport (tests use httpx.MockTransport) routes requests
@@ -185,9 +216,14 @@ class _Transport:
         params: Optional[dict] = None,
         json: Optional[Any] = None,
         retry: _RetryMode = "none",
+        retry_throttled: bool = False,
     ) -> Any:
-        """Send a control-plane request and unwrap the ``{success, data}`` envelope."""
-        body = await self._request_envelope(method, path, params=params, json=json, retry=retry)
+        """Send a control-plane request and unwrap the ``{success, data}`` envelope.
+        ``retry_throttled`` keeps resending while the control plane reports no
+        capacity (or rate-limits), up to the client's ``max_throttle_wait``."""
+        body = await self._request_envelope(
+            method, path, params=params, json=json, retry=retry, retry_throttled=retry_throttled
+        )
         return body.get("data")
 
     async def request_json_page(
@@ -224,10 +260,14 @@ class _Transport:
         json,
         allow_empty: bool = False,
         retry: _RetryMode = "none",
+        retry_throttled: bool = False,
     ) -> dict:
         # Drop None-valued query params so optional args don't serialize as "None".
         clean_params = {k: v for k, v in (params or {}).items() if v is not None} or None
         attempt = 0
+        throttled_attempt = 0
+        started = time.monotonic()
+        last_warning: Optional[float] = None
         while True:
             try:
                 client = self._cp_client()
@@ -246,15 +286,28 @@ class _Transport:
                 if retry != "transient" or attempt >= _MAX_RETRIES:
                     raise
             else:
+                body = _json_body(resp)
+                delay = self._throttle_delay(resp, body, throttled_attempt, started) if retry_throttled else None
+                if delay is not None:
+                    now = time.monotonic()
+                    if last_warning is None or now - last_warning >= _THROTTLE_WARNING_INTERVAL_SECONDS:
+                        last_warning = now
+                        logger.warning(
+                            "%s %s: %s (HTTP %d); retrying (max_throttle_wait=%ss).",
+                            method,
+                            path,
+                            (body or {}).get("error") or "throttled",
+                            resp.status_code,
+                            self._max_throttle_wait,
+                        )
+                    await asyncio.sleep(delay)
+                    throttled_attempt += 1
+                    attempt = 0
+                    continue
                 if retry != "transient" or resp.status_code not in _TRANSIENT_STATUSES or attempt >= _MAX_RETRIES:
                     break
             await asyncio.sleep(_retry_delay(attempt))
             attempt += 1
-        body: Optional[dict]
-        try:
-            body = resp.json()
-        except ValueError:
-            body = None
         if allow_empty and resp.is_success and body is None:
             return {}
         if not body or not body.get("success"):
@@ -264,6 +317,15 @@ class _Transport:
             code = body.get("code") if body else None
             raise ArchilApiError(message, resp.status_code, code)
         return body
+
+    def _throttle_delay(self, resp: httpx.Response, body: Optional[dict], attempt: int, started: float) -> Optional[float]:
+        code = body.get("code") if body else None
+        if resp.status_code != 429 and not (resp.status_code == 503 and code in _THROTTLED_CODES):
+            return None
+        delay = _throttle_backoff(attempt, resp.headers.get("retry-after"))
+        if time.monotonic() - started + delay >= self._max_throttle_wait:
+            return None
+        return delay
 
     async def s3_request(
         self,
