@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Optional, Union
 
 from ._disks import _Disks
-from ._http import _Transport
+from ._http import DEFAULT_MAX_THROTTLE_WAIT, _Transport
 from ._models import ExecResult
 from ._regions import derive_s3_base_url, resolve_base_url
 from ._sandboxes import _Sandboxes
@@ -54,7 +54,11 @@ class _Archil:
     Every method is available both synchronously and asynchronously: call it
     directly to block, or use the ``.aio`` attribute for a coroutine
     (e.g. ``await archil.exec.aio(...)``). Also usable as an (async) context
-    manager: ``with Archil(...) as a:`` / ``async with Archil(...) as a:``."""
+    manager: ``with Archil(...) as a:`` / ``async with Archil(...) as a:``.
+
+    Sandbox create, start, resume, and fork keep retrying while the region has
+    no capacity, for up to ``max_throttle_wait`` (or ``ARCHIL_MAX_THROTTLE_WAIT``)
+    seconds, 10 by default; ``0`` raises at once and ``inf`` waits indefinitely."""
 
     def __init__(
         self,
@@ -64,10 +68,13 @@ class _Archil:
         base_url: Optional[str] = None,
         s3_base_url: Optional[str] = None,
         timeout: Optional[float] = 30.0,
+        max_throttle_wait: Optional[float] = None,
         _http_transport=None,
     ) -> None:
         api_key = api_key or os.environ.get("ARCHIL_API_KEY")
         region = region or os.environ.get("ARCHIL_REGION")
+        if max_throttle_wait is None:
+            max_throttle_wait = float(os.environ.get("ARCHIL_MAX_THROTTLE_WAIT") or DEFAULT_MAX_THROTTLE_WAIT)
         if not api_key:
             raise ValueError("Missing API key: pass api_key or set the ARCHIL_API_KEY environment variable")
         if not region:
@@ -79,7 +86,14 @@ class _Archil:
         control_base_url = base_url or resolve_base_url(region)
         s3 = s3_base_url or os.environ.get("ARCHIL_S3_BASE_URL") or derive_s3_base_url(control_base_url)
 
-        self._transport = _Transport(control_base_url, api_key, s3, transport=_http_transport, timeout=timeout)
+        self._transport = _Transport(
+            control_base_url,
+            api_key,
+            s3,
+            transport=_http_transport,
+            timeout=timeout,
+            max_throttle_wait=max_throttle_wait,
+        )
         self._disks = _Disks(self._transport, region)
         self._sandboxes = _Sandboxes(self._transport)
         self._tokens = _Tokens(self._transport)
