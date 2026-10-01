@@ -17,6 +17,16 @@ export type { ListDisksOptions, CreateDiskResult, DiskListPage } from "./disks.j
 export { Tokens } from "./tokens.js";
 export type { ListTokensOptions } from "./tokens.js";
 
+export { Images } from "./images.js";
+export type {
+  BuildImageOptions,
+  BuildImageRequest,
+  Image,
+  ImageFailureReason,
+  ImageStatus,
+  RegistryAuth,
+} from "./images.js";
+
 export { Sandboxes } from "./sandboxes.js";
 export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
 
@@ -93,6 +103,7 @@ export {
   ArchilError,
   ArchilApiError,
   ArchilS3Error,
+  ImageBuildError,
   SandboxFileTransferError,
   SandboxPauseError,
 } from "./errors.js";

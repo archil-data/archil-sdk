@@ -11,10 +11,10 @@ import typing_extensions
 import websockets.asyncio.client
 
 class Archil:
-    """Top-level Archil client. Holds the account-level ``disks``, ``sandboxes``,
-    and ``tokens`` collections and the cross-disk ``exec``. Construct directly
-    for multi-account or multi-region scripts; otherwise use the module-level
-    helpers.
+    """Top-level Archil client. Holds the account-level ``disks``, ``images``,
+    ``sandboxes``, and ``tokens`` collections and the cross-disk ``exec``.
+    Construct directly for multi-account or multi-region scripts; otherwise use
+    the module-level helpers.
 
     Every method is available both synchronously and asynchronously: call it
     directly to block, or use the ``.aio`` attribute for a coroutine
@@ -26,6 +26,10 @@ class Archil:
 
     @property
     def disks(self) -> Disks:
+        ...
+
+    @property
+    def images(self) -> Images:
         ...
 
     @property
@@ -198,6 +202,61 @@ class Disks:
             ...
 
     create: __create_spec
+
+
+class Images:
+    """Account-level sandbox images built from OCI references."""
+    def __init__(self, transport: archil._http._Transport) -> None:
+        ...
+
+    class __get_spec(typing_extensions.Protocol):
+        def __call__(self, /, image_id: str) -> archil._models.Image:
+            ...
+
+        async def aio(self, /, image_id: str) -> archil._models.Image:
+            ...
+
+    get: __get_spec
+
+    class __build_spec(typing_extensions.Protocol):
+        def __call__(self, /, *, source: str, registry_auth: archil._models.RegistryAuth | None = None, timeout: float = 1800.0) -> archil._models.Image:
+            """Build a sandbox image from an OCI reference and wait until it is ready.
+
+            Returns at once when the image is already built from a digest reference
+            and joins a build that is already running. A tag is rebuilt on each
+            call in case it moved, so call this once and reuse ``image_id``.
+            ``registry_auth`` is required for private images on every call; without
+            it ``source`` names the public image. Interrupted builds are requested
+            again up to three times; other failures raise ``ImageBuildError``, and
+            ``TimeoutError`` is raised if the image is not ready within ``timeout``
+            seconds.
+            """
+            ...
+
+        async def aio(self, /, *, source: str, registry_auth: archil._models.RegistryAuth | None = None, timeout: float = 1800.0) -> archil._models.Image:
+            """Build a sandbox image from an OCI reference and wait until it is ready.
+
+            Returns at once when the image is already built from a digest reference
+            and joins a build that is already running. A tag is rebuilt on each
+            call in case it moved, so call this once and reuse ``image_id``.
+            ``registry_auth`` is required for private images on every call; without
+            it ``source`` names the public image. Interrupted builds are requested
+            again up to three times; other failures raise ``ImageBuildError``, and
+            ``TimeoutError`` is raised if the image is not ready within ``timeout``
+            seconds.
+            """
+            ...
+
+    build: __build_spec
+
+    class ___request_spec(typing_extensions.Protocol):
+        def __call__(self, /, body: dict) -> archil._models.Image:
+            ...
+
+        async def aio(self, /, body: dict) -> archil._models.Image:
+            ...
+
+    _request: ___request_spec
 
 
 class Multipart:
@@ -1173,6 +1232,12 @@ class Sandbox:
 
     @property
     def base_image(self) -> str:
+        """Empty for sandboxes created from ``image_id``."""
+        ...
+
+    @property
+    def image_digest(self) -> str:
+        """Digest of the image the sandbox was created from; may be empty."""
         ...
 
     @property
@@ -1523,10 +1588,10 @@ class Sandboxes:
     get: __get_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
+        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, image_id: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
             ...
 
-        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
+        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, image_id: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, wait: bool = True) -> Sandbox:
             ...
 
     create: __create_spec

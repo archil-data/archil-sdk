@@ -415,6 +415,7 @@ def test_create_and_list_sandboxes(archil, router):
     assert sandbox.id == "sbx-1"
     assert sandbox.platform == "amd64"
     assert sandbox.idle_ttl_seconds == 30
+    assert sandbox.image_digest == ""
     assert sandbox.endpoints[0].hostname == "8080.sbx.example.com"
     assert isinstance(sandbox.created_at, datetime)
     assert router.requests[0].query == {"wait": "true"}
@@ -434,6 +435,26 @@ def test_create_and_list_sandboxes(archil, router):
     listed = archil.sandboxes.list(disk="dsk-1")
     assert [item.id for item in listed] == ["sbx-1"]
     assert router.requests[1].query == {"filesystem": "dsk-1"}
+
+
+def test_create_from_image_sends_image_id_and_exposes_digest(archil, router):
+    image_id = "a" * 64
+    responses = [
+        httpx.Response(
+            409, json={"success": False, "error": "image has no successful build", "code": "image_not_ready"}
+        ),
+        ok_envelope(sandbox_json(base_image="", image_digest="sha256:abc")),
+    ]
+    router.set(lambda _request: responses.pop(0))
+
+    with pytest.raises(ArchilApiError) as caught:
+        archil.sandboxes.create(image_id=image_id)
+    sandbox = archil.sandboxes.create(image_id=image_id)
+
+    assert (caught.value.status, caught.value.code) == (409, "image_not_ready")
+    assert sandbox.base_image == ""
+    assert sandbox.image_digest == "sha256:abc"
+    assert [request.json for request in router.requests] == [{"image_id": image_id}] * 2
 
 
 def test_create_surfaces_terminal_start_failure(archil, router, monkeypatch):
@@ -866,6 +887,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "vcpu_count": None,
                 "mem_size_mib": None,
                 "base_image": None,
+                "image_id": None,
                 "env": None,
                 "max_ttl_seconds": None,
                 "idle_ttl_seconds": 0,

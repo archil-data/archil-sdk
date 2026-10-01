@@ -240,6 +240,9 @@ SandboxProcessStatus = Literal["running", "completed", "failed", "cancelled", "t
 SandboxProcessStream = Literal["stdout", "stderr"]
 SandboxPlatform = Literal["arm64", "amd64"]
 SandboxNetworkAction = Literal["allow", "deny"]
+ImageStatus = Literal["building", "ready", "failed"]
+# invalid_source: the registry reported the image missing or denied access. interrupted: the build did not finish.
+ImageFailureReason = Literal["invalid_source", "interrupted"]
 
 
 def _parse_datetime(value: str) -> datetime:
@@ -401,6 +404,7 @@ class SandboxData:
     exit_reason: Optional[str] = None
     idle_ttl_seconds: int = 0
     checkpoint: Optional[str] = None
+    image_digest: str = ""
 
     @classmethod
     def from_json(cls, d: dict) -> "SandboxData":
@@ -422,6 +426,42 @@ class SandboxData:
             last_active_at=_parse_datetime(d["last_active_at"]),
             exit_reason=d.get("exit_reason"),
             checkpoint=d.get("checkpoint"),
+            image_digest=d.get("image_digest", ""),
+        )
+
+
+@dataclass(frozen=True)
+class RegistryAuth:
+    """Registry credentials for a private image. Archil never stores them."""
+
+    username: str
+    password: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class Image:
+    image_id: str
+    source: str
+    private: bool
+    status: ImageStatus
+    created_at: datetime
+    updated_at: datetime
+    digest: Optional[str] = None
+    canonical_source: Optional[str] = None
+    failure_reason: Optional[ImageFailureReason] = None
+
+    @classmethod
+    def from_json(cls, d: dict) -> "Image":
+        return cls(
+            image_id=d["image_id"],
+            source=d["source"],
+            private=d["private"],
+            status=d["status"],
+            created_at=_parse_datetime(d["created_at"]),
+            updated_at=_parse_datetime(d["updated_at"]),
+            digest=d.get("digest"),
+            canonical_source=d.get("canonical_source"),
+            failure_reason=d.get("failure_reason"),
         )
 
 

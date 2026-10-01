@@ -183,6 +183,32 @@ const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
 
+Build a sandbox image from an OCI reference, then create sandboxes from it:
+
+```ts
+const image = await client.images.build({
+  source: "ghcr.io/acme/agent:v3",
+  // Private images only.
+  registryAuth: { username: "bot", password: process.env.GHCR_TOKEN! },
+});
+const agent = await client.sandboxes.create({ imageId: image.imageId });
+console.log(agent.imageDigest);
+```
+
+`build()` waits until the image is ready, joining a build already in progress.
+It times out after 30 minutes by default (`{ timeoutSeconds }` changes this)
+with an `ArchilError` whose `code` is `IMAGE_BUILD_TIMEOUT`. Building a tag
+again rebuilds it in case the tag moved, so build once and reuse `imageId`; a
+built digest reference (`repo@sha256:...`) returns immediately. Archil never
+stores registry credentials: pass `registryAuth` on every build of a private
+image, since without it the same `source` names the public image. Interrupted
+builds are requested again up to three times. A failed build throws
+`ImageBuildError`; its `reason` is `invalid_source` when the registry reported
+the image missing or denied access, or `interrupted`. `images.get(imageId)`
+returns the image's current state. `imageId` cannot be combined with
+`baseImage`, and creating a sandbox from an image without a successful build
+fails with a 409 `ArchilApiError` whose `code` is `image_not_ready`.
+
 Expose TCP ports publicly when creating a sandbox or later with `exposePort`:
 
 ```ts
