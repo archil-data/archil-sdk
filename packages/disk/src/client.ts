@@ -215,10 +215,11 @@ export async function unwrapPage<T>(
   const { data: body, error, response } = await promise;
 
   if (error || !body) {
-    const errBody = error as { error?: string } | undefined;
+    const errBody = error as { error?: string; code?: string } | undefined;
     throw new ArchilApiError(
       errBody?.error ?? `API request failed with status ${response.status}`,
       response.status,
+      errBody?.code,
     );
   }
 
@@ -226,6 +227,7 @@ export async function unwrapPage<T>(
     throw new ArchilApiError(
       (body as unknown as { error?: string }).error ?? "Unknown API error",
       response.status,
+      (body as unknown as { code?: string }).code,
     );
   }
 
@@ -243,10 +245,11 @@ export async function unwrapEmpty(
   if (!error && response.status === 204) return;
 
   if (error || !body) {
-    const errBody = error as { error?: string } | undefined;
+    const errBody = error as { error?: string; code?: string } | undefined;
     throw new ArchilApiError(
       errBody?.error ?? `API request failed with status ${response.status}`,
       response.status,
+      errBody?.code,
     );
   }
 
@@ -254,6 +257,7 @@ export async function unwrapEmpty(
     throw new ArchilApiError(
       body.error ?? "Unknown API error",
       response.status,
+      (body as { code?: string }).code,
     );
   }
 }

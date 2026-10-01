@@ -79,7 +79,13 @@ class _Sandbox:
 
     @property
     def base_image(self) -> str:
+        """Empty for sandboxes created from ``image_id``."""
         return self._data.base_image
+
+    @property
+    def image_digest(self) -> str:
+        """Digest of the image the sandbox was created from; may be empty."""
+        return self._data.image_digest
 
     @property
     def platform(self) -> Optional[SandboxPlatform]:

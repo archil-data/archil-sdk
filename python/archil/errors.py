@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ._models import Image
 from ._s3xml import parse_error
 
 
@@ -43,6 +44,15 @@ class SandboxPauseError(ArchilError):
         detail = f": {reason}" if reason else ""
         super().__init__(f"Sandbox entered {state} before it paused{detail}", 409, "SANDBOX_PAUSE_FAILED")
         self.latest = sandbox
+
+
+class ImageBuildError(ArchilError):
+    """The image build failed; ``reason`` is the server's failure code and latest holds the image."""
+
+    def __init__(self, image: Image) -> None:
+        super().__init__(f"Image {image.image_id} build failed: {image.failure_reason}", 409, "IMAGE_BUILD_FAILED")
+        self.reason = image.failure_reason
+        self.latest = image
 
 
 class SandboxFileTransferError(ArchilError):
