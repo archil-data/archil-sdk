@@ -28,6 +28,8 @@ export interface CreateSandboxRequest {
    * `alpine@sha256:<digest>`.
    */
   baseImage?: string;
+  /** Ready image from `images.build()`. Cannot be combined with `baseImage`. */
+  imageId?: string;
   env?: Record<string, string>;
   maxTtlSeconds?: number;
   /** Seconds without a direct process connection before pausing. Omitted or zero disables idle expiry. */
@@ -94,6 +96,7 @@ export class Sandboxes {
       vcpu_count: request.vcpuCount,
       mem_size_mib: request.memSizeMiB,
       base_image: request.baseImage,
+      image_id: request.imageId,
       env: request.env,
       max_ttl_seconds: request.maxTtlSeconds,
       idle_ttl_seconds: request.idleTtlSeconds,
@@ -106,7 +109,7 @@ export class Sandboxes {
         () =>
           this._client.POST("/api/sandboxes", {
             params: { query: { wait: options.wait ?? true } },
-            body: body as components["schemas"]["CreateSandboxRequest"],
+            body: body as components["schemas"]["CreateSandboxRequest"] & { image_id?: string },
           }),
         "connect",
       ),

@@ -32,6 +32,7 @@ export type SandboxNetwork = Omit<components["schemas"]["SandboxNetwork"], "egre
 /** @internal */
 export type SandboxWire = components["schemas"]["Sandbox"] & {
   idle_ttl_seconds?: number;
+  image_digest?: string;
 };
 
 export type SandboxStatus = components["schemas"]["SandboxState"];
@@ -85,7 +86,10 @@ export interface SandboxResponse {
   status: SandboxStatus;
   vcpuCount: number;
   memSizeMiB: number;
+  /** Empty for sandboxes created from `imageId`. */
   baseImage: string;
+  /** Digest of the image the sandbox was created from; may be empty. */
+  imageDigest: string;
   platform?: "arm64" | "amd64";
   maxTtlSeconds: number;
   idleTtlSeconds: number;
@@ -184,6 +188,7 @@ export class Sandbox {
   vcpuCount!: number;
   memSizeMiB!: number;
   baseImage!: string;
+  imageDigest!: string;
   platform?: "arm64" | "amd64";
   maxTtlSeconds!: number;
   idleTtlSeconds!: number;
@@ -218,6 +223,7 @@ export class Sandbox {
     this.vcpuCount = data.vcpu_count;
     this.memSizeMiB = data.mem_size_mib;
     this.baseImage = data.base_image;
+    this.imageDigest = data.image_digest ?? "";
     this.platform = data.platform;
     this.maxTtlSeconds = data.max_ttl_seconds;
     this.idleTtlSeconds = data.idle_ttl_seconds ?? 0;
@@ -240,6 +246,7 @@ export class Sandbox {
       vcpuCount: this.vcpuCount,
       memSizeMiB: this.memSizeMiB,
       baseImage: this.baseImage,
+      imageDigest: this.imageDigest,
       platform: this.platform,
       maxTtlSeconds: this.maxTtlSeconds,
       idleTtlSeconds: this.idleTtlSeconds,

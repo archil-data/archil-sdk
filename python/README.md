@@ -72,6 +72,36 @@ all_sandboxes = archil.list_sandboxes()
 using_disk = archil.list_sandboxes(disk="dsk-abc123")
 ```
 
+Build a sandbox image from an OCI reference, then create sandboxes from it:
+
+```python
+import os
+from archil import Archil, RegistryAuth
+
+client = Archil()
+image = client.images.build(
+    source="ghcr.io/acme/agent:v3",
+    # Private images only.
+    registry_auth=RegistryAuth(username="bot", password=os.environ["GHCR_TOKEN"]),
+)
+agent = client.sandboxes.create(image_id=image.image_id)
+print(agent.image_digest)
+```
+
+`build()` waits until the image is ready, joining a build already in progress.
+It raises `TimeoutError` after 30 minutes by default (`timeout=` takes seconds).
+Building a tag again rebuilds it in case the tag moved, so build once and reuse
+`image_id`; a built digest reference (`repo@sha256:...`) returns immediately.
+Archil never stores registry credentials: pass `registry_auth` on every build
+of a private image, since without it the same `source` names the public image.
+Interrupted builds are requested again up to three times. A failed build raises
+`ImageBuildError`; its `reason` is `invalid_source` when the registry reported
+the image missing or denied access, or `interrupted`. `images.get(image_id)`
+returns the image's current state, and both methods have `.aio` variants.
+`image_id` cannot be combined with `base_image`, and creating a sandbox from an
+image without a successful build fails with a 409 `ArchilApiError` whose `code`
+is `image_not_ready`.
+
 Expose TCP ports publicly when creating a sandbox or later with `expose_port`:
 
 ```python
