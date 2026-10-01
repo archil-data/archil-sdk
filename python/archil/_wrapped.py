@@ -9,6 +9,7 @@ stub re-declares the model dataclasses as distinct types and breaks pyright)."""
 from ._archil import _Archil
 from ._disk import _Disk, _DiskMultipart
 from ._disks import _Disks
+from ._images import _Images
 from ._sandbox import _Sandbox, _SandboxProcesses
 from ._sandbox_files import _SandboxFiles
 from ._sandbox_process import _SandboxProcess
@@ -19,6 +20,7 @@ from ._workspace import _Workspace
 
 Archil = synchronizer.wrap(_Archil, name="Archil", target_module=__name__)
 Disks = synchronizer.wrap(_Disks, name="Disks", target_module=__name__)
+Images = synchronizer.wrap(_Images, name="Images", target_module=__name__)
 # Wrap Multipart before Disk so its impl->wrapped mapping is registered when the
 # Disk.multipart property's return value is translated.
 Multipart = synchronizer.wrap(_DiskMultipart, name="Multipart", target_module=__name__)
