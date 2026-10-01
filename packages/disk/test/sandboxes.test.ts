@@ -157,6 +157,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     vcpuCount: 2,
     memSizeMiB: 4096,
     baseImage: "ubuntu:26.04",
+    imageDigest: "",
     platform: "arm64",
     maxTtlSeconds: 3600,
     idleTtlSeconds: 30,
@@ -216,6 +217,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
           vcpu_count: 8,
           mem_size_mib: 16384,
           base_image: "ubuntu:26.04",
+          image_id: undefined,
           env: { NODE_ENV: "test" },
           max_ttl_seconds: 600,
           idle_ttl_seconds: 30,
@@ -354,6 +356,29 @@ test.each([undefined, 0, 30])("sandbox creation serializes idle TTL %s", async (
   assert.equal(request.method, "POST");
   assert.equal(request.url.pathname, "/api/sandboxes");
   assert.deepEqual(JSON.parse(request.body), idleTtlSeconds === undefined ? {} : { idle_ttl_seconds: idleTtlSeconds });
+});
+
+test("sandbox creation sends imageId and exposes the image digest", async () => {
+  const imageId = "a".repeat(64);
+  const responses: CannedResponse[] = [
+    json({ success: false, error: "image has no successful build", code: "image_not_ready" }, 409),
+    json({ success: true, data: { ...sandboxWire("running"), base_image: "", image_digest: "sha256:abc" } }),
+  ];
+  const control = await origin(() => responses.shift() ?? json({ success: false, error: "unexpected request" }, 500));
+  const sandboxes = new Sandboxes(createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url }));
+
+  await assert.rejects(sandboxes.create({ imageId }), (error: unknown) => {
+    assert.ok(error instanceof ArchilApiError);
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "image_not_ready");
+    return true;
+  });
+  const sandbox = await sandboxes.create({ imageId });
+  assert.equal(sandbox.baseImage, "");
+  assert.equal(sandbox.imageDigest, "sha256:abc");
+  for (const request of control.requests) {
+    assert.deepEqual(JSON.parse(request.body), { image_id: imageId });
+  }
 });
 
 test("sandbox snapshots from older servers default idle TTL to disabled", () => {

@@ -6,6 +6,7 @@ from typing import Optional, Union
 
 from ._disks import _Disks
 from ._http import _Transport
+from ._images import _Images
 from ._models import ExecResult
 from ._regions import derive_s3_base_url, resolve_base_url
 from ._sandboxes import _Sandboxes
@@ -46,10 +47,10 @@ def _disk_id(mount: object) -> str:
 
 
 class _Archil:
-    """Top-level Archil client. Holds the account-level ``disks``, ``sandboxes``,
-    and ``tokens`` collections and the cross-disk ``exec``. Construct directly
-    for multi-account or multi-region scripts; otherwise use the module-level
-    helpers.
+    """Top-level Archil client. Holds the account-level ``disks``, ``images``,
+    ``sandboxes``, and ``tokens`` collections and the cross-disk ``exec``.
+    Construct directly for multi-account or multi-region scripts; otherwise use
+    the module-level helpers.
 
     Every method is available both synchronously and asynchronously: call it
     directly to block, or use the ``.aio`` attribute for a coroutine
@@ -81,12 +82,17 @@ class _Archil:
 
         self._transport = _Transport(control_base_url, api_key, s3, transport=_http_transport, timeout=timeout)
         self._disks = _Disks(self._transport, region)
+        self._images = _Images(self._transport)
         self._sandboxes = _Sandboxes(self._transport)
         self._tokens = _Tokens(self._transport)
 
     @property
     def disks(self) -> "_Disks":
         return self._disks
+
+    @property
+    def images(self) -> "_Images":
+        return self._images
 
     @property
     def tokens(self) -> "_Tokens":
