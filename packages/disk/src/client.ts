@@ -17,7 +17,16 @@ const createClient = (
     : (createClientDefault as { default: typeof createClientDefault }).default
 );
 
-export type ApiClient = Client<paths>;
+type ApiPaths = paths & {
+  "/api/disks/{id}/connect": {
+    post: {
+      parameters: { path: { id: string } };
+      responses: paths["/api/sandboxes"]["post"]["responses"];
+    };
+  };
+};
+
+export type ApiClient = Client<ApiPaths>;
 
 export interface ArchilTlsOptions {
   /**
@@ -178,7 +187,7 @@ function createPooledFetch(
 export function createApiClient(opts: ApiClientOptions): ApiClient {
   const baseUrl = opts.baseUrl ?? resolveBaseUrl(opts.region);
   const apiKey = `key-${opts.apiKey.replace(/^key-/, '')}`;
-  return createClient<paths>({
+  return createClient<ApiPaths>({
     baseUrl,
     fetch: createPooledFetch(baseUrl, apiKey, opts.tls),
     headers: {
