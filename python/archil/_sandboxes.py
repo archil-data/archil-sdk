@@ -58,7 +58,7 @@ class _Sandboxes:
             if value is not None
         }
         data = await self._transport.request_json(
-            "POST", "/api/sandboxes", params={"wait": wait}, json=body, retry="connect"
+            "POST", "/api/sandboxes", params={"wait": wait}, json=body, retry="connect", retry_throttled=True
         )
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
