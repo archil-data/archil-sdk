@@ -1,5 +1,14 @@
 # @archildata/eve
 
+## 0.0.18
+
+### Patch Changes
+
+- Updated dependencies [df67b51]
+- Updated dependencies [ca2e89e]
+- Updated dependencies [5326863]
+  - disk@1.7.0
+
 ## 0.0.17
 
 ### Patch Changes

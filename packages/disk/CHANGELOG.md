@@ -1,5 +1,13 @@
 # disk
 
+## 1.7.0
+
+### Minor Changes
+
+- df67b51: Add an optional absolute `cwd` to sandbox `run()`, `exec()`, and the legacy `processes.start()` API, including PTYs. Requires runtime support for the `cwd` connection field.
+- ca2e89e: Add `images.build()` to build a sandbox image from an OCI reference, including private registries, and wait until it is ready, plus `images.get()`. Create sandboxes from a built image with `imageId` (`image_id` in Python); sandboxes expose `imageDigest` (`image_digest`). A failed build raises `ImageBuildError` with the server's failure reason. TypeScript `ArchilApiError.code` now carries the control plane's error code, such as `image_not_ready`, as Python already does.
+- 5326863: Add `sandbox.run()` to start a process and return its handle immediately, including PTYs, and `sandbox.attach()` to reconnect by process ID and output cursor. `sandbox.exec()` still waits for the command result. Keep `sandbox.processes.start()`, `sandbox.processes.connect()`, and the `SandboxProcesses` export as deprecated compatibility APIs until the next version.
+
 ## 1.6.0
 
 ### Minor Changes
