@@ -257,7 +257,11 @@ class _Sandbox:
 
     async def start(self, *, wait: bool = True) -> "_Sandbox":
         data = await self._transport.request_json(
-            "POST", f"/api/sandboxes/{self.id}/start", params={"wait": wait}, retry="transient"
+            "POST",
+            f"/api/sandboxes/{self.id}/start",
+            params={"wait": wait},
+            retry="transient",
+            retry_throttled=True,
         )
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
@@ -279,7 +283,11 @@ class _Sandbox:
 
     async def resume(self, *, wait: bool = True) -> "_Sandbox":
         data = await self._transport.request_json(
-            "POST", f"/api/sandboxes/{self.id}/resume", params={"wait": wait}, retry="transient"
+            "POST",
+            f"/api/sandboxes/{self.id}/resume",
+            params={"wait": wait},
+            retry="transient",
+            retry_throttled=True,
         )
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
@@ -307,6 +315,8 @@ class _Sandbox:
                 params={"wait": wait and not resume_after_fork},
                 json=body or None,
                 retry="connect",
+                # Waiting out a capacity shortage would keep a source we paused paused.
+                retry_throttled=not resume_after_fork,
             )
         finally:
             if resume_after_fork:

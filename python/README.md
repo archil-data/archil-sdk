@@ -72,6 +72,12 @@ all_sandboxes = archil.list_sandboxes()
 using_disk = archil.list_sandboxes(disk="dsk-abc123")
 ```
 
+When the region has no capacity, sandbox create, start, resume, and fork back off
+and retry for up to 10 seconds, logging a warning, then raise the 503. Change the
+limit with `Archil(max_throttle_wait=seconds)` or `ARCHIL_MAX_THROTTLE_WAIT`; `0`
+raises immediately and `inf` waits indefinitely. Forking a running sandbox never
+waits, so the source is not left paused.
+
 Build a sandbox image from an OCI reference, then create sandboxes from it:
 
 ```python
