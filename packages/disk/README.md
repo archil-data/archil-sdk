@@ -62,6 +62,7 @@ npx sandbox pause dev
 npx sandbox resume dev --no-wait
 npx sandbox wait dev --status running --timeout 60
 npx sandbox fork dev agent-task
+npx sandbox fork dev replay-step --checkpoint sandbox-<id>-epoch-3
 npx sandbox run dev -- sh -c 'echo "$NODE_ENV"'
 npx sandbox shell dev
 npx sandbox stop dev
@@ -232,6 +233,18 @@ may take a few seconds to propagate, and existing connections remain open.
 
 `fork` pauses a running sandbox while the snapshot is taken and resumes it once the
 fork is accepted. A paused or stopped sandbox is forked in place and left as it is.
+
+To fork an earlier state, pass the `checkpoint` that pause or stop returned, from any
+session. The source is left untouched, and the fork resumes with memory if that
+session ended in a pause, or cold-boots otherwise:
+
+```ts
+const paused = await sandbox.pause();
+const step = paused.checkpoint;
+await sandbox.resume();
+// ... later, even after more pauses and resumes:
+const replay = await sandbox.fork({ name: "replay-step", checkpoint: step });
+```
 
 For private HTTP access, create a port token without exposing the port publicly:
 

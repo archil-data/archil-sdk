@@ -575,6 +575,28 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
     assert stop_request.query == {}
 
 
+
+def test_fork_of_a_named_checkpoint_leaves_the_source_alone(archil, router, monkeypatch):
+    import archil._sandbox as sandbox_module
+
+    monkeypatch.setattr(sandbox_module, "_POLL_INTERVAL_SECONDS", 0)
+
+    def handler(request):
+        if request.url.path.endswith("/fork"):
+            return ok_envelope(sandbox_json("pending", sandbox_id="sbx-fork"))
+        return ok_envelope(sandbox_json(sandbox_id=request.url.path.rsplit("/", 1)[-1]))
+
+    router.set(handler)
+    sandbox = archil.sandboxes.get("sbx-1")
+    fork = sandbox.fork(checkpoint="sandbox-sbx-1-epoch-1")
+
+    assert fork.id == "sbx-fork"
+    assert fork.status == "running"
+    posts = [request for request in router.requests if request.method == "POST"]
+    assert [request.path for request in posts] == ["/api/sandboxes/sbx-1/fork"]
+    assert posts[0].json == {"checkpoint": "sandbox-sbx-1-epoch-1"}
+    assert posts[0].query == {"wait": "true"}
+
 @pytest.mark.asyncio
 async def test_public_ports_use_expose_list_unexpose_api(archil, router):
     endpoint_json = {"port": 3000, "hostname": "3000-sandbox.example.com"}

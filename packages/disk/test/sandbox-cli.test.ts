@@ -175,7 +175,16 @@ test("lifecycle commands pass wait behavior and reject invalid states", async ()
   const source = fakeSandbox({ status: "stopped" });
   const fork = harness([source]);
   await fork.run("fork", "one", "valid-fork", "--no-wait");
-  assert.deepEqual((source.fork as ReturnType<typeof vi.fn>).mock.calls[0], [{ name: "valid-fork", wait: false }]);
+  assert.deepEqual((source.fork as ReturnType<typeof vi.fn>).mock.calls[0], [
+    { name: "valid-fork", checkpoint: undefined, wait: false },
+  ]);
+
+  const pending = fakeSandbox({ status: "pending" });
+  const checkpointFork = harness([pending]);
+  await checkpointFork.run("fork", "one", "--checkpoint", "sandbox-sbx-one-epoch-1", "--no-wait");
+  assert.deepEqual((pending.fork as ReturnType<typeof vi.fn>).mock.calls[0], [
+    { name: undefined, checkpoint: "sandbox-sbx-one-epoch-1", wait: false },
+  ]);
 
   const invalid = harness([fakeSandbox({ status: "pending" })]);
   await assert.rejects(invalid.run("stop", "one"), /while it is pending/);

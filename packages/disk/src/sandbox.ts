@@ -115,6 +115,13 @@ export interface SandboxWaitOptions {
 export interface SandboxForkOptions extends SandboxWaitOptions {
   /** Name for the fork. The server generates one when omitted. */
   name?: string;
+  /**
+   * Fork this saved state instead of the current one: the `checkpoint` of an
+   * earlier pause or stop, from any session. The source is left untouched. The
+   * fork resumes with memory if that session ended in a pause and cold-boots
+   * otherwise.
+   */
+  checkpoint?: string;
 }
 
 export interface SandboxTimeoutOptions {
@@ -454,6 +461,11 @@ export class Sandbox {
    * the source's status afterwards if that matters.
    */
   async fork(options: SandboxForkOptions = {}): Promise<Sandbox> {
+    if (options.checkpoint !== undefined) {
+      const fork = await this._postFork(options.name, options.checkpoint, options.wait ?? true);
+      if (options.wait !== false) await waitForSandboxStart(fork);
+      return fork;
+    }
     // Pause is idempotent: "pausing" means the sandbox was live and is ours to
     // resume; "paused" or "stopped" means it was already inactive.
     const paused = await unwrap(
@@ -471,27 +483,28 @@ export class Sandbox {
 
     // A source we paused resumes as soon as the fork is accepted, not after the child boots.
     const wait = resumeAfterFork ? false : (options.wait ?? true);
-    const body = { name: options.name, checkpoint };
     const fork = await waitWhileSandboxStatus(this, "pausing")
-      .then(() =>
-        unwrap(
-          retryApiRequest(
-            () =>
-              this._client.POST("/api/sandboxes/{sid}/fork", {
-                params: { path: { sid: this.id }, query: { wait } },
-                body,
-              }),
-            "connect",
-          ),
-        ),
-      )
-      .then((data) => new Sandbox(data, this._client))
+      .then(() => this._postFork(options.name, checkpoint, wait))
       .finally(() => (resumeAfterFork ? this.resume({ wait: false }).catch(() => undefined) : undefined));
 
     if (options.wait === false) return fork;
     await waitForSandboxStart(fork);
     if (resumeAfterFork) await waitForSandboxStart(this).catch(() => undefined);
     return fork;
+  }
+
+  private async _postFork(name: string | undefined, checkpoint: string | undefined, wait: boolean): Promise<Sandbox> {
+    const data = await unwrap(
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/sandboxes/{sid}/fork", {
+            params: { path: { sid: this.id }, query: { wait } },
+            body: { name, checkpoint },
+          }),
+        "connect",
+      ),
+    );
+    return new Sandbox(data, this._client);
   }
 
   /** Expose a TCP port publicly (1–65535), returning its hostname. */

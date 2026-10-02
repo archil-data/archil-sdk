@@ -284,36 +284,38 @@ class _Sandbox:
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
 
-    async def fork(self, *, name: Optional[str] = None, wait: bool = True) -> "_Sandbox":
+    async def fork(
+        self, *, name: Optional[str] = None, checkpoint: Optional[str] = None, wait: bool = True
+    ) -> "_Sandbox":
         """Fork this sandbox's current state. A running sandbox is paused for the
         snapshot and resumed once the fork is accepted; a paused or stopped
         sandbox is left as it is. The fork names the checkpoint the pause
         returned, so it does not depend on the source still being paused when
         the request lands. Resuming the source is best effort: the child is
         returned even if the source could not be resumed, and this sandbox is
-        updated in place with the source's state after the fork."""
+        updated in place with the source's state after the fork.
+
+        Pass ``checkpoint`` (the ``checkpoint`` of an earlier pause or stop, from
+        any session) to fork that saved state instead; the source is then left
+        untouched. The fork resumes with memory if that session ended in a
+        pause and cold-boots otherwise."""
+        if checkpoint is not None:
+            sandbox = await self._post_fork(name, checkpoint, wait)
+            return await sandbox._wait_for_start() if wait else sandbox
         # Pause is idempotent: "pausing" means the sandbox was live and is ours
         # to resume; "paused" or "stopped" means it was already inactive.
         source = await self.pause(wait=False)
         resume_after_fork = source.status == "pausing"
         checkpoint = source.checkpoint
-        body = {key: value for key, value in {"name": name, "checkpoint": checkpoint}.items() if value is not None}
         try:
             source = await source._wait_while("pausing")
-            data = await self._transport.request_json(
-                "POST",
-                f"/api/sandboxes/{self.id}/fork",
-                # A source we paused resumes as soon as the fork is accepted, not after the child boots.
-                params={"wait": wait and not resume_after_fork},
-                json=body or None,
-                retry="connect",
-            )
+            # A source we paused resumes as soon as the fork is accepted, not after the child boots.
+            sandbox = await self._post_fork(name, checkpoint, wait and not resume_after_fork)
         finally:
             if resume_after_fork:
                 with contextlib.suppress(Exception):
                     source = await self.resume(wait=False)
             self._data = source._data
-        sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         if not wait:
             return sandbox
         sandbox = await sandbox._wait_for_start()
@@ -321,6 +323,13 @@ class _Sandbox:
             with contextlib.suppress(Exception):
                 self._data = (await source._wait_while("pending"))._data
         return sandbox
+
+    async def _post_fork(self, name: Optional[str], checkpoint: Optional[str], wait: bool) -> "_Sandbox":
+        body = {key: value for key, value in {"name": name, "checkpoint": checkpoint}.items() if value is not None}
+        data = await self._transport.request_json(
+            "POST", f"/api/sandboxes/{self.id}/fork", params={"wait": wait}, json=body or None, retry="connect"
+        )
+        return _Sandbox(self._transport, SandboxData.from_json(data))
 
     async def expose_port(self, port: int) -> str:
         """Expose a TCP port publicly (1–65535), returning its hostname."""
