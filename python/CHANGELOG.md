@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.0
+
+### Minor Changes
+
+- 8dbb28d: Sandbox create, start, resume, and fork now wait out a region with no capacity: on a 503 `no_capacity` or `runtime_retryable` (or a 429), they back off and retry, honoring `Retry-After`, and log a warning. They give up after 10 seconds by default; change that with `Archil(max_throttle_wait=seconds)` or `ARCHIL_MAX_THROTTLE_WAIT`, where `0` keeps the old fail-fast behavior and `inf` waits indefinitely. Forking a running sandbox does not wait, so its source is resumed promptly.
+- df67b51: Add an optional absolute `cwd` to sandbox `run()`, `exec()`, and the legacy `processes.start()` API, including PTYs. Requires runtime support for the `cwd` connection field.
+- ca2e89e: Add `images.build()` to build a sandbox image from an OCI reference, including private registries, and wait until it is ready, plus `images.get()`. Create sandboxes from a built image with `imageId` (`image_id` in Python); sandboxes expose `imageDigest` (`image_digest`). A failed build raises `ImageBuildError` with the server's failure reason. TypeScript `ArchilApiError.code` now carries the control plane's error code, such as `image_not_ready`, as Python already does.
+- 5326863: Add `sandbox.run()` to start a process and return its handle immediately, including PTYs, and `sandbox.attach()` to reconnect by process ID and output cursor. `sandbox.exec()` still waits for the command result. Keep `sandbox.processes.start()`, `sandbox.processes.connect()`, and the `SandboxProcesses` export as deprecated compatibility APIs until the next version.
+
 ## 0.14.0
 
 ### Minor Changes
