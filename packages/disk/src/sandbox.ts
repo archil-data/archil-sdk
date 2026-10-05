@@ -78,7 +78,8 @@ export interface SandboxMount {
 function sandboxMountFromWire(mount: SandboxMountWire): SandboxMount {
   const out: SandboxMount = {
     diskId: mount.disk_id,
-    path: mount.path ?? "/mnt/archil",
+    // The schema is shared with requests, where path is optional; responses always resolve it.
+    path: mount.path!,
     readOnly: mount.read_only ?? false,
     conditional: mount.conditional ?? false,
   };

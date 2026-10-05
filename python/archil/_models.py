@@ -430,7 +430,7 @@ class SandboxMount:
     def from_json(cls, d: dict) -> "SandboxMount":
         return cls(
             disk_id=d["disk_id"],
-            path=d.get("path") or "/mnt/archil",
+            path=d["path"],
             read_only=d.get("read_only", False),
             conditional=d.get("conditional", False),
             subdirectory=d.get("subdirectory"),
