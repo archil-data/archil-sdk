@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { createApiClient, type ApiClient } from "../src/client.js";
 import { ArchilApiError, SandboxPauseError } from "../src/errors.js";
-import type { Disk } from "../src/disk.js";
+import { Disks } from "../src/disks.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess, SandboxProcesses } from "../src/index.js";
 import { Sandbox } from "../src/sandbox.js";
@@ -507,74 +507,112 @@ test("create polls when the server returns a pending sandbox", async () => {
   assert.equal(gets, 1);
 });
 
-test("Sandboxes serializes mounts and wraps them on the snapshot", async () => {
-  let body: unknown;
-  const client = {
-    POST: async (_path: string, options: { body: unknown }) => {
-      body = options.body;
-      return ok({
-        ...sandboxWire("running"),
-        mounts: [
-          { disk_id: "dsk-0123456789abcdef", path: "/mnt/archil" },
-          {
-            disk_id: "dsk-fedcba9876543210",
-            path: "/workspace",
-            subdirectory: "repo",
-            read_only: false,
-            conditional: true,
-            queue_ms: 5000,
-          },
-        ],
-      });
-    },
-  } as unknown as ApiClient;
-
+test("Sandboxes sends valid mount options through the HTTP client", async () => {
+  const mounts = [
+    { disk_id: "dsk-0123456789abcdef", path: "/mnt/archil", read_only: false, conditional: false, queue_ms: 5000 },
+    { disk_id: "dsk-fedcba9876543210", path: "/workspace", subdirectory: "repo", read_only: false, conditional: true },
+    { disk_id: "dsk-0000000000000001", path: "/mnt/models", read_only: true, conditional: false },
+  ];
+  const control = await origin((request) => json({
+    success: true,
+    data: request.method === "GET"
+      ? { id: "dsk-fedcba9876543210", name: "workspace", createdAt: now }
+      : { ...sandboxWire("running"), mounts },
+  }));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
+  const disk = await new Disks(client, "aws-us-east-1").get("dsk-fedcba9876543210");
   const created = await new Sandboxes(client).create({
+    imageId: "a".repeat(64),
+    idleTtlSeconds: 30,
+    ports: [8080],
     mounts: [
-      { disk: "dsk-0123456789abcdef" },
-      {
-        disk: { id: "dsk-fedcba9876543210" } as Disk,
-        path: "/workspace",
-        subdirectory: "repo",
-        conditional: true,
-        queueMs: 5000,
-      },
-      { disk: "dsk-0000000000000000", path: "/mnt/models", readOnly: true },
+      { disk: "dsk-0123456789abcdef", path: "/mnt/archil", queueMs: 5000 },
+      { disk, path: "/workspace", subdirectory: "repo", conditional: true },
+      { disk: "dsk-0000000000000001", path: "/mnt/models", readOnly: true },
     ],
   });
 
-  assert.deepEqual((body as { mounts: unknown }).mounts, [
-    { disk_id: "dsk-0123456789abcdef", read_only: false, conditional: false },
-    {
-      disk_id: "dsk-fedcba9876543210",
-      read_only: false,
-      conditional: true,
-      path: "/workspace",
-      subdirectory: "repo",
-      queue_ms: 5000,
-    },
-    { disk_id: "dsk-0000000000000000", read_only: true, conditional: false, path: "/mnt/models" },
-  ]);
-  assert.deepEqual(created.mounts, [
-    { diskId: "dsk-0123456789abcdef", path: "/mnt/archil", readOnly: false, conditional: false },
-    {
-      diskId: "dsk-fedcba9876543210",
-      path: "/workspace",
-      readOnly: false,
-      conditional: true,
-      subdirectory: "repo",
-      queueMs: 5000,
-    },
-  ]);
-
-  body = undefined;
-  await created.start({ mounts: [{ disk: "dsk-0000000000000000", path: "/mnt/models", readOnly: true }] });
-  assert.deepEqual(body, {
-    mounts: [{ disk_id: "dsk-0000000000000000", read_only: true, conditional: false, path: "/mnt/models" }],
+  assert.deepEqual(JSON.parse(control.requests.at(-1)!.body), {
+    image_id: "a".repeat(64), idle_ttl_seconds: 30, ports: [8080], mounts,
   });
-  body = undefined;
-  await created.start();
-  assert.equal(body, undefined);
+  assert.deepEqual(created.mounts, [
+    { diskId: "dsk-0123456789abcdef", path: "/mnt/archil", readOnly: false, conditional: false, queueMs: 5000 },
+    { diskId: disk.id, path: "/workspace", subdirectory: "repo", readOnly: false, conditional: true },
+    { diskId: "dsk-0000000000000001", path: "/mnt/models", readOnly: true, conditional: false },
+  ]);
+  assert.deepEqual(created.toJSON().mounts, created.mounts);
+});
+
+test("a sole sandbox mount can omit its path", async () => {
+  const control = await origin(() => json({ success: true, data: {
+    ...sandboxWire("running"),
+    mounts: [{ disk_id: "dsk-0123456789abcdef", path: "/mnt/archil" }],
+  } }));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
+  const sandbox = await new Sandboxes(client).create({ mounts: [{ disk: "dsk-0123456789abcdef" }] });
+  assert.deepEqual(JSON.parse(control.requests[0].body), {
+    mounts: [{ disk_id: "dsk-0123456789abcdef", read_only: false, conditional: false }],
+  });
+  assert.equal(sandbox.mounts[0].path, "/mnt/archil");
+});
+
+test.each([undefined, []])("create preserves omitted versus empty mounts (%j)", async (mounts) => {
+  const control = await origin(() => json({ success: true, data: sandboxWire("running") }));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
+  const sandbox = await new Sandboxes(client).create({ mounts });
+  assert.deepEqual(JSON.parse(control.requests[0].body), mounts === undefined ? {} : { mounts: [] });
+  assert.deepEqual(sandbox.mounts, []);
+});
+
+test.each([
+  { name: "retain", mounts: undefined, expectedBody: undefined },
+  { name: "clear", mounts: [], expectedBody: { mounts: [] } },
+  {
+    name: "replace",
+    mounts: [{ disk: "dsk-fedcba9876543210", path: "/mnt/other", readOnly: true }],
+    expectedBody: { mounts: [{ disk_id: "dsk-fedcba9876543210", path: "/mnt/other", read_only: true, conditional: false }] },
+  },
+])("cold start can $name sandbox mounts", async ({ mounts, expectedBody }) => {
+  const previous = [{ disk_id: "dsk-0123456789abcdef", path: "/mnt/data", read_only: false, conditional: false }];
+  const next = expectedBody?.mounts ?? previous;
+  const control = await origin((request) => json({ success: true, data: {
+    ...sandboxWire(request.method === "GET" ? "stopped" : "running"),
+    mounts: request.method === "GET" ? previous : next,
+  } }));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
+  const sandbox = await new Sandboxes(client).get("0198-sandbox");
+  await sandbox.start({ mounts });
+  const request = control.requests.at(-1)!;
+  assert.equal(request.url.pathname, "/api/sandboxes/0198-sandbox/start");
+  assert.deepEqual(request.body ? JSON.parse(request.body) : undefined, expectedBody);
+  assert.deepEqual(sandbox.mounts.map((mount) => mount.diskId), next.map((mount) => mount.disk_id));
+  assert.deepEqual(sandbox.toJSON().mounts, sandbox.mounts);
+});
+
+test("create surfaces mount validation errors without retrying", async () => {
+  const control = await origin(() => json({
+    success: false, code: "bad_request", error: "mounts[0].path: path is required when mounting multiple disks",
+  }, 400));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
+  await assert.rejects(new Sandboxes(client).create({ mounts: [
+    { disk: "dsk-0123456789abcdef" },
+    { disk: "dsk-fedcba9876543210", path: "/workspace" },
+  ] }), (error: unknown) => error instanceof ArchilApiError && error.status === 400 && error.code === "bad_request");
+  assert.equal(control.requests.length, 1);
+});
+
+test("rejected mount replacement leaves the sandbox snapshot intact", async () => {
+  const previous = [{ disk_id: "dsk-0123456789abcdef", path: "/mnt/data", read_only: false, conditional: false }];
+  const control = await origin((request) => request.method === "GET"
+    ? json({ success: true, data: { ...sandboxWire("running"), mounts: previous } })
+    : json({ success: false, code: "conflict", error: "mounts cannot be changed while active" }, 409));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
+  const sandbox = await new Sandboxes(client).get("0198-sandbox");
+  await assert.rejects(sandbox.start({ mounts: [] }),
+    (error: unknown) => error instanceof ArchilApiError && error.status === 409);
+  assert.equal(sandbox.status, "running");
+  assert.equal(sandbox.mounts[0].diskId, previous[0].disk_id);
+  assert.equal(control.requests.length, 2);
 });
 
 test("sandbox lifecycle methods can opt out of waiting", async () => {

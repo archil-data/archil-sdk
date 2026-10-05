@@ -30,21 +30,11 @@ export type SandboxNetwork = Omit<components["schemas"]["SandboxNetwork"], "egre
   egress?: SandboxEgressPolicy;
 };
 
-/** @internal Local until @archildata/api-types ships the SandboxMount schema. */
-export interface SandboxMountWire {
-  disk_id: string;
-  path?: string;
-  subdirectory?: string;
-  read_only?: boolean;
-  conditional?: boolean;
-  queue_ms?: number;
-}
+/** @internal */
+export type SandboxMountWire = components["schemas"]["SandboxMount"];
 
 /** @internal */
-export type SandboxWire = components["schemas"]["Sandbox"] & {
-  idle_ttl_seconds?: number;
-  mounts?: SandboxMountWire[];
-};
+export type SandboxWire = components["schemas"]["Sandbox"];
 
 /**
  * One Archil disk to mount inside a sandbox. `path` is the absolute guest
@@ -465,8 +455,8 @@ export class Sandbox {
         () =>
           this._client.POST("/api/sandboxes/{sid}/start", {
             params: { path: { sid: this.id }, query: { wait: options.wait ?? true } },
-            ...(options.mounts && {
-              body: { mounts: options.mounts.map(sandboxMountWire) } as never,
+            ...(options.mounts !== undefined && {
+              body: { mounts: options.mounts.map(sandboxMountWire) },
             }),
           }),
         "transient",

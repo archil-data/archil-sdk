@@ -111,13 +111,14 @@ export class Sandboxes {
       max_concurrent_execs: request.maxConcurrentExecs,
       network: request.network,
       ports: request.ports,
-      ...(request.mounts && { mounts: request.mounts.map(sandboxMountWire) }),
-    };
+      ...(request.mounts !== undefined && { mounts: request.mounts.map(sandboxMountWire) }),
+    } satisfies Partial<components["schemas"]["CreateSandboxRequest"]>;
     const data = await unwrap(
       retryApiRequest(
         () =>
           this._client.POST("/api/sandboxes", {
             params: { query: { wait: options.wait ?? true } },
+            // Generated types require defaulted fields; omission lets the server choose them.
             body: body as components["schemas"]["CreateSandboxRequest"],
           }),
         "connect",
