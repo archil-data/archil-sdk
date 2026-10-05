@@ -459,7 +459,8 @@ export class Sandbox {
               body: { mounts: options.mounts.map(sandboxMountWire) },
             }),
           }),
-        "transient",
+        // Replaying a mount update after a lost success conflicts with the now-active sandbox.
+        options.mounts === undefined ? "transient" : "connect",
       ),
     );
     this._apply(data);

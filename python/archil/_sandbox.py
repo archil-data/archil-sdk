@@ -267,7 +267,8 @@ class _Sandbox:
             f"/api/sandboxes/{self.id}/start",
             params={"wait": wait},
             json=None if mounts is None else {"mounts": [mount.to_json() for mount in mounts]},
-            retry="transient",
+            # Replaying a mount update after a lost success conflicts with the now-active sandbox.
+            retry="transient" if mounts is None else "connect",
             retry_throttled=True,
         )
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))

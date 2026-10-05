@@ -589,6 +589,75 @@ test.each([
   assert.deepEqual(sandbox.toJSON().mounts, sandbox.mounts);
 });
 
+test.each([
+  { name: "clear", mounts: [] },
+  { name: "replace", mounts: [{ disk: "dsk-0123456789abcdef", path: "/mnt/data" }] },
+])("$name mounts is not replayed after an ambiguous start failure", async ({ mounts }) => {
+  for (const failure of ["disconnect", "gateway"] as const) {
+    let starts = 0;
+    const control = await origin(() => {
+      starts++;
+      if (starts > 1) return json({ success: false, error: "mounts cannot change while active" }, 409);
+      return failure === "disconnect"
+        ? { destroy: true }
+        : json({ success: false, error: "start response lost" }, 502);
+    });
+    const sandbox = new Sandbox(sandboxWire("stopped") as any, createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url }));
+
+    await assert.rejects(sandbox.start({ mounts, wait: false }), (error: unknown) => {
+      if (failure === "gateway") return error instanceof ArchilApiError && error.status === 502;
+      return error instanceof Error && !(error instanceof ArchilApiError);
+    });
+    assert.equal(starts, 1);
+    assert.ok(Object.hasOwn(JSON.parse(control.requests[0].body), "mounts"));
+  }
+});
+
+test.each(["disconnect", "gateway"])("start without mounts still retries a %s failure", async (failure) => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
+  let starts = 0;
+  const control = await origin(() => {
+    starts++;
+    if (starts === 1) return failure === "disconnect"
+      ? { destroy: true }
+      : json({ success: false, error: "start response lost" }, 502);
+    return json({ success: true, data: sandboxWire("running") });
+  });
+  const sandbox = new Sandbox(sandboxWire("stopped") as any, createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url }));
+
+  await sandbox.start({ wait: false });
+
+  assert.equal(starts, 2);
+  assert.equal(sandbox.status, "running");
+  assert.ok(control.requests.every((request) => request.body === ""));
+});
+
+test.each([
+  { name: "clear", mounts: [] },
+  { name: "replace", mounts: [{ disk: "dsk-0123456789abcdef", path: "/mnt/data" }] },
+])(
+  "start to $name mounts retries connection-establishment failures",
+  async ({ mounts }) => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    let attempts = 0;
+    const client = {
+      POST: async () => {
+        attempts++;
+        if (attempts === 1) throw new TypeError("fetch failed", {
+          cause: Object.assign(new Error("connection refused"), { code: "ECONNREFUSED" }),
+        });
+        return ok(sandboxWire("running"));
+      },
+    } as unknown as ApiClient;
+    const sandbox = new Sandbox(sandboxWire("stopped") as any, client);
+
+    await sandbox.start({ mounts, wait: false });
+
+    assert.equal(attempts, 2);
+    assert.equal(sandbox.status, "running");
+  },
+);
+
 test("create surfaces mount validation errors without retrying", async () => {
   const control = await origin(() => json({
     success: false, code: "bad_request", error: "mounts[0].path: path is required when mounting multiple disks",

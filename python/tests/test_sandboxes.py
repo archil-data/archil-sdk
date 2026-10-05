@@ -744,6 +744,92 @@ def test_cold_start_mounts(archil, router, mounts, expected_body):
     assert [mount.disk_id for mount in started.mounts] == [mount["disk_id"] for mount in updated]
 
 
+@pytest.mark.parametrize("mounts", [[], [SandboxMountSpec(disk="dsk-0123456789abcdef", path="/mnt/data")]])
+@pytest.mark.parametrize("failure", ["disconnect", "gateway"])
+def test_mount_start_does_not_replay_ambiguous_failures(archil, router, mounts, failure):
+    starts = 0
+
+    def handler(request):
+        nonlocal starts
+        if request.method == "GET":
+            return ok_envelope(sandbox_json("stopped"))
+        starts += 1
+        if starts > 1:
+            return error_envelope(409, "mounts cannot change while active")
+        if failure == "disconnect":
+            raise httpx.ReadError("start response lost", request=request)
+        return error_envelope(502, "start response lost")
+
+    router.set(handler)
+    sandbox = archil.sandboxes.get("sbx-1")
+
+    with pytest.raises(httpx.ReadError if failure == "disconnect" else ArchilApiError) as exc:
+        sandbox.start(mounts=mounts, wait=False)
+
+    if failure == "gateway":
+        assert exc.value.status == 502
+    assert starts == 1
+    assert "mounts" in router.requests[-1].json
+
+
+@pytest.mark.parametrize("failure", ["disconnect", "gateway"])
+def test_start_without_mounts_retries_ambiguous_failures(archil, router, monkeypatch, failure):
+    import archil._http as http_module
+
+    starts = 0
+
+    def handler(request):
+        nonlocal starts
+        if request.method == "GET":
+            return ok_envelope(sandbox_json("stopped"))
+        starts += 1
+        if starts == 1:
+            if failure == "disconnect":
+                raise httpx.ReadError("start response lost", request=request)
+            return error_envelope(502, "start response lost")
+        return ok_envelope(sandbox_json("running"))
+
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    router.set(handler)
+
+    started = archil.sandboxes.get("sbx-1").start(wait=False)
+
+    assert starts == 2
+    assert started.status == "running"
+    assert router.requests[-1].json is None
+
+
+@pytest.mark.parametrize("mounts", [[], [SandboxMountSpec(disk="dsk-0123456789abcdef", path="/mnt/data")]])
+@pytest.mark.parametrize("failure", ["connect", "no_capacity", "runtime_retryable", "rate_limit"])
+def test_mount_start_retries_safe_failures(archil, router, monkeypatch, mounts, failure):
+    import archil._http as http_module
+
+    starts = 0
+
+    def handler(request):
+        nonlocal starts
+        if request.method == "GET":
+            return ok_envelope(sandbox_json("stopped"))
+        starts += 1
+        if starts == 1:
+            if failure == "connect":
+                raise httpx.ConnectError("connection refused", request=request)
+            if failure == "rate_limit":
+                return error_envelope(429, "rate limited")
+            return _capacity_error(failure)
+        return ok_envelope(sandbox_json("running"))
+
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    monkeypatch.setattr(http_module, "_throttle_backoff", lambda _attempt, _retry_after: 0)
+    router.set(handler)
+
+    started = archil.sandboxes.get("sbx-1").start(mounts=mounts, wait=False)
+
+    assert starts == 2
+    assert started.status == "running"
+    assert router.requests[-1].json == router.requests[-2].json
+
+
 def test_create_surfaces_mount_validation_error(archil, router):
     router.set(
         lambda request: httpx.Response(
