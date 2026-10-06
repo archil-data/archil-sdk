@@ -32,8 +32,11 @@ class _Disks:
     async def _page(
         self, *, limit: Optional[int], cursor: Optional[str], name: Optional[str] = None
     ) -> tuple[list["_Disk"], Optional[str]]:
+        # Always send an explicit limit: a request without one leaves the page
+        # size up to the server.
+        page_limit = _DISK_PAGE_LIMIT if limit is None else min(limit, _DISK_PAGE_LIMIT)
         data, next_cursor = await self._transport.request_json_page(
-            "GET", "/api/disks", params={"limit": limit, "cursor": cursor, "name": name}
+            "GET", "/api/disks", params={"limit": page_limit, "cursor": cursor, "name": name}
         )
         # `data or []`: the list endpoint can come back as JSON `null` (Go nil
         # slice) for an empty account, which would otherwise raise TypeError.

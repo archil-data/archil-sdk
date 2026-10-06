@@ -96,6 +96,13 @@ def test_list_disks_name_filter_is_single_request(archil, router):
     assert [d.id for d in disks] == ["dsk-1"]
     assert len(router.requests) == 1
     assert router.requests[0].query["name"] == "my-disk"
+    assert router.requests[0].query["limit"] == "100"
+
+
+def test_list_disks_name_filter_passes_limit(archil, router):
+    router.set(lambda req: ok_envelope([_disk(1)]))
+    archil.disks.list(name="my-disk", limit=5)
+    assert router.requests[0].query["limit"] == "5"
 
 
 def test_list_pages(archil, router):

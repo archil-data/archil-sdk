@@ -83,11 +83,14 @@ export class Disks {
    * listing (it can also be persisted, e.g. across requests of a paginated UI).
    */
   async listPage(opts?: ListDisksOptions): Promise<DiskListPage> {
+    // Always send an explicit limit: a request without one leaves the page
+    // size up to the server.
+    const limit = Math.min(opts?.limit ?? DISK_PAGE_LIMIT, DISK_PAGE_LIMIT);
     const { data, nextCursor } = await unwrapPage(
       retryApiRequest(
         () =>
           this._client.GET("/api/disks", {
-            params: { query: { limit: opts?.limit, cursor: opts?.cursor, name: opts?.name } },
+            params: { query: { limit, cursor: opts?.cursor, name: opts?.name } },
           }),
         "transient",
       ),

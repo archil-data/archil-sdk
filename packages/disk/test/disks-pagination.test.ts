@@ -109,6 +109,13 @@ test("list({name}) is a single request even when nextCursor is present", async (
   assert.deepEqual(result.map((x) => x.id), ["dsk-1"]);
   assert.equal(queries.length, 1);
   assert.equal(queries[0].name, "d1");
+  assert.equal(queries[0].limit, 100);
+});
+
+test("list({name, limit}) passes the limit through", async () => {
+  const { disks: d, queries } = disks(new Map([[undefined, { data: [diskJson(1)] }]]));
+  await d.list({ name: "d1", limit: 5 });
+  assert.equal(queries[0].limit, 5);
 });
 
 test("listPage() returns the page and its nextCursor", async () => {
@@ -131,4 +138,10 @@ test("listPage() treats JSON null data as an empty account", async () => {
   const page = await d.listPage();
   assert.deepEqual(page.disks, []);
   assert.equal(page.nextCursor, undefined);
+});
+
+test("listPage() sends the default page size when no limit is given", async () => {
+  const { disks: d, queries } = disks(new Map([[undefined, { data: [] }]]));
+  await d.listPage();
+  assert.equal(queries[0].limit, 100);
 });
