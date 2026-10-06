@@ -317,8 +317,9 @@ console.log(timed.maxTtlSeconds, timed.idleTtlSeconds);
 ```
 
 Omitted settings stay unchanged on edits. Updating the hard TTL resets its
-deadline from now; an idle-only edit does not. Changes made while inactive apply
-to the next powered-on session. Idle TTL accepts 0–86,400 seconds; omitted or
+deadline from now, but never past 24 hours after the sandbox started or last
+resumed; an idle-only edit does not. Changes made while inactive apply to the
+next powered-on session. Idle TTL accepts 0–86,400 seconds; omitted or
 zero at creation disables it, and zero on edits disables it again.
 
 Both TTLs pause the sandbox, preserving memory and processes. Open direct
@@ -328,7 +329,7 @@ traffic do not keep it alive. Disable idle TTL for unattended jobs.
 
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB. Sandbox
-timeouts default to 24 hours and can be reset up to 24 hours from now.
+timeouts default to 24 hours, and no session runs longer than that.
 
 Pass an absolute `cwd` to `sandbox.run()` or `sandbox.exec()` to choose the
 working directory, for example `sandbox.exec("pytest", { cwd: "/workspace/app" })`.
