@@ -871,7 +871,11 @@ def test_get_and_update_network_use_active_runtime_policy(archil, router):
     network = SandboxNetwork(
         egress=SandboxEgressPolicy(
             default="deny",
-            allow=["github.com", "140.82.112.0/20"],
+            allow=[
+                "github.com",
+                "140.82.112.0/20",
+                SandboxEgressRule(target="api.example.com", forward_url="https://proxy.example.com/archil"),
+            ],
             deny=["169.254.0.0/16"],
             drain_on_pause=["bedrock-runtime.*.amazonaws.com"],
         )

@@ -318,11 +318,14 @@ class SandboxEgressTransform:
 class SandboxEgressRule:
     target: str
     transform: Optional[SandboxEgressTransform] = None
+    forward_url: Optional[str] = None
 
     def to_json(self) -> dict:
         result: dict[str, Any] = {"target": self.target}
         if self.transform is not None:
             result["transform"] = self.transform.to_json()
+        if self.forward_url is not None:
+            result["forward_url"] = self.forward_url
         return result
 
     @classmethod
@@ -331,6 +334,7 @@ class SandboxEgressRule:
         return cls(
             target=d["target"],
             transform=SandboxEgressTransform.from_json(transform) if transform is not None else None,
+            forward_url=d.get("forward_url"),
         )
 
 
