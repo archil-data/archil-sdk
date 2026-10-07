@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.0
+
+### Minor Changes
+
+- 5d756f5: `SandboxEgressRule` accepts `forward_url`, which sends the rule's requests to another public HTTPS URL with the original path appended. Policies read back from the API keep the field.
+
 ## 0.15.0
 
 ### Minor Changes
