@@ -196,7 +196,12 @@ applies to plaintext HTTP and HTTPS traffic, and a wildcard such as
 `*.github.com` matches subdomains, not `github.com` itself. An object-form allow
 rule can transform outbound HTTPS requests to its exact lowercase domain.
 Header transformations overwrite values supplied by the sandbox; matching
-plaintext HTTP requests are rejected. Omit `network` for unrestricted egress. A
+plaintext HTTP requests are rejected. An object-form rule can instead set
+`forward_url` to an absolute public HTTPS URL: the rule's requests go there, with
+the original path appended, instead of to their original host, and Archil sets the
+`archil-forwarded-host`, `archil-forwarded-scheme`, `archil-forwarded-port`,
+`archil-forwarded-path`, and `archil-sandbox-id` headers. A transform on the same
+rule applies first. Omit `network` for unrestricted egress. A
 running sandbox's complete policy can be replaced without restarting it;
 existing connections are not terminated:
 
