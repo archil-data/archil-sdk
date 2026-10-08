@@ -49,6 +49,28 @@ d.remove_user("token", user.identifier)
 d.delete()
 ```
 
+### Disk sandboxes
+
+`disk.connect()` creates a fresh sandbox with the disk mounted at `/mnt/archil`.
+The returned `Sandbox` keeps a connection open between commands:
+
+```python
+sandbox = d.connect()
+try:
+    result = sandbox.exec("python --version")
+    print(result.stdout)
+finally:
+    sandbox.disconnect()
+```
+
+Use `sandbox.run()` for process handles and `sandbox.run("bash -i", terminal=True)` for a PTY.
+`sandbox.connected` tracks the keepalive connection. `sandbox.disconnect()` releases
+it; other process connections remain independent. After the last connection closes,
+the sandbox expires in 10 seconds by default. Every `d.connect()` creates a fresh
+sandbox. Disk files persist; memory and rootfs changes are temporary.
+
+Python methods also support `.aio`.
+
 ### Sandboxes
 
 Use `Archil.sandboxes` or the module-level helpers to manage persistent microVMs:
