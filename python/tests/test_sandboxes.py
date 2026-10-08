@@ -15,6 +15,8 @@ from archil import (
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
+    SandboxMount,
+    SandboxMountSpec,
     SandboxNetwork,
     SandboxProcess,
     SandboxProcesses,
@@ -622,6 +624,252 @@ def test_create_from_image_sends_image_id_and_exposes_digest(archil, router):
     assert [request.json for request in router.requests] == [{"image_id": image_id}] * 2
 
 
+def test_create_sandbox_with_mounts(archil, router):
+    router.set(
+        lambda request: ok_envelope(
+            {
+                "id": "dsk-fedcba9876543210",
+                "name": "workspace",
+                "organization": "org-1",
+                "status": "available",
+                "provider": "aws",
+                "region": "aws-us-east-1",
+                "createdAt": NOW,
+            }
+        )
+    )
+    disk = archil.disks.get("dsk-fedcba9876543210")
+    mounts_json = [
+        {
+            "disk_id": "dsk-0123456789abcdef",
+            "path": "/mnt/archil",
+            "read_only": False,
+            "conditional": False,
+            "queue_ms": 5000,
+        },
+        {
+            "disk_id": disk.id,
+            "path": "/workspace",
+            "subdirectory": "repo",
+            "read_only": False,
+            "conditional": True,
+        },
+        {"disk_id": "dsk-0000000000000001", "path": "/mnt/models", "read_only": True, "conditional": False},
+    ]
+    router.set(lambda request: ok_envelope(sandbox_json(mounts=mounts_json)))
+
+    sandbox = archil.sandboxes.create(
+        image_id="a" * 64,
+        idle_ttl_seconds=30,
+        ports=[8080],
+        mounts=[
+            SandboxMountSpec(disk="dsk-0123456789abcdef", path="/mnt/archil", queue_ms=5000),
+            SandboxMountSpec(disk=disk, path="/workspace", subdirectory="repo", conditional=True),
+            SandboxMountSpec(disk="dsk-0000000000000001", path="/mnt/models", read_only=True),
+        ],
+    )
+
+    assert router.requests[-1].json == {
+        "image_id": "a" * 64,
+        "idle_ttl_seconds": 30,
+        "ports": [8080],
+        "mounts": mounts_json,
+    }
+    assert sandbox.mounts == [
+        SandboxMount(disk_id="dsk-0123456789abcdef", path="/mnt/archil", queue_ms=5000),
+        SandboxMount(disk_id=disk.id, path="/workspace", conditional=True, subdirectory="repo"),
+        SandboxMount(disk_id="dsk-0000000000000001", path="/mnt/models", read_only=True),
+    ]
+
+
+def test_sole_sandbox_mount_can_omit_path(archil, router):
+    router.set(
+        lambda request: ok_envelope(
+            sandbox_json(
+                mounts=[{"disk_id": "dsk-0123456789abcdef", "path": "/mnt/archil"}],
+            )
+        )
+    )
+    sandbox = archil.sandboxes.create(mounts=[SandboxMountSpec(disk="dsk-0123456789abcdef")])
+    assert router.requests[0].json == {
+        "mounts": [{"disk_id": "dsk-0123456789abcdef", "read_only": False, "conditional": False}],
+    }
+    assert sandbox.mounts == [SandboxMount(disk_id="dsk-0123456789abcdef", path="/mnt/archil")]
+
+
+@pytest.mark.parametrize("mounts", [None, []])
+def test_create_preserves_omitted_and_empty_mounts(archil, router, mounts):
+    router.set(lambda request: ok_envelope(sandbox_json()))
+    sandbox = archil.sandboxes.create(mounts=mounts)
+    assert router.requests[0].json == ({} if mounts is None else {"mounts": []})
+    assert sandbox.mounts == []
+
+
+@pytest.mark.parametrize(
+    "mounts,expected_body",
+    [
+        (None, None),
+        ([], {"mounts": []}),
+        (
+            [SandboxMountSpec(disk="dsk-fedcba9876543210", path="/mnt/other", read_only=True)],
+            {
+                "mounts": [
+                    {
+                        "disk_id": "dsk-fedcba9876543210",
+                        "path": "/mnt/other",
+                        "read_only": True,
+                        "conditional": False,
+                    }
+                ]
+            },
+        ),
+    ],
+    ids=["retain", "clear", "replace"],
+)
+def test_cold_start_mounts(archil, router, mounts, expected_body):
+    previous = [{"disk_id": "dsk-0123456789abcdef", "path": "/mnt/data"}]
+    updated = previous if expected_body is None else expected_body["mounts"]
+    router.set(
+        lambda request: ok_envelope(
+            sandbox_json(
+                "stopped" if request.method == "GET" else "running",
+                mounts=previous if request.method == "GET" else updated,
+            )
+        )
+    )
+    sandbox = archil.sandboxes.get("sbx-1")
+    started = sandbox.start(mounts=mounts)
+    assert router.requests[-1].path == "/api/sandboxes/sbx-1/start"
+    assert router.requests[-1].json == expected_body
+    assert [mount.disk_id for mount in started.mounts] == [mount["disk_id"] for mount in updated]
+
+
+@pytest.mark.parametrize("mounts", [[], [SandboxMountSpec(disk="dsk-0123456789abcdef", path="/mnt/data")]])
+@pytest.mark.parametrize("failure", ["disconnect", "gateway"])
+def test_mount_start_does_not_replay_ambiguous_failures(archil, router, mounts, failure):
+    starts = 0
+
+    def handler(request):
+        nonlocal starts
+        if request.method == "GET":
+            return ok_envelope(sandbox_json("stopped"))
+        starts += 1
+        if starts > 1:
+            return error_envelope(409, "mounts cannot change while active")
+        if failure == "disconnect":
+            raise httpx.ReadError("start response lost", request=request)
+        return error_envelope(502, "start response lost")
+
+    router.set(handler)
+    sandbox = archil.sandboxes.get("sbx-1")
+
+    with pytest.raises(httpx.ReadError if failure == "disconnect" else ArchilApiError) as exc:
+        sandbox.start(mounts=mounts, wait=False)
+
+    if failure == "gateway":
+        assert exc.value.status == 502
+    assert starts == 1
+    assert "mounts" in router.requests[-1].json
+
+
+@pytest.mark.parametrize("failure", ["disconnect", "gateway"])
+def test_start_without_mounts_retries_ambiguous_failures(archil, router, monkeypatch, failure):
+    import archil._http as http_module
+
+    starts = 0
+
+    def handler(request):
+        nonlocal starts
+        if request.method == "GET":
+            return ok_envelope(sandbox_json("stopped"))
+        starts += 1
+        if starts == 1:
+            if failure == "disconnect":
+                raise httpx.ReadError("start response lost", request=request)
+            return error_envelope(502, "start response lost")
+        return ok_envelope(sandbox_json("running"))
+
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    router.set(handler)
+
+    started = archil.sandboxes.get("sbx-1").start(wait=False)
+
+    assert starts == 2
+    assert started.status == "running"
+    assert router.requests[-1].json is None
+
+
+@pytest.mark.parametrize("mounts", [[], [SandboxMountSpec(disk="dsk-0123456789abcdef", path="/mnt/data")]])
+@pytest.mark.parametrize("failure", ["connect", "no_capacity", "runtime_retryable", "rate_limit"])
+def test_mount_start_retries_safe_failures(archil, router, monkeypatch, mounts, failure):
+    import archil._http as http_module
+
+    starts = 0
+
+    def handler(request):
+        nonlocal starts
+        if request.method == "GET":
+            return ok_envelope(sandbox_json("stopped"))
+        starts += 1
+        if starts == 1:
+            if failure == "connect":
+                raise httpx.ConnectError("connection refused", request=request)
+            if failure == "rate_limit":
+                return error_envelope(429, "rate limited")
+            return _capacity_error(failure)
+        return ok_envelope(sandbox_json("running"))
+
+    monkeypatch.setattr(http_module, "_retry_delay", lambda _attempt: 0)
+    monkeypatch.setattr(http_module, "_throttle_backoff", lambda _attempt, _retry_after: 0)
+    router.set(handler)
+
+    started = archil.sandboxes.get("sbx-1").start(mounts=mounts, wait=False)
+
+    assert starts == 2
+    assert started.status == "running"
+    assert router.requests[-1].json == router.requests[-2].json
+
+
+def test_create_surfaces_mount_validation_error(archil, router):
+    router.set(
+        lambda request: httpx.Response(
+            400,
+            json={
+                "success": False,
+                "code": "bad_request",
+                "error": "mounts[0].path: path is required when mounting multiple disks",
+            },
+        )
+    )
+    with pytest.raises(ArchilApiError) as caught:
+        archil.sandboxes.create(
+            mounts=[
+                SandboxMountSpec(disk="dsk-0123456789abcdef"),
+                SandboxMountSpec(disk="dsk-fedcba9876543210", path="/workspace"),
+            ]
+        )
+    assert (caught.value.status, caught.value.code) == (400, "bad_request")
+    assert len(router.requests) == 1
+
+
+def test_rejected_mount_replacement_preserves_snapshot(archil, router):
+    previous = [{"disk_id": "dsk-0123456789abcdef", "path": "/mnt/data"}]
+    router.set(
+        lambda request: (
+            ok_envelope(sandbox_json(mounts=previous))
+            if request.method == "GET"
+            else error_envelope(409, "mounts cannot be changed while active")
+        )
+    )
+    sandbox = archil.sandboxes.get("sbx-1")
+    with pytest.raises(ArchilApiError) as caught:
+        sandbox.start(mounts=[])
+    assert caught.value.status == 409
+    assert sandbox.status == "running"
+    assert sandbox.mounts[0].disk_id == previous[0]["disk_id"]
+    assert len(router.requests) == 2
+
+
 def test_create_surfaces_terminal_start_failure(archil, router, monkeypatch):
     import archil._sandbox as sandbox_module
 
@@ -1063,6 +1311,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "max_concurrent_execs": None,
                 "network": network,
                 "ports": [3000],
+                "mounts": None,
                 "wait": False,
             },
         ),

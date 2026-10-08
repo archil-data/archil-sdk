@@ -28,6 +28,8 @@ from archil import (
     SandboxEgressPolicy,
     SandboxEgressRule,
     SandboxEgressTransform,
+    SandboxMount,
+    SandboxMountSpec,
     SandboxNetwork,
     SandboxProcess,
     SandboxProcesses,
@@ -67,6 +69,17 @@ def sync_usage() -> None:
             )
         ),
     )
+    _mounts: list[SandboxMount] = sandbox.mounts
+    mounted: Sandbox = client.sandboxes.create(
+        mounts=[
+            SandboxMountSpec(disk="dsk-0123456789abcdef", path="/mnt/archil"),
+            SandboxMountSpec(disk=disk, path="/mnt/models", subdirectory="llama", read_only=True),
+        ],
+        wait=False,
+    )
+    _mounts = mounted.mounts
+    mounted = mounted.start(mounts=[SandboxMountSpec(disk="dsk-0123456789abcdef", path="/mnt/other")], wait=False)
+    mounted = mounted.start(mounts=[], wait=False)
     _network: SandboxNetwork = sandbox.get_network()
     _network = sandbox.update_network(SandboxNetwork())
     image: Image = client.images.build(

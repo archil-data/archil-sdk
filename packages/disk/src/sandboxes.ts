@@ -5,9 +5,11 @@ import { retryApiRequest } from "./retry.js";
 import type { Disk } from "./disk.js";
 import {
   Sandbox,
+  type SandboxMountSpec,
   type SandboxNetwork,
   type SandboxWire,
   type SandboxWaitOptions,
+  sandboxMountWire,
   waitForSandboxStart,
 } from "./sandbox.js";
 
@@ -40,6 +42,12 @@ export interface CreateSandboxRequest {
   network?: SandboxNetwork;
   /** TCP ports to expose publicly, from 1 to 65535. */
   ports?: number[];
+  /**
+   * Disks mounted inside the guest for the first session; `sandbox.start()`
+   * can replace them later. A sandbox with mounts must be stopped before it
+   * is forked.
+   */
+  mounts?: SandboxMountSpec[];
 }
 
 export interface ListSandboxesOptions {
@@ -103,12 +111,14 @@ export class Sandboxes {
       max_concurrent_execs: request.maxConcurrentExecs,
       network: request.network,
       ports: request.ports,
-    };
+      ...(request.mounts !== undefined && { mounts: request.mounts.map(sandboxMountWire) }),
+    } satisfies Partial<components["schemas"]["CreateSandboxRequest"]>;
     const data = await unwrap(
       retryApiRequest(
         () =>
           this._client.POST("/api/sandboxes", {
             params: { query: { wait: options.wait ?? true } },
+            // Generated types require defaulted fields; omission lets the server choose them.
             body: body as components["schemas"]["CreateSandboxRequest"],
           }),
         "connect",
