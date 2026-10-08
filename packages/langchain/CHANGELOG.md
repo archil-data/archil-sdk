@@ -1,5 +1,12 @@
 # @archildata/langchain
 
+## 0.0.19
+
+### Patch Changes
+
+- Updated dependencies [8b2000c]
+  - disk@1.8.0
+
 ## 0.0.18
 
 ### Patch Changes
