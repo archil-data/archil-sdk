@@ -1,7 +1,10 @@
-import httpx
+import uuid
 
-from archil import AwsStsUser, Delegation, ExecMountSpec, TokenUser
-from conftest import ok_envelope
+import httpx
+import pytest
+
+from archil import ArchilApiError, AwsStsUser, Branch, Delegation, ExecMountSpec, TokenUser
+from conftest import error_envelope, ok_envelope
 
 DISK_JSON = {
     "id": "dsk-1",
@@ -252,3 +255,114 @@ def test_archil_exec_payload_shapes(archil, router):
         "work": {"disk": "dsk-4", "readOnly": False, "conditional": True},
     }
     assert captured["body"]["command"] == "ls"
+
+
+BRANCH_JSON = {
+    "root_filesystem_id": "dsk-1",
+    "branch_name": "work",
+    "filesystem_id": "dsk-2",
+    "from_checkpoint_name": "cp1",
+    "from_checkpoint_filesystem_id": "dsk-1",
+    "created_at": "2026-10-07T00:00:00Z",
+}
+
+BRANCH = Branch(
+    root_filesystem_id="dsk-1",
+    branch_name="work",
+    filesystem_id="dsk-2",
+    from_checkpoint_name="cp1",
+    from_checkpoint_filesystem_id="dsk-1",
+    created_at="2026-10-07T00:00:00Z",
+)
+
+
+def test_create_branch_sends_spec_fields_and_uuid_idempotency_key(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: httpx.Response(201, json={"success": True, "data": BRANCH_JSON}))
+
+    assert d.create_branch("work", "cp1", from_branch="base") == BRANCH
+
+    req = router.requests[-1]
+    assert req.method == "POST"
+    assert req.path == "/api/disks/dsk-1/branches"
+    assert req.json == {"branch_name": "work", "from_checkpoint_name": "cp1", "from_branch": "base"}
+    uuid.UUID(req.headers["idempotency-key"])
+
+
+def test_create_branch_omits_from_branch_when_unset(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: httpx.Response(201, json={"success": True, "data": BRANCH_JSON}))
+
+    d.create_branch("work", "cp1")
+
+    assert router.requests[-1].json == {"branch_name": "work", "from_checkpoint_name": "cp1"}
+
+
+def test_create_branch_retries_with_the_same_idempotency_key(archil, router):
+    d = _disk(archil, router)
+    responses = iter(
+        [
+            error_envelope(504, "Request timed out"),
+            httpx.Response(201, json={"success": True, "data": BRANCH_JSON}),
+        ]
+    )
+    router.set(lambda req: next(responses))
+
+    assert d.create_branch("work", "cp1") == BRANCH
+
+    first, second = router.requests[-2:]
+    assert first.path == second.path == "/api/disks/dsk-1/branches"
+    assert first.headers["idempotency-key"] == second.headers["idempotency-key"]
+
+
+def test_create_branch_uses_a_fresh_key_per_call(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: httpx.Response(201, json={"success": True, "data": BRANCH_JSON}))
+
+    d.create_branch("a", "cp1")
+    d.create_branch("b", "cp1")
+
+    first, second = router.requests[-2:]
+    assert first.headers["idempotency-key"] != second.headers["idempotency-key"]
+
+
+def test_create_branch_conflict_is_not_retried(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: error_envelope(409, 'Branch "work" already exists'))
+    before = len(router.requests)
+
+    with pytest.raises(ArchilApiError) as exc:
+        d.create_branch("work", "cp1")
+
+    assert exc.value.status == 409
+    assert len(router.requests) - before == 1
+
+
+def test_list_branches(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: ok_envelope([BRANCH_JSON]))
+
+    assert d.list_branches() == [BRANCH]
+    req = router.requests[-1]
+    assert req.method == "GET"
+    assert req.path == "/api/disks/dsk-1/branches"
+
+
+def test_get_branch(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: ok_envelope(BRANCH_JSON))
+
+    assert d.get_branch("work") == BRANCH
+    req = router.requests[-1]
+    assert req.method == "GET"
+    assert req.path == "/api/disks/dsk-1/branches/work"
+
+
+def test_get_branch_not_found(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: error_envelope(404, 'Branch "missing" not found'))
+
+    with pytest.raises(ArchilApiError) as exc:
+        d.get_branch("missing")
+
+    assert exc.value.status == 404

@@ -556,6 +556,43 @@ class Disk:
 
     revoke_delegation: __revoke_delegation_spec
 
+    class __create_branch_spec(typing_extensions.Protocol):
+        def __call__(self, /, name: str, from_checkpoint: str, *, from_branch: str | None = None) -> archil._models.Branch:
+            """Create a writable branch of this disk from a committed checkpoint.
+
+            ``from_checkpoint`` names a checkpoint on the root disk, or on
+            ``from_branch`` when given. Writes on the branch don't affect its source."""
+            ...
+
+        async def aio(self, /, name: str, from_checkpoint: str, *, from_branch: str | None = None) -> archil._models.Branch:
+            """Create a writable branch of this disk from a committed checkpoint.
+
+            ``from_checkpoint`` names a checkpoint on the root disk, or on
+            ``from_branch`` when given. Writes on the branch don't affect its source."""
+            ...
+
+    create_branch: __create_branch_spec
+
+    class __list_branches_spec(typing_extensions.Protocol):
+        def __call__(self, /) -> list[archil._models.Branch]:
+            """List every branch of this disk, including branches of branches, in no particular order."""
+            ...
+
+        async def aio(self, /) -> list[archil._models.Branch]:
+            """List every branch of this disk, including branches of branches, in no particular order."""
+            ...
+
+    list_branches: __list_branches_spec
+
+    class __get_branch_spec(typing_extensions.Protocol):
+        def __call__(self, /, name: str) -> archil._models.Branch:
+            ...
+
+        async def aio(self, /, name: str) -> archil._models.Branch:
+            ...
+
+    get_branch: __get_branch_spec
+
     class __get_allowed_ips_spec(typing_extensions.Protocol):
         def __call__(self, /) -> list[str]:
             ...

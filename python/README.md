@@ -364,6 +364,31 @@ for delegation in disk.list_delegations():
 Delegations are identified by their `client_id` and `inode_id`. The `path` is
 resolved best-effort by the server and may be `None`.
 
+### Branches
+
+A branch is an independent, writable fork of a disk that starts from a
+committed checkpoint. Writes on a branch don't affect its source. Create a
+checkpoint from a mounted disk with `archil checkpoints create <mountpoint> <name>`,
+then branch from it:
+
+```python
+disk = archil.get_disk("dsk-abc123")
+
+branch = disk.create_branch("experiment", "nightly")
+print(branch.filesystem_id)
+
+# Branch from a checkpoint taken on another branch:
+disk.create_branch("experiment-2", "cp1", from_branch="experiment")
+
+disk.list_branches()
+disk.get_branch("experiment")
+```
+
+Branch names are 1-100 letters, digits, hyphens, or underscores, and are unique
+across the disk. `create_branch` raises a 409 `ArchilApiError` when the name is
+taken or the checkpoint isn't committed yet. Retries after a timeout are safe:
+the SDK sends the same idempotency key on every attempt.
+
 Account-level API keys are top-level helpers:
 
 ```python

@@ -128,6 +128,29 @@ class Delegation:
         )
 
 
+@dataclass(frozen=True)
+class Branch:
+    """An independent, writable fork of a disk, started from a committed checkpoint."""
+
+    root_filesystem_id: str
+    branch_name: str
+    filesystem_id: str
+    from_checkpoint_name: str
+    from_checkpoint_filesystem_id: str
+    created_at: str
+
+    @classmethod
+    def from_json(cls, d: dict) -> "Branch":
+        return cls(
+            root_filesystem_id=d["root_filesystem_id"],
+            branch_name=d["branch_name"],
+            filesystem_id=d["filesystem_id"],
+            from_checkpoint_name=d["from_checkpoint_name"],
+            from_checkpoint_filesystem_id=d["from_checkpoint_filesystem_id"],
+            created_at=d["created_at"],
+        )
+
+
 DiskStatus = Literal["available", "creating", "deleting", "deleted", "failed"]
 
 

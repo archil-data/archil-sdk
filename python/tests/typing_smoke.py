@@ -13,6 +13,7 @@ from archil import (
     AgentToolset,
     Archil,
     ArchilS3Error,
+    Branch,
     Delegation,
     FileSystem,
     Image,
@@ -146,6 +147,11 @@ def sync_usage() -> None:
     delegations: list[Delegation] = d.list_delegations()
     if delegations:
         d.revoke_delegation(delegations[0])
+    branch: Branch = d.create_branch("work", "cp1", from_branch="base")
+    _branch_fs: str = branch.filesystem_id
+    branches: list[Branch] = d.list_branches()
+    _ = branches
+    _same: Branch = d.get_branch(branch.branch_name)
     put = d.put_object("k", b"x")
     _etag = put.etag
     share = d.share("reports/data.pdf", expires_in=604800)
@@ -205,6 +211,10 @@ async def async_usage() -> None:
         delegations: list[Delegation] = await d.list_delegations.aio()
         if delegations:
             await d.revoke_delegation.aio(delegations[0])
+        abranch: Branch = await d.create_branch.aio("work", "cp1")
+        abranches: list[Branch] = await d.list_branches.aio()
+        _ = abranches
+        _again: Branch = await d.get_branch.aio(abranch.branch_name)
         async for page in d.list_objects_pages.aio("p/"):
             for obj in page.objects:
                 _k: str = obj.key
