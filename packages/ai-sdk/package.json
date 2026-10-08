@@ -1,6 +1,6 @@
 {
   "name": "@archildata/ai-sdk",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "description": "Archil filesystem adapter for AI SDK",
   "keywords": [
     "archil",

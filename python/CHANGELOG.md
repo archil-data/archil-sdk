@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.0
+
+### Minor Changes
+
+- 8b2000c: Add `mounts` to sandbox creation and `start` so Archil disks are mounted inside the guest at chosen paths, with read-only, conditional, subdirectory, and delegation-queue options.
+
 ## 0.16.0
 
 ### Minor Changes
