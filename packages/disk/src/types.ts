@@ -18,6 +18,8 @@ export type AzureBlobMount = components["schemas"]["AzureBlobMount"];
 
 export type Delegation = components["schemas"]["DelegationEntry"];
 
+export type Branch = components["schemas"]["BranchResponse"];
+
 export type DiskUser = components["schemas"]["DiskUser"];
 export type TokenUser = components["schemas"]["TokenUser"];
 export type AwsStsUser = components["schemas"]["AwsStsUser"];

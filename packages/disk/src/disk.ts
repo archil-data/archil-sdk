@@ -18,6 +18,7 @@ import type {
   DiskMetrics,
   ConnectedClient,
   Delegation,
+  Branch,
   DiskStatus,
   ExecDiskResult,
   ExecTiming as ExecTimingSchema,
@@ -31,6 +32,22 @@ export interface MountOptions {
   logLevel?: string;
   serverAddress?: string;
   insecure?: boolean;
+}
+
+export interface CreateBranchOptions {
+  /** 1-100 letters, digits, hyphens, or underscores. Unique across the disk. */
+  name: string;
+  /** Name of a committed checkpoint on the source. */
+  fromCheckpoint: string;
+  /** Branch the checkpoint was taken on. Omit to branch from the root disk. */
+  fromBranch?: string;
+  /**
+   * UUID identifying this create. Pass the same key (and options) when you
+   * retry a create yourself, so a retry of one that succeeded returns that
+   * branch instead of a 409. Defaults to a fresh key per call; the SDK's own
+   * retries always reuse it.
+   */
+  idempotencyKey?: string;
 }
 
 export type ExecTiming = ExecTimingSchema;
@@ -528,6 +545,62 @@ export class Disk implements FileSystem {
             body: { clientId, inodeId },
           }),
         "connect",
+      ),
+    );
+  }
+
+  /**
+   * Create a branch: an independent, writable fork of this disk that starts
+   * from a committed checkpoint. Writes on the branch don't affect its source.
+   *
+   * Fails with a 409 if a branch with this name already exists or the
+   * checkpoint is not yet committed, and a 404 if the checkpoint or
+   * `fromBranch` doesn't exist.
+   */
+  async createBranch(options: CreateBranchOptions): Promise<Branch> {
+    // One key for every attempt, so a retry after a timeout returns the branch
+    // the first attempt created instead of a 409.
+    const idempotencyKey = options.idempotencyKey ?? globalThis.crypto.randomUUID();
+    return unwrap(
+      retryApiRequest(
+        () =>
+          this._client.POST("/api/disks/{id}/branches", {
+            params: {
+              path: { id: this.id },
+              header: { "Idempotency-Key": idempotencyKey },
+            },
+            body: {
+              branch_name: options.name,
+              from_checkpoint_name: options.fromCheckpoint,
+              from_branch: options.fromBranch,
+            },
+          }),
+        "transient",
+      ),
+    );
+  }
+
+  /** List every branch of this disk, including branches of branches, in no particular order. */
+  async listBranches(): Promise<Branch[]> {
+    return unwrap(
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/disks/{id}/branches", {
+            params: { path: { id: this.id } },
+          }),
+        "transient",
+      ),
+    );
+  }
+
+  async getBranch(name: string): Promise<Branch> {
+    return unwrap(
+      retryApiRequest(
+        () =>
+          this._client.GET("/api/disks/{id}/branches/{name}", {
+            params: { path: { id: this.id, name } },
+          }),
+        "transient",
       ),
     );
   }

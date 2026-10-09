@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from email.utils import parsedate_to_datetime
 from typing import AsyncIterator, List, Literal, Optional, Union
+from urllib.parse import quote
 from xml.etree.ElementTree import ParseError
 
 from ._http import BodyType, _Transport
 from ._models import (
     AuthorizedUser,
+    Branch,
     CompletedMultipartUpload,
     ConnectedClient,
     Delegation,
@@ -270,6 +273,52 @@ class _Disk:
                 "inodeId": delegation.inode_id,
             },
         )
+
+    async def create_branch(
+        self,
+        name: str,
+        from_checkpoint: str,
+        *,
+        from_branch: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> Branch:
+        """Create a writable branch of this disk from a committed checkpoint.
+
+        ``from_checkpoint`` names a checkpoint on the root disk, or on
+        ``from_branch`` when given. Writes on the branch don't affect its source.
+
+        ``idempotency_key`` is a UUID identifying this create. Pass the same key
+        (and arguments) when you retry a create yourself, so a retry of one that
+        succeeded returns that branch instead of a 409. It defaults to a fresh
+        key per call; the SDK's own retries always reuse it."""
+        body: dict = {"branch_name": name, "from_checkpoint_name": from_checkpoint}
+        if from_branch is not None:
+            body["from_branch"] = from_branch
+        # The transport resends these headers on every attempt, so a retry after a
+        # timeout returns the branch the first attempt created instead of a 409.
+        if idempotency_key is None:
+            idempotency_key = str(uuid.uuid4())
+        data = await self._transport.request_json(
+            "POST",
+            f"/api/disks/{self.id}/branches",
+            json=body,
+            headers={"Idempotency-Key": idempotency_key},
+            retry="transient",
+        )
+        return Branch.from_json(data)
+
+    async def list_branches(self) -> list[Branch]:
+        """List every branch of this disk, including branches of branches, in no particular order."""
+        data = await self._transport.request_json(
+            "GET", f"/api/disks/{self.id}/branches", retry="transient"
+        )
+        return [Branch.from_json(b) for b in data or []]
+
+    async def get_branch(self, name: str) -> Branch:
+        data = await self._transport.request_json(
+            "GET", f"/api/disks/{self.id}/branches/{quote(name, safe='')}", retry="transient"
+        )
+        return Branch.from_json(data)
 
     async def get_allowed_ips(self) -> list[str]:
         data = await self._transport.request_json("GET", f"/api/disks/{self.id}/allowed-ips")

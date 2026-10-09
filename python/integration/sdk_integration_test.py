@@ -329,6 +329,36 @@ def run_sandbox_suite(archil) -> None:
                 pass
 
 
+def run_branch_suite(disk) -> None:
+    """Branch reads and failed creates against the live API. Creating a branch
+    needs a committed checkpoint, and that needs a mount, so a successful create
+    is not covered here; nothing below leaves a branch behind."""
+
+    def expect_api_error(label: str, status: int, fn) -> None:
+        with step(label):
+            try:
+                fn()
+                raise AssertionError(f"expected a {status} ArchilApiError")
+            except ArchilApiError as err:
+                assert_that(err.status == status, f"expected status {status}, got {err.status}: {err}")
+
+    with step("list_branches on a fresh disk is empty"):
+        branches = disk.list_branches()
+        assert_that(branches == [], f"expected no branches, got {branches}")
+
+    expect_api_error("get_branch for a missing branch raises 404", 404, lambda: disk.get_branch("no-such-branch"))
+    expect_api_error(
+        "create_branch from a missing checkpoint raises 404",
+        404,
+        lambda: disk.create_branch("never-created", "no-such-checkpoint"),
+    )
+    expect_api_error(
+        "create_branch from a missing source branch raises 404",
+        404,
+        lambda: disk.create_branch("never-created", "cp", from_branch="no-such-branch"),
+    )
+
+
 def run_s3_object_suite(disk) -> None:
     print("\n--- S3-compatible object API (put/get/head/list/delete) ---")
     prefix = f"sdk-s3-test-{uuid.uuid4()}/"
@@ -587,6 +617,8 @@ def main() -> None:
         with step("Add token user"):
             user = disk.add_user(TokenUser(nickname="integration-test"))
             assert_that(bool(user.identifier), "add_user did not return an identifier")
+
+        run_branch_suite(disk)
 
         run_s3_object_suite(disk)
         run_s3_advanced_suite(disk)

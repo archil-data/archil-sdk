@@ -220,6 +220,7 @@ class _Transport:
         *,
         params: Optional[dict] = None,
         json: Optional[Any] = None,
+        headers: Optional[dict[str, str]] = None,
         retry: _RetryMode = "none",
         retry_throttled: bool = False,
     ) -> Any:
@@ -227,7 +228,7 @@ class _Transport:
         ``retry_throttled`` keeps resending while the control plane reports no
         capacity (or rate-limits), up to the client's ``max_throttle_wait``."""
         body = await self._request_envelope(
-            method, path, params=params, json=json, retry=retry, retry_throttled=retry_throttled
+            method, path, params=params, json=json, headers=headers, retry=retry, retry_throttled=retry_throttled
         )
         return body.get("data")
 
@@ -263,6 +264,7 @@ class _Transport:
         *,
         params,
         json,
+        headers: Optional[dict[str, str]] = None,
         allow_empty: bool = False,
         retry: _RetryMode = "none",
         retry_throttled: bool = False,
@@ -282,6 +284,7 @@ class _Transport:
                     url,
                     params=clean_params,
                     json=json,
+                    headers=headers,
                     timeout=self._timeout,
                 )
             except _CONNECT_ERRORS:

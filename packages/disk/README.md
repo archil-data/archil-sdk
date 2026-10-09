@@ -703,6 +703,38 @@ A delegation has no ID of its own — it is identified by the
 connected to the disk. `path` is resolved best-effort by the server and may be
 absent.
 
+## Branches
+
+A branch is an independent, writable fork of a disk that starts from a
+committed checkpoint. Writes on a branch don't affect its source. Create a
+checkpoint from a mounted disk with `archil checkpoints create <mountpoint> <name>`,
+then branch from it:
+
+```ts
+const disk = await archil.disks.get("dsk-0123456789abcdef");
+
+const branch = await disk.createBranch({ name: "experiment", fromCheckpoint: "nightly" });
+// { branch_name, filesystem_id, from_checkpoint_name, created_at, ... }
+
+// Branch from a checkpoint taken on another branch:
+await disk.createBranch({ name: "experiment-2", fromCheckpoint: "cp1", fromBranch: "experiment" });
+
+await disk.listBranches();
+await disk.getBranch("experiment");
+```
+
+Branch names are 1-100 letters, digits, hyphens, or underscores, and are unique
+across the disk. `createBranch` rejects with a 409 `ArchilApiError` when the
+name is taken or the checkpoint isn't committed yet. The SDK's own retries are
+safe: it sends the same idempotency key on every attempt. To retry a create
+yourself, pass your own key and reuse it, so a retry of a create that already
+succeeded returns that branch instead of a 409:
+
+```ts
+const idempotencyKey = crypto.randomUUID(); // store it alongside the job
+await disk.createBranch({ name: "experiment", fromCheckpoint: "nightly", idempotencyKey });
+```
+
 A `Workspace` is a full filesystem in its own right — it has the same object API
 a `Disk` does (`getObject` / `putObject` / `deleteObject` / `listObjects` /
 `grep` / `exec`; both implement the `FileSystem` interface), so you can use it

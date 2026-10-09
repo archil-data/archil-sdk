@@ -73,6 +73,7 @@ export type {
 export { Disk, DiskMultipart, effectiveUploadPartSize } from "./disk.js";
 export type {
   MountOptions,
+  CreateBranchOptions,
   ExecResult,
   GrepOptions,
   GrepResult,
@@ -124,6 +125,7 @@ export type {
   DiskMetrics,
   ConnectedClient,
   Delegation,
+  Branch,
   AuthorizedUser,
   CreateDiskRequest,
   RootAttrs,
