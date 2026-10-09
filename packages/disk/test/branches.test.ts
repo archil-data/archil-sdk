@@ -108,6 +108,24 @@ test("createBranch() uses a fresh Idempotency-Key per call", async () => {
   );
 });
 
+test("createBranch() sends a caller-supplied Idempotency-Key on every attempt", async () => {
+  const key = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+  let attempt = 0;
+  const { disk: d, calls } = disk(() =>
+    ++attempt === 1
+      ? { status: 504, body: { success: false, error: "Request timed out" } }
+      : { status: 201, body: { success: true, data: branch } },
+  );
+
+  await d.createBranch({ name: "work", fromCheckpoint: "cp1", idempotencyKey: key });
+
+  assert.deepEqual(
+    calls.map((c) => c.params?.header?.["Idempotency-Key"]),
+    [key, key],
+  );
+  assert.equal((calls[0].body as Record<string, unknown>).idempotencyKey, undefined);
+});
+
 test("createBranch() surfaces a 409 without retrying", async () => {
   const { disk: d, calls } = disk(() => ({
     status: 409,

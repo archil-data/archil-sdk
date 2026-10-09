@@ -386,8 +386,17 @@ disk.get_branch("experiment")
 
 Branch names are 1-100 letters, digits, hyphens, or underscores, and are unique
 across the disk. `create_branch` raises a 409 `ArchilApiError` when the name is
-taken or the checkpoint isn't committed yet. Retries after a timeout are safe:
-the SDK sends the same idempotency key on every attempt.
+taken or the checkpoint isn't committed yet. The SDK's own retries are safe: it
+sends the same idempotency key on every attempt. To retry a create yourself, pass
+your own key and reuse it, so a retry of a create that already succeeded returns
+that branch instead of a 409:
+
+```python
+import uuid
+
+key = str(uuid.uuid4())  # store it alongside the job
+disk.create_branch("experiment", "nightly", idempotency_key=key)
+```
 
 Account-level API keys are top-level helpers:
 

@@ -41,6 +41,13 @@ export interface CreateBranchOptions {
   fromCheckpoint: string;
   /** Branch the checkpoint was taken on. Omit to branch from the root disk. */
   fromBranch?: string;
+  /**
+   * UUID identifying this create. Pass the same key (and options) when you
+   * retry a create yourself, so a retry of one that succeeded returns that
+   * branch instead of a 409. Defaults to a fresh key per call; the SDK's own
+   * retries always reuse it.
+   */
+  idempotencyKey?: string;
 }
 
 export type ExecTiming = ExecTimingSchema;
@@ -553,7 +560,7 @@ export class Disk implements FileSystem {
   async createBranch(options: CreateBranchOptions): Promise<Branch> {
     // One key for every attempt, so a retry after a timeout returns the branch
     // the first attempt created instead of a 409.
-    const idempotencyKey = globalThis.crypto.randomUUID();
+    const idempotencyKey = options.idempotencyKey ?? globalThis.crypto.randomUUID();
     return unwrap(
       retryApiRequest(
         () =>

@@ -326,6 +326,23 @@ def test_create_branch_uses_a_fresh_key_per_call(archil, router):
     assert first.headers["idempotency-key"] != second.headers["idempotency-key"]
 
 
+def test_create_branch_sends_caller_supplied_idempotency_key(archil, router):
+    d = _disk(archil, router)
+    key = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    responses = iter(
+        [
+            error_envelope(504, "Request timed out"),
+            httpx.Response(201, json={"success": True, "data": BRANCH_JSON}),
+        ]
+    )
+    router.set(lambda req: next(responses))
+
+    d.create_branch("work", "cp1", idempotency_key=key)
+
+    assert [r.headers["idempotency-key"] for r in router.requests[-2:]] == [key, key]
+    assert "idempotency_key" not in router.requests[-1].json
+
+
 def test_create_branch_conflict_is_not_retried(archil, router):
     d = _disk(archil, router)
     router.set(lambda req: error_envelope(409, 'Branch "work" already exists'))

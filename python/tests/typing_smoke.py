@@ -211,7 +211,7 @@ async def async_usage() -> None:
         delegations: list[Delegation] = await d.list_delegations.aio()
         if delegations:
             await d.revoke_delegation.aio(delegations[0])
-        abranch: Branch = await d.create_branch.aio("work", "cp1")
+        abranch: Branch = await d.create_branch.aio("work", "cp1", idempotency_key="6ba7b810-9dad-11d1-80b4-00c04fd430c8")
         abranches: list[Branch] = await d.list_branches.aio()
         _ = abranches
         _again: Branch = await d.get_branch.aio(abranch.branch_name)

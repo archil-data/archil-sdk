@@ -557,18 +557,28 @@ class Disk:
     revoke_delegation: __revoke_delegation_spec
 
     class __create_branch_spec(typing_extensions.Protocol):
-        def __call__(self, /, name: str, from_checkpoint: str, *, from_branch: str | None = None) -> archil._models.Branch:
+        def __call__(self, /, name: str, from_checkpoint: str, *, from_branch: str | None = None, idempotency_key: str | None = None) -> archil._models.Branch:
             """Create a writable branch of this disk from a committed checkpoint.
 
             ``from_checkpoint`` names a checkpoint on the root disk, or on
-            ``from_branch`` when given. Writes on the branch don't affect its source."""
+            ``from_branch`` when given. Writes on the branch don't affect its source.
+
+            ``idempotency_key`` is a UUID identifying this create. Pass the same key
+            (and arguments) when you retry a create yourself, so a retry of one that
+            succeeded returns that branch instead of a 409. It defaults to a fresh
+            key per call; the SDK's own retries always reuse it."""
             ...
 
-        async def aio(self, /, name: str, from_checkpoint: str, *, from_branch: str | None = None) -> archil._models.Branch:
+        async def aio(self, /, name: str, from_checkpoint: str, *, from_branch: str | None = None, idempotency_key: str | None = None) -> archil._models.Branch:
             """Create a writable branch of this disk from a committed checkpoint.
 
             ``from_checkpoint`` names a checkpoint on the root disk, or on
-            ``from_branch`` when given. Writes on the branch don't affect its source."""
+            ``from_branch`` when given. Writes on the branch don't affect its source.
+
+            ``idempotency_key`` is a UUID identifying this create. Pass the same key
+            (and arguments) when you retry a create yourself, so a retry of one that
+            succeeded returns that branch instead of a 409. It defaults to a fresh
+            key per call; the SDK's own retries always reuse it."""
             ...
 
     create_branch: __create_branch_spec
