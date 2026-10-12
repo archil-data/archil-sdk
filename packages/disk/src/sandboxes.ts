@@ -24,7 +24,7 @@ export interface CreateSandboxRequest {
    * Public Linux OCI image reference for the sandbox's root filesystem.
    * Docker Hub shorthand and any public registry are accepted; the tag
    * defaults to `latest`, and mutable tags are pinned to immutable digests
-   * when the sandbox is created. Defaults to `ubuntu:26.04`.
+   * when the sandbox is created. Defaults to `node:24-bookworm`.
    *
    * Examples: `ubuntu`, `node:24-bookworm`, `ghcr.io/owner/app:v2`,
    * `alpine@sha256:<digest>`.

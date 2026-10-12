@@ -149,7 +149,7 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   const create = waitOption(formatOption(program.command("create [name]").description("Create a sandbox")))
     .option("--vcpu-count <count>", "Virtual CPU count (1-32)")
     .option("--mem-size-mib <mib>", "Memory in MiB (256-65536)")
-    .option("--base-image <image>", "Public OCI image", "ubuntu:26.04")
+    .option("--base-image <image>", "Public OCI image (default: node:24-bookworm)")
     .option("--max-ttl-seconds <seconds>", "Maximum sandbox lifetime")
     .option("--idle-ttl-seconds <seconds>", "Seconds without a process connection before pausing (0 disables)")
     .option("--max-concurrent-processes <count>", "Maximum attached processes")

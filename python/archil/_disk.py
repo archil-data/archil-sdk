@@ -36,6 +36,7 @@ from ._models import (
     S3Object,
     ShareUrl,
     UploadPart,
+    _drop_none,
 )
 from ._s3xml import (
     build_complete_multipart_upload,
@@ -390,10 +391,10 @@ class _Disk:
         *,
         directory: str,
         pattern: str,
-        recursive: bool = False,
-        max_duration_seconds: int = 30,
-        concurrency: int = 50,
-        max_results: int = 1000,
+        recursive: Optional[bool] = None,
+        max_duration_seconds: Optional[int] = None,
+        concurrency: Optional[int] = None,
+        max_results: Optional[int] = None,
     ) -> GrepResult:
         """Constant-time parallel grep across files on this disk. The returned
         ``stopped_reason`` says whether the search ran to completion or
@@ -401,14 +402,16 @@ class _Disk:
         data = await self._transport.request_json(
             "POST",
             f"/api/disks/{self.id}/grep",
-            json={
-                "directory": directory,
-                "pattern": pattern,
-                "recursive": recursive,
-                "maxDurationSeconds": max_duration_seconds,
-                "concurrency": concurrency,
-                "maxResults": max_results,
-            },
+            json=_drop_none(
+                {
+                    "directory": directory,
+                    "pattern": pattern,
+                    "recursive": recursive,
+                    "maxDurationSeconds": max_duration_seconds,
+                    "concurrency": concurrency,
+                    "maxResults": max_results,
+                }
+            ),
         )
         return GrepResult.from_json(data)
 

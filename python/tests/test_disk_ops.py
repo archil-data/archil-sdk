@@ -194,8 +194,7 @@ def test_exec_and_grep(archil, router):
     )
     empty = d.grep(directory="logs", pattern="nope")
     assert empty.matches == []
-    body = router.requests[-1].json
-    assert body["maxDurationSeconds"] == 30 and body["concurrency"] == 50 and body["maxResults"] == 1000
+    assert router.requests[-1].json == {"directory": "logs", "pattern": "nope"}
 
 
 def test_share_default_expiry(archil, router):

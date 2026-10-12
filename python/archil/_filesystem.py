@@ -58,10 +58,10 @@ class FileSystem(Protocol):
         *,
         directory: str,
         pattern: str,
-        recursive: bool = False,
-        max_duration_seconds: int = 30,
-        concurrency: int = 50,
-        max_results: int = 1000,
+        recursive: Optional[bool] = None,
+        max_duration_seconds: Optional[int] = None,
+        concurrency: Optional[int] = None,
+        max_results: Optional[int] = None,
     ) -> GrepResult:
         """Constant-time parallel grep."""
         ...
