@@ -55,6 +55,25 @@ importers:
         specifier: 'catalog:'
         version: 4.1.9(@types/node@20.19.43)(vite@8.1.3(@types/node@20.19.43)(esbuild@0.28.1)(tsx@4.23.0)(yaml@2.9.0))
 
+  packages/archil:
+    dependencies:
+      disk:
+        specifier: workspace:*
+        version: link:../disk
+    devDependencies:
+      '@types/node':
+        specifier: ^26.0.1
+        version: 26.1.0
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.22.3(tsx@4.23.0)(typescript@6.0.3)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.9(@types/node@26.1.0)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(tsx@4.23.0)(yaml@2.9.0))
+
   packages/disk:
     dependencies:
       '@archildata/api-types':

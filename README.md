@@ -3,5 +3,6 @@
 This repository contains SDKs for using Archil. It currently contains:
 
 - [`disk`](./packages/disk/README.md) - A client for using Archil disks.
+- [`archil`](./packages/archil/README.md) - npm alias for `disk`, for anyone who runs `npm install archil`.
 - [`@archildata/sqlite`](./packages/sqlite/README.md) - Run serverless SQLite databases on Archil disks.
-- [`archil`](./python/README.md) - Pure-Python SDK for disks, serverless execution, object access, workspaces, and agent tools.
+- [`archil` (PyPI)](./python/README.md) - Pure-Python SDK for disks, serverless execution, object access, workspaces, and agent tools.
