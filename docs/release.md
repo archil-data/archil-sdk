@@ -18,7 +18,7 @@ pnpm changeset
 
 Pick the package(s) your change affects, choose a bump type (`patch`, `minor`, or `major`), and write a short summary — it becomes the changelog entry. Commit the generated file in `.changeset/` with your PR.
 
-Select `archil` for Python changes, `disk` for the JavaScript SDK, or both when a change affects both SDKs. Python's `package.json` is private because it supplies Changesets metadata; it is never published to npm.
+Select `@archildata/python` for Python changes, `disk` for the JavaScript SDK, or both when a change affects both SDKs. Python's `package.json` is private because it supplies Changesets metadata; it is never published to npm. Do not select `archil` for Python changes: that is the npm alias package for `disk` (`packages/archil`), which Changesets bumps automatically whenever `disk` is released.
 
 Skip the changeset for changes that don't affect published packages (CI config, docs, tests) or only affect internals (refactoring, optimization).
 
@@ -50,7 +50,7 @@ After the initial version exists on npm, configure trusted publishing for the pa
 
 ## Publishing the Python SDK
 
-Add an `archil` changeset with your Python change. The shared **Version Packages** PR handles the version and changelog; no manual version edits or tags are needed.
+Add an `@archildata/python` changeset with your Python change. The shared **Version Packages** PR handles the version and changelog; no manual version edits or tags are needed.
 
 The [Python release workflow](../.github/workflows/python-release.yaml) runs when `python/pyproject.toml` or the workflow changes on `main`. It skips publishing if the `python/vX.Y.Z` tag for the current version already exists. An unreleased version runs the Python tests, lint, and type checks, builds the wheel and source distribution, publishes to PyPI, and creates the `python/vX.Y.Z` tag and GitHub release at that commit.
 
