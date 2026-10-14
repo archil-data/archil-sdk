@@ -1,5 +1,11 @@
 # disk
 
+## 1.9.0
+
+### Minor Changes
+
+- edcccb7: Disks can create, list, and get branches: writable forks that start from a committed checkpoint (`createBranch` / `listBranches` / `getBranch` in JavaScript, `create_branch` / `list_branches` / `get_branch` in Python).
+
 ## 1.8.0
 
 ### Minor Changes

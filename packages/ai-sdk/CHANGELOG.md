@@ -1,5 +1,12 @@
 # @archildata/ai-sdk
 
+## 0.0.20
+
+### Patch Changes
+
+- Updated dependencies [edcccb7]
+  - disk@1.9.0
+
 ## 0.0.19
 
 ### Patch Changes
