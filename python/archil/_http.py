@@ -93,9 +93,11 @@ def _json_body(resp: httpx.Response) -> Optional[dict]:
 
 
 def _auth_header(api_key: str) -> str:
-    # Mirror the control-plane REST convention: a single leading "key-" prefix.
+    # A standard bearer token, so proxies that inject credentials into
+    # "Authorization: Bearer ..." work. The key keeps a single "key-" prefix,
+    # which the control plane and S3 gateway parse after stripping the scheme.
     stripped = api_key[4:] if api_key.startswith("key-") else api_key
-    return f"key-{stripped}"
+    return f"Bearer key-{stripped}"
 
 
 def _origin(url: str) -> str:

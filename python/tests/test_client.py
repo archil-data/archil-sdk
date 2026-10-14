@@ -1,3 +1,4 @@
+import httpx
 import pytest
 
 from archil import Archil
@@ -134,3 +135,28 @@ async def test_control_plane_clients_share_http2_pool_by_origin_and_api_key():
 
     await different_credential.aclose()
     await different_origin.aclose()
+
+
+@pytest.mark.parametrize("api_key", ["key-abc123", "abc123"])
+def test_control_plane_and_s3_send_bearer_api_key(api_key):
+    seen: list[tuple[str, str]] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.host, request.headers["authorization"]))
+        if request.url.host == "cp.test":
+            return ok_envelope(DISK_JSON)
+        return httpx.Response(200, headers={"etag": '"ok"'})
+
+    client = Archil(
+        api_key=api_key,
+        region="aws-us-east-1",
+        base_url="http://cp.test",
+        s3_base_url="http://s3.test",
+        _http_transport=httpx.MockTransport(handle),
+    )
+    try:
+        client.disks.get("dsk-1").put_object("hello.txt", b"hi")
+    finally:
+        client.close()
+
+    assert seen == [("cp.test", "Bearer key-abc123"), ("s3.test", "Bearer key-abc123")]

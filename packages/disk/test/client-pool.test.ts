@@ -23,7 +23,7 @@ test("control-plane clients share one connection per origin and API key", async 
     assert.equal(control.connections, 1, "same origin and API key should share a connection");
     assert.deepEqual(
       control.requests.map((request) => request.headers.get("authorization")),
-      ["key-shared", "key-shared"],
+      ["Bearer key-shared", "Bearer key-shared"],
     );
 
     const differentCredential = new Archil({
