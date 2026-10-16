@@ -117,7 +117,7 @@ async def test_control_plane_clients_share_http2_pool_by_origin_and_api_key():
     from archil._http import _Transport
 
     first = _Transport("https://control.example.test/api", "key-shared", None)
-    second = _Transport("https://control.example.test/other-path", "shared", None)
+    second = _Transport("https://control.example.test/other-path", "key-shared", None)
     different_credential = _Transport("https://control.example.test", "key-other", None)
     different_origin = _Transport("https://other-control.example.test", "key-shared", None)
 
@@ -159,4 +159,4 @@ def test_control_plane_and_s3_send_bearer_api_key(api_key):
     finally:
         client.close()
 
-    assert seen == [("cp.test", "Bearer key-abc123"), ("s3.test", "Bearer key-abc123")]
+    assert seen == [("cp.test", f"Bearer {api_key}"), ("s3.test", f"Bearer {api_key}")]

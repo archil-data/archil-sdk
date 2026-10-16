@@ -176,13 +176,13 @@ function createPooledFetch(
 }
 
 /**
- * The `Authorization` value for an API key, accepted with or without its `key-`
- * prefix. Sent as a standard bearer token so proxies that inject credentials
- * into `Authorization: Bearer …` work; the control plane and the S3 gateway
- * strip the scheme before parsing the `key-` credential.
+ * The `Authorization` value for an API key: the key exactly as given, as a
+ * bearer token. Credential-injecting proxies substitute a placeholder only when
+ * it is the whole token, so the SDK must not add a prefix to it. The control
+ * plane accepts the key with or without its `key-` prefix after `Bearer`.
  */
 export function apiKeyAuthorization(apiKey: string): string {
-  return `Bearer key-${apiKey.replace(/^key-/, "")}`;
+  return `Bearer ${apiKey}`;
 }
 
 export function createApiClient(opts: ApiClientOptions): ApiClient {

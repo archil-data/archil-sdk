@@ -27,7 +27,7 @@ def test_list_disks(archil, router):
     assert disks[0].active_data_bytes == 1234
     assert disks[0].total_data_bytes == 5678
     assert disks[0].allowed_ips == ["10.0.0.0/8"]
-    # auth header carries the single key- prefix
+    # auth header carries the key exactly as configured
     assert router.requests[0].headers["authorization"] == "Bearer key-test"
 
 

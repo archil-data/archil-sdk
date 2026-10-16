@@ -14,7 +14,7 @@ test("control-plane clients share one connection per origin and API key", async 
       baseUrl: `${control.url}/api`,
     });
     const second = new Archil({
-      apiKey: "shared",
+      apiKey: "key-shared",
       region: "aws-us-east-1",
       baseUrl: `${control.url}/other-path`,
     });
