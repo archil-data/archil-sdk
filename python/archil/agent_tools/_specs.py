@@ -226,7 +226,6 @@ async def _grep(ctx: ToolContext, args: dict) -> str:
         pattern=pattern,
         recursive=recursive,
         max_results=max_results,
-        max_duration_seconds=30,
     )
     caveat = _grep_caveat(result)
     if not result.matches:

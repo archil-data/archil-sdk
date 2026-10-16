@@ -235,10 +235,10 @@ class _Workspace:
         *,
         directory: str,
         pattern: str,
-        recursive: bool = False,
-        max_duration_seconds: int = 30,
-        concurrency: int = 50,
-        max_results: int = 1000,
+        recursive: Optional[bool] = None,
+        max_duration_seconds: Optional[int] = None,
+        concurrency: Optional[int] = None,
+        max_results: Optional[int] = None,
     ) -> GrepResult:
         covered = self._covered(directory)
         # Fan out resiliently: a disk that errors contributes a "list_failed"
@@ -277,7 +277,7 @@ class _Workspace:
         # Merging across disks can exceed the cap even when every disk completed,
         # so flag the truncation ourselves before slicing — otherwise the extra
         # matches are dropped with no signal.
-        if len(matches) > max_results:
+        if max_results is not None and len(matches) > max_results:
             reasons.add("max_results")
         # Report the most serious reason so a listing/scan failure on one disk
         # isn't masked by a truncation reason on another.

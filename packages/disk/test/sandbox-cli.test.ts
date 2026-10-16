@@ -157,6 +157,7 @@ test("create validates options, maps repeated values, and dispatches no-wait", a
   assert.equal(create.mock.calls[0]![0].name, "agent-task");
   assert.equal(create.mock.calls[0]![0].memSizeMiB, 512);
   assert.equal(create.mock.calls[0]![0].idleTtlSeconds, 0);
+  assert.equal(create.mock.calls[0]![0].baseImage, undefined);
   assert.deepEqual(create.mock.calls[0]![1], { wait: false });
 
   const invalidMemory = harness([]);
