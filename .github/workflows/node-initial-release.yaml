@@ -14,8 +14,13 @@ jobs:
   publish:
     name: Publish initial Node package versions
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm provenance
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:
@@ -32,6 +37,9 @@ jobs:
       - name: Build packages
         run: pnpm run build
 
+      # npm only allows configuring a trusted publisher on a package that already
+      # exists, so first versions need a token. Add the trusted publisher afterwards
+      # so node-release.yaml can publish the package without one.
       - name: Publish initial versions
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -47,5 +55,5 @@ jobs:
           printf "  %s\n" $packages
 
           for package in $packages; do
-            pnpm --filter "$package" publish --access public --no-git-checks
+            pnpm --filter "$package" publish --access public --provenance --no-git-checks
           done
