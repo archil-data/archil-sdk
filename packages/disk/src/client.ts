@@ -112,8 +112,8 @@ interface PooledTransport {
 
 const sharedTransports = new Map<string, Promise<PooledTransport>>();
 
-function dispatcherKey(baseUrl: string, apiKey: string, ca?: Buffer[]): string {
-  return JSON.stringify([new URL(baseUrl).origin, apiKey, ca?.map((cert) => cert.toString("base64"))]);
+function dispatcherKey(baseUrl: string, authorization: string, ca?: Buffer[]): string {
+  return JSON.stringify([new URL(baseUrl).origin, authorization, ca?.map((cert) => cert.toString("base64"))]);
 }
 
 function getSharedTransport(key: string, ca?: Buffer[]): Promise<PooledTransport> {
@@ -143,7 +143,7 @@ function getSharedTransport(key: string, ca?: Buffer[]): Promise<PooledTransport
 
 function createPooledFetch(
   baseUrl: string,
-  apiKey: string,
+  authorization: string,
   tls?: ArchilTlsOptions,
 ): ((request: Request) => Promise<Response>) | undefined {
   if (!isNodeRuntime()) {
@@ -155,7 +155,7 @@ function createPooledFetch(
   const ca = tls?.ca === undefined
     ? undefined
     : (Array.isArray(tls.ca) ? tls.ca : [tls.ca]).map((cert) => Buffer.from(cert));
-  const key = dispatcherKey(baseUrl, apiKey, ca);
+  const key = dispatcherKey(baseUrl, authorization, ca);
 
   return async (request: Request): Promise<Response> => {
     const { fetch, dispatcher } = await getSharedTransport(key, ca);
@@ -175,14 +175,24 @@ function createPooledFetch(
   };
 }
 
+/**
+ * The `Authorization` value for an API key: the key exactly as given, as a
+ * bearer token. Credential-injecting proxies substitute a placeholder only when
+ * it is the whole token, so the SDK must not add a prefix to it. The control
+ * plane accepts the key with or without its `key-` prefix after `Bearer`.
+ */
+export function apiKeyAuthorization(apiKey: string): string {
+  return `Bearer ${apiKey}`;
+}
+
 export function createApiClient(opts: ApiClientOptions): ApiClient {
   const baseUrl = opts.baseUrl ?? resolveBaseUrl(opts.region);
-  const apiKey = `key-${opts.apiKey.replace(/^key-/, '')}`;
+  const authorization = apiKeyAuthorization(opts.apiKey);
   return createClient<paths>({
     baseUrl,
-    fetch: createPooledFetch(baseUrl, apiKey, opts.tls),
+    fetch: createPooledFetch(baseUrl, authorization, opts.tls),
     headers: {
-      Authorization: apiKey,
+      Authorization: authorization,
       // Identifies the JS SDK (and its version) to the control plane. Honored
       // by Node's fetch; browsers treat User-Agent as a forbidden header and
       // drop it, which is fine — the SDK's primary use is server-side.
