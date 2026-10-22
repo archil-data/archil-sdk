@@ -43,10 +43,12 @@
     "build": "tsdown",
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "generate:process-protocol": "protoc -I proto --es_out=src/generated --es_opt=target=ts proto/process.proto"
   },
   "dependencies": {
     "@archildata/api-types": "^0.0.54",
+    "@bufbuild/protobuf": "^2.16.0",
     "@clack/prompts": "^1.7.0",
     "commander": "^14.0.3",
     "fast-xml-parser": "^5.7.0",
@@ -56,6 +58,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@bufbuild/protoc-gen-es": "^2.16.0",
     "@types/node": "^26.0.1",
     "tsdown": "catalog:",
     "typescript": "catalog:",

@@ -326,6 +326,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
         removeSignalListeners();
         if (remote && !result && !terminationStarted) await remote.kill().catch(() => {});
         await remote?.disconnect().catch(() => {});
+        await sandbox.processes.disconnect();
       }
     });
 

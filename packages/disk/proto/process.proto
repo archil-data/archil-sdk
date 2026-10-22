@@ -1,0 +1,158 @@
+syntax = "proto3";
+package archil.process.v1;
+
+// One message per WebSocket message, or per library-delimited guest record.
+// Channel IDs identify attachments/operations, not persistent processes.
+message Envelope {
+  uint32 channel_id = 1;
+  oneof body {
+    bytes stdin = 2;
+    Output stdout = 3;
+    Output stderr = 4;
+    Start start = 5;
+    Attach attach = 6;
+    ProcessIdentity started = 7;
+    ProcessIdentity attached = 8;
+    Exit exit = 9;
+    Error error = 10;
+    Empty close_stdin = 11;
+    Empty detach = 12;
+    Kill kill = 13;
+    Resize resize = 14;
+    Empty killed = 15;
+    Empty resized = 16;
+    Settings settings = 17;
+    WindowUpdate window_update = 18;
+    Empty drain = 19;
+    // Only runtime-to-guest. Public Start never authorizes these settings.
+    GuestStart guest_start = 20;
+    Empty detached = 21;
+    ControlRequest control_request = 22;
+    ControlResponse control_response = 23;
+  }
+}
+message Empty {}
+message Output { uint64 offset = 1; bytes data = 2; }
+message Start {
+  string command = 1;
+  optional string cwd = 2;
+  TerminalSize terminal = 3;
+  map<string, string> env = 4;
+  optional uint64 timeout_seconds = 5;
+}
+message TerminalSize { uint32 rows = 1; uint32 cols = 2; }
+message Attach { string process_id = 1; uint64 offset = 2; }
+message ProcessIdentity { string process_id = 1; }
+message Kill { string process_id = 1; }
+message Resize { string process_id = 1; TerminalSize terminal = 2; }
+message Exit {
+  enum Status {
+    UNSPECIFIED = 0;
+    COMPLETED = 1;
+    FAILED = 2;
+    CANCELLED = 3;
+    TIMED_OUT = 4;
+  }
+  Status status = 1;
+  optional int32 exit_code = 2;
+  optional string exit_reason = 3;
+  uint64 cursor = 4;
+  bool oom_killed = 5;
+}
+message Error { string code = 1; string message = 2; }
+message Settings {
+  // Per-channel credit in each direction. Data costs its byte length plus
+  // DATA_CREDIT_OVERHEAD, bounding both buffered bytes and tiny-message count.
+  uint32 receive_window = 1;
+  uint32 max_data_bytes = 2;
+  uint32 max_channels = 3;
+}
+message WindowUpdate { uint32 credit = 1; }
+message GuestStart {
+  repeated string argv = 1;
+  map<string, string> environment = 2;
+  optional string working_directory = 3;
+  bool pty = 4;
+  bool keep_mounted = 5;
+  TerminalSize terminal = 6;
+  optional uint64 timeout_seconds = 7;
+}
+
+
+// Lifecycle RPCs use channel zero and are binary from the first message.
+message ControlRequest {
+  oneof body {
+    Empty health = 1;
+    Initialize initialize = 2;
+    SetClock set_clock = 3;
+    Empty sync = 4;
+    Shutdown shutdown = 5;
+    Empty refresh_service_projection = 6;
+    InstallIdentity install_identity = 7;
+    InstallEgressCa install_egress_ca = 8;
+    Empty close_outgoing_connections = 9;
+  }
+}
+message ControlResponse {
+  oneof body {
+    Health health = 1;
+    Empty clock_set = 2;
+    Empty sync_complete = 3;
+    Empty shutdown_complete = 4;
+    CommandOutput output = 5;
+    CommandExit exit = 6;
+    AgentFailure error = 7;
+    ServiceProjection service_projection = 8;
+  }
+}
+message Initialize {
+  string container_id = 1;
+  map<string, DiskMount> mounts = 2;
+  optional uint64 wall_clock_unix_nanos = 3;
+}
+message DiskMount {
+  string disk_id = 1;
+  optional string region = 2;
+  optional string environment = 3;
+  optional string server = 4;
+  string auth_token = 5;
+  bool shared = 6;
+  bool insecure = 7;
+  string subdirectory = 8;
+  bool read_only = 9;
+  bool conditional = 10;
+  optional uint64 delegation_queue_timeout_ms = 11;
+  repeated string checkout_paths = 12;
+  optional string prebaked_endpoint = 13;
+}
+message SetClock { int64 unix_nanos = 1; }
+message Shutdown { bool sync_filesystems = 1; uint64 termination_grace_ms = 2; }
+message InstallIdentity {
+  string ssh_host_ed25519_key = 1;
+  string ssh_host_ed25519_key_pub = 2;
+  string ssh_host_ecdsa_key = 3;
+  string ssh_host_ecdsa_key_pub = 4;
+  string machine_id = 5;
+}
+message InstallEgressCa { string certificate_pem = 1; }
+message Health {
+  enum Lifecycle {
+    UNSPECIFIED = 0;
+    AWAITING_MOUNT = 1;
+    MOUNTING = 2;
+    READY = 3;
+    TEARING_DOWN = 4;
+    FINISHED = 5;
+    FAILED = 6;
+  }
+  Lifecycle lifecycle = 1;
+}
+message CommandOutput { bool stderr = 1; bytes data = 2; }
+message CommandExit {
+  int32 code = 1;
+  bool oom_killed = 2;
+  // Existing opaque CLI diagnostic data, not a transport or I/O encoding.
+  optional bytes mount_timings_json = 3;
+}
+message AgentFailure { string message = 1; optional string public_message = 2; }
+message ServiceProjection { uint64 revision = 1; repeated uint32 ports = 2; }

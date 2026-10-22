@@ -51,6 +51,7 @@ function fakeSandbox(overrides: Partial<Sandbox> = {}): Sandbox {
     exec: vi.fn(async () => ({ status: "completed", exitCode: 0, stdout: "", stderr: "" })),
     run: vi.fn(),
     ...overrides,
+    processes: { disconnect: vi.fn(async () => undefined) },
   } as unknown as Sandbox;
 }
 

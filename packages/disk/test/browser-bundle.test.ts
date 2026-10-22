@@ -48,6 +48,7 @@ async function bundleForBrowser(format: BundleFormat, globalName?: string) {
     deps: {
       alwaysBundle: (id) =>
         id === "openapi-fetch" ||
+        id.startsWith("@bufbuild/protobuf") ||
         id === "fast-xml-parser" ||
         id === "zod" ||
         id.startsWith("zod/"),

@@ -54,6 +54,7 @@ function harness(processOverrides: Partial<SandboxProcess> = {}, startError?: Er
     ...processOverrides,
   } as unknown as SandboxProcess;
   const sandbox = {
+    processes: { disconnect: vi.fn(async () => undefined) },
     run: vi.fn(async (_command: string, options: { onOutput?: typeof output }) => {
       if (startError) throw startError;
       await startGate;

@@ -1,4 +1,4 @@
-import { MAX_RETRIES, retrySleep } from "./retry.js";
+import { BinaryChannel, type ProcessSocket } from "./process-connection.js";
 import type { Sandbox } from "./sandbox.js";
 
 export type SandboxProcessStatus =
@@ -83,61 +83,13 @@ type ProcessControlEvent =
 
 const PROCESS_STDIN_CHUNK_BYTES = 1024 * 1024;
 
-async function waitForSocketOpen(socket: WebSocket): Promise<void> {
-  if (socket.readyState === WebSocket.OPEN) return;
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      socket.removeEventListener("open", opened);
-      socket.removeEventListener("error", failed);
-      socket.removeEventListener("close", closed);
-    };
-    const opened = () => {
-      cleanup();
-      resolve();
-    };
-    const failed = () => {
-      cleanup();
-      reject(new Error("Process connection failed"));
-    };
-    const closed = () => {
-      cleanup();
-      reject(new Error("Process connection closed before opening"));
-    };
-    socket.addEventListener("open", opened, { once: true });
-    socket.addEventListener("error", failed, { once: true });
-    socket.addEventListener("close", closed, { once: true });
-  });
-}
-
-export async function openProcessSocket(
-  connectionUrl: () => Promise<string>,
-): Promise<WebSocket> {
-  for (let attempt = 0; ; attempt++) {
-    const url = await connectionUrl();
-    let socket: WebSocket | undefined;
-    try {
-      socket = new WebSocket(url);
-      await waitForSocketOpen(socket);
-      return socket;
-    } catch (error) {
-      try {
-        socket?.close();
-      } catch {}
-      if (attempt >= MAX_RETRIES) {
-        throw new Error(
-          `Process connection failed after ${attempt + 1} attempts`,
-          { cause: error },
-        );
-      }
-    }
-    await retrySleep(attempt);
-  }
-}
-
 /** @deprecated Use Sandbox.run() and Sandbox.attach(). Removed in the next version. */
 export class SandboxProcesses {
   /** @internal */
-  constructor(private readonly _sandbox: Pick<Sandbox, "run" | "attach">) {}
+  constructor(
+    private readonly _sandbox: Pick<Sandbox, "run" | "attach">,
+    private readonly _disconnect: () => void,
+  ) {}
 
   /** @deprecated Use sandbox.run(). Removed in the next version. */
   start(
@@ -154,6 +106,9 @@ export class SandboxProcesses {
   ): Promise<SandboxProcess> {
     return this._sandbox.attach(processId, options);
   }
+
+  /** Disconnect process transport without terminating guest processes. */
+  async disconnect(): Promise<void> { this._disconnect(); }
 }
 
 export class SandboxProcess {
@@ -165,7 +120,7 @@ export class SandboxProcess {
   private _cursor: number;
   private readonly _onOutput?: SandboxProcessOutputHandler;
   private readonly _collectOutput: boolean;
-  private readonly _connectionUrl: () => Promise<string>;
+  private readonly _openConnection: () => Promise<ProcessSocket>;
   private readonly _controlProcess: (
     request: ProcessControlRequest,
   ) => Promise<void>;
@@ -174,7 +129,7 @@ export class SandboxProcess {
   private readonly _terminal: Promise<SandboxProcessResult>;
   private _resolveTerminal!: (result: SandboxProcessResult) => void;
   private _result?: SandboxProcessResult;
-  private _socket?: WebSocket;
+  private _socket?: ProcessSocket;
   private _connectionClosed?: Promise<void>;
   private _connectionError?: Error;
   private _stdinClosed = false;
@@ -185,14 +140,14 @@ export class SandboxProcess {
     cursor: number,
     onOutput: SandboxProcessOutputHandler | undefined,
     collectOutput: boolean,
-    connectionUrl: () => Promise<string>,
+    openConnection: () => Promise<ProcessSocket>,
     controlProcess: (request: ProcessControlRequest) => Promise<void>,
   ) {
     this._id = processId;
     this._cursor = cursor;
     this._onOutput = onOutput;
     this._collectOutput = collectOutput;
-    this._connectionUrl = connectionUrl;
+    this._openConnection = openConnection;
     this._controlProcess = controlProcess;
     this._terminal = new Promise((resolve) => {
       this._resolveTerminal = resolve;
@@ -219,7 +174,7 @@ export class SandboxProcess {
       typeof data === "string"
         ? new TextEncoder().encode(data)
         : new Uint8Array(data);
-    this._sendInput(bytes);
+    await this._sendInput(bytes);
   }
 
   async resize(size: { cols: number; rows: number }): Promise<void> {
@@ -234,8 +189,15 @@ export class SandboxProcess {
   /** Close stdin. Piped processes only. */
   async closeStdin(): Promise<void> {
     if (this._stdinClosed) return;
-    this._sendControl({ type: "close_stdin" });
+    const socket = this._openSocket();
     this._stdinClosed = true;
+    try {
+      if (socket instanceof BinaryChannel) await socket.closeStdin();
+      else socket.send(JSON.stringify({ type: "close_stdin" }));
+    } catch (error) {
+      this._stdinClosed = false;
+      throw error;
+    }
   }
 
   /** Close this client connection without terminating the process. */
@@ -266,7 +228,7 @@ export class SandboxProcess {
 
   /** @internal */
   async _connect(request: ProcessConnectionRequest): Promise<void> {
-    const socket = await openProcessSocket(this._connectionUrl);
+    const socket = await this._openConnection();
     socket.binaryType = "arraybuffer";
     this._socket = socket;
 
@@ -326,11 +288,18 @@ export class SandboxProcess {
       { once: true },
     );
 
-    socket.send(JSON.stringify(request));
+    const send = () => {
+      try {
+        if (socket instanceof BinaryChannel) socket.sendRequest(request);
+        else socket.send(JSON.stringify(request));
+      } catch (error) { fail(error); socket.close(); }
+    };
+    if (socket.readyState === WebSocket.OPEN) send();
+    else socket.addEventListener("open", send, { once: true });
     await ready;
   }
 
-  private _openSocket(): WebSocket {
+  private _openSocket(): ProcessSocket {
     if (this.status !== "running") {
       throw new Error("Process has exited");
     }
@@ -340,12 +309,12 @@ export class SandboxProcess {
     return this._socket;
   }
 
-  private _sendControl(message: Record<string, unknown>): void {
-    this._openSocket().send(JSON.stringify(message));
-  }
-
-  private _sendInput(data: Uint8Array): void {
+  private async _sendInput(data: Uint8Array): Promise<void> {
     const socket = this._openSocket();
+    if (socket instanceof BinaryChannel) {
+      await socket.send(data);
+      return;
+    }
     for (let offset = 0; offset < data.byteLength; offset += PROCESS_STDIN_CHUNK_BYTES) {
       const chunk = new Uint8Array(
         Math.min(PROCESS_STDIN_CHUNK_BYTES, data.byteLength - offset),
@@ -356,15 +325,15 @@ export class SandboxProcess {
   }
 
   private _handleMessage(
-    data: string | ArrayBuffer,
+    data: string | ArrayBuffer | ProcessControlEvent | SandboxProcessOutput,
     expectedReady: "started" | "attached",
     ready: () => void,
   ): SandboxProcessOutput | undefined {
-    if (typeof data !== "string") {
-      return this._handleOutput(data);
+    if (data instanceof ArrayBuffer) return this._handleOutput(data);
+    if (typeof data === "object" && "stream" in data) {
+      return this._consumeOutput(data.data, data.offset, data.stream);
     }
-
-    const event = JSON.parse(data) as ProcessControlEvent;
+    const event = (typeof data === "string" ? JSON.parse(data) : data) as ProcessControlEvent;
     switch (event.type) {
       case "started":
       case "attached":
@@ -398,7 +367,10 @@ export class SandboxProcess {
         1,
       ),
     );
-    const payload = bytes.subarray(9);
+    return this._consumeOutput(bytes.subarray(9), offset, bytes[0] === 1 ? "stdout" : "stderr");
+  }
+
+  private _consumeOutput(payload: Uint8Array, offset: number, stream: SandboxProcessStream): SandboxProcessOutput | undefined {
     const end = offset + payload.byteLength;
     if (end <= this._cursor) return;
 
@@ -411,7 +383,6 @@ export class SandboxProcess {
     const unread = payload.subarray(skip);
     const unreadOffset = offset + skip;
     this._cursor = end;
-    const stream = bytes[0] === 1 ? "stdout" : "stderr";
     if (this._collectOutput) {
       this._appendText(
         stream,

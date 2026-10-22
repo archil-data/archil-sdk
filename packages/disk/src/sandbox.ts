@@ -1,10 +1,10 @@
+import { BinaryChannel, ProcessConnection } from "./process-connection.js";
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty, unwrapPage } from "./client.js";
 import {
   SandboxProcess,
   SandboxProcesses,
-  openProcessSocket,
   type ProcessControlRequest,
   type SandboxProcessConnectOptions,
   type SandboxProcessResult,
@@ -271,12 +271,14 @@ export class Sandbox {
 
   /** @internal */
   private readonly _client: ApiClient;
+  private readonly _processConnection: ProcessConnection;
 
   /** @internal */
   constructor(data: SandboxWire, client: ApiClient) {
     this._client = client;
     this._apply(data);
-    this.processes = new SandboxProcesses(this);
+    this._processConnection = new ProcessConnection(() => this._connectionUrl());
+    this.processes = new SandboxProcesses(this, () => this._processConnection.disconnect());
     this.files = new SandboxFiles(this);
   }
 
@@ -338,7 +340,7 @@ export class Sandbox {
       0,
       options.onOutput,
       options.collectOutput ?? true,
-      () => this._connectionUrl(),
+      () => this._processConnection.open(),
       (request) => this._control(request),
     );
     const terminal =
@@ -370,7 +372,7 @@ export class Sandbox {
       offset,
       options.onOutput,
       options.collectOutput ?? true,
-      () => this._connectionUrl(),
+      () => this._processConnection.open(),
       (request) => this._control(request),
     );
     await process._connect({ type: "attach", process_id: processId, offset });
@@ -391,12 +393,12 @@ export class Sandbox {
   }
 
   private async _control(request: ProcessControlRequest): Promise<void> {
-    const socket = await openProcessSocket(() => this._connectionUrl());
+    const socket = await this._processConnection.open();
     const expected = request.type === "kill" ? "killed" : "resized";
     await new Promise<void>((resolve, reject) => {
       socket.addEventListener("message", (message) => {
         try {
-          const event = JSON.parse(message.data as string) as
+          const event = (typeof message.data === "string" ? JSON.parse(message.data) : message.data) as
             | { type: "killed" | "resized" }
             | { type: "error"; error: string; message: string };
           if (event.type === "error") {
@@ -422,7 +424,12 @@ export class Sandbox {
           ),
         ),
       );
-      socket.send(JSON.stringify(request));
+      const send = () => {
+        if (socket instanceof BinaryChannel) socket.sendRequest(request);
+        else socket.send(JSON.stringify(request));
+      };
+      if (socket.readyState === WebSocket.OPEN) send();
+      else socket.addEventListener("open", send, { once: true });
     });
   }
 

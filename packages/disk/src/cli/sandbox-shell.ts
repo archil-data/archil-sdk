@@ -150,5 +150,6 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     stdin.pause();
     if (remote && !result && !terminationRequested) await remote.kill().catch(() => {});
     if (remote) await remote.disconnect().catch(() => {});
+    await options.sandbox.processes.disconnect();
   }
 }
