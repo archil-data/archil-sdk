@@ -15,6 +15,8 @@ class RuntimeSocket extends EventTarget {
   static CLOSED = 3;
   static instances: RuntimeSocket[] = [];
   static rejectProtocol = false;
+  /** Return stdin credit as the guest would after reading it. */
+  static grantStdin = true;
   readyState = 0;
   binaryType = "arraybuffer";
   readonly protocol: string;
@@ -63,6 +65,12 @@ class RuntimeSocket extends EventTarget {
             value: { processId: frame.body.case === "attach" ? frame.body.value.processId : `process_${id}` },
           }),
         );
+        break;
+      case "stdin":
+        if (RuntimeSocket.grantStdin) {
+          const bytes = Math.max(frame.body.value.length, 256);
+          queueMicrotask(() => this.emit(id, { case: "windowUpdate", value: { bytes } }));
+        }
         break;
       case "detach":
         queueMicrotask(() => this.emit(id, { case: "detached", value: {} }));
@@ -117,6 +125,7 @@ afterEach(() => {
   for (const socket of RuntimeSocket.instances) socket.close();
   RuntimeSocket.instances = [];
   RuntimeSocket.rejectProtocol = false;
+  RuntimeSocket.grantStdin = true;
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -162,7 +171,7 @@ test("concurrent and sequential processes reuse one authorized binary connection
   await processes.disconnect();
 });
 
-test("stdin chunks precede EOF without a credit exchange", async () => {
+test("stdin chunks spend returned credit and precede EOF", async () => {
   const { processes } = setup();
   const process = await processes.start("cat");
   const socket = RuntimeSocket.instances[0];
@@ -171,6 +180,26 @@ test("stdin chunks precede EOF without a credit exchange", async () => {
   await assert.rejects(process.sendInput("late"), /stdin is closed/);
   await Promise.all([sending, closing]);
   assert.deepEqual(socket.sent.map(frame => frame.body.case), ["start", ...Array(32).fill("stdin"), "closeStdin"]);
+  socket.exit(1);
+  await process.wait();
+  await processes.disconnect();
+});
+
+test("stdin waits for credit while the process is not reading", async () => {
+  RuntimeSocket.grantStdin = false;
+  const { processes } = setup();
+  const process = await processes.start("sleep");
+  const socket = RuntimeSocket.instances[0];
+  const stdin = () => socket.sent.filter(frame => frame.body.case === "stdin").length;
+  let sent = false;
+  const sending = process.sendInput(new Uint8Array(512 * 1024)).then(() => { sent = true; });
+  await vi.waitFor(() => assert.equal(stdin(), 4));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(stdin(), 4, "sent beyond the initial window");
+  assert.equal(sent, false);
+  socket.emit(1, { case: "windowUpdate", value: { bytes: 256 * 1024 } });
+  await sending;
+  assert.equal(stdin(), 8);
   socket.exit(1);
   await process.wait();
   await processes.disconnect();
@@ -235,29 +264,41 @@ test("a draining socket finishes existing channels while new work gets a fresh c
   await processes.disconnect();
 });
 
-test("all iterators share one output budget and resume subscriptions from buffered cursors", async () => {
+test("binary output beyond the shared budget pauses by credit and is never detached", async () => {
   const { processes } = setup();
-  const [first, second] = await Promise.all([processes.start("one", { collectOutput: false }), processes.start("two", { collectOutput: false })]);
+  // 17 full windows exceed the 4 MiB shared budget that pauses legacy sockets.
+  const started = await Promise.all(Array.from({ length: 17 }, (_, n) => processes.start(`p${n}`, { collectOutput: false })));
   const socket = RuntimeSocket.instances[0];
-  const chunk = new Uint8Array(65536);
-  for (let n = 0; n < 40; n++) socket.emit(1, { case: "stdout", value: { offset: BigInt(n * chunk.length), data: chunk } });
-  for (let n = 0; n < 24; n++) socket.emit(2, { case: "stderr", value: { offset: BigInt(n * chunk.length), data: chunk } });
-  await vi.waitFor(() => assert.equal(socket.sent.filter(f => f.body.case === "detach").length, 2));
-  assert.equal(first.cursor, 40 * chunk.length);
-  assert.equal(second.cursor, 24 * chunk.length);
-  // Data in flight beyond the shared limit is replayed rather than buffered.
-  socket.emit(1, { case: "stdout", value: { offset: BigInt(first.cursor), data: chunk } });
-  assert.equal(first.cursor, 40 * chunk.length);
-  const output = first.output[Symbol.asyncIterator]();
-  for (let n = 0; n < 32; n++) assert.equal((await output.next()).value?.data.length, chunk.length);
-  await vi.waitFor(() => assert.equal(socket.sent.filter(f => f.body.case === "attach").length, 2));
-  assert.deepEqual(socket.sent.filter(f => f.body.case === "attach").map(f => f.body.case === "attach" && [f.body.value.processId, Number(f.body.value.offset)]), [
-    [first.id, 40 * chunk.length], [second.id, 24 * chunk.length],
-  ]);
-  assert.equal(socket.sent.filter(f => f.body.case === "start").length, 2);
-  await output.return?.();
-  await second.disconnect();
+  const chunk = new Uint8Array(64 * 1024);
+  for (let id = 1; id <= started.length; id++)
+    for (let n = 0; n < 4; n++) socket.emit(id, { case: "stdout", value: { offset: BigInt(n * chunk.length), data: chunk } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(socket.sent.filter(f => f.body.case === "detach" || f.body.case === "attach").length, 0);
+  for (const process of started) assert.equal(process.cursor, 4 * chunk.length);
+  const granted = () => socket.sent.filter(f => f.channelId === 1 && f.body.case === "windowUpdate")
+    .reduce((sum, f) => sum + (f.body.case === "windowUpdate" ? f.body.value.bytes : 0), 0);
+  assert.equal(granted(), 0, "credit returned before the application consumed output");
+  const output = started[0].output[Symbol.asyncIterator]();
+  await output.next();
+  assert.equal(granted(), 0, "credit is batched");
+  await output.next();
+  assert.equal(granted(), 128 * 1024);
+  await output.next();
+  await output.next();
+  assert.equal(granted(), 256 * 1024);
+  socket.exit(1);
+  assert.equal((await output.next()).done, true);
   await processes.disconnect();
+});
+
+test("output beyond the granted window closes the connection", async () => {
+  const { processes } = setup();
+  const process = await processes.start("noisy", { collectOutput: false });
+  const socket = RuntimeSocket.instances[0];
+  const chunk = new Uint8Array(64 * 1024);
+  for (let n = 0; n < 5; n++) socket.emit(1, { case: "stdout", value: { offset: BigInt(n * chunk.length), data: chunk } });
+  await assert.rejects(process.wait(), /connection_closed/);
+  assert.equal(socket.readyState, RuntimeSocket.CLOSED);
 });
 
 test("iterator yields binary chunks and ends after draining output before wait resolves", async () => {
@@ -271,21 +312,5 @@ test("iterator yields binary chunks and ends after draining output before wait r
   assert.deepEqual(next.value?.data, new Uint8Array([0, 255]));
   assert.equal((await iterator.next()).done, true);
   assert.equal((await process.wait()).stdout, "");
-  await processes.disconnect();
-});
-
-test("runtime output detachment reattaches a known process without replaying Start", async () => {
-  const { processes } = setup();
-  const process = await processes.start("one");
-  const socket = RuntimeSocket.instances[0];
-  socket.emit(1, { case: "stdout", value: { offset: 0n, data: new Uint8Array([65]) } });
-  socket.emit(1, { case: "error", value: { code: "output_detached", message: "output queue full" } });
-  await vi.waitFor(() => assert.equal(socket.sent.filter(f => f.body.case === "attach").length, 1));
-  const request = socket.sent.find(f => f.body.case === "attach")!;
-  assert.equal(request.body.case === "attach" && request.body.value.offset, 1n);
-  socket.emit(request.channelId, { case: "stdout", value: { offset: 1n, data: new Uint8Array([66]) } });
-  socket.exit(request.channelId);
-  assert.equal((await process.wait()).stdout, "AB");
-  assert.equal(socket.sent.filter(f => f.body.case === "start").length, 1);
   await processes.disconnect();
 });

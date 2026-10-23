@@ -23,11 +23,17 @@ export class ProcessOutputBuffer {
   }
   remove(subscription: Subscription): void { this.subscriptions.delete(subscription); }
   has(subscription: Subscription): boolean { return !!this.queues.get(subscription)?.length; }
-  push(subscription: Subscription, output: SandboxProcessOutput): boolean {
-    if (this.paused) return false;
-    if (this.bytes + output.data.length > HIGH_WATER_BYTES || this.chunks >= MAX_BUFFERED_CHUNKS) {
-      this.pause();
-      return false;
+  /**
+   * Credited output is already bounded by its channel's flow-control window,
+   * so it is always accepted; it still counts toward pausing legacy sockets.
+   */
+  push(subscription: Subscription, output: SandboxProcessOutput, credited = false): boolean {
+    if (!credited) {
+      if (this.paused) return false;
+      if (this.bytes + output.data.length > HIGH_WATER_BYTES || this.chunks >= MAX_BUFFERED_CHUNKS) {
+        this.pause();
+        return false;
+      }
     }
     const queue = this.queues.get(subscription) ?? [];
     queue.push(output);

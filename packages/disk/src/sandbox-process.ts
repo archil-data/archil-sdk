@@ -129,6 +129,8 @@ export class SandboxProcess {
   private _error?: Error;
   private _exit?: Extract<ProcessControlEvent, { type: "exit" }>;
   private _result?: SandboxProcessResult;
+  /** Returns each buffered binary output's credit once the iterator takes it. */
+  private readonly _releases = new WeakMap<SandboxProcessOutput, () => void>();
   private _resolveDone!: () => void;
   private readonly _done = new Promise<void>((resolve) => { this._resolveDone = resolve; });
 
@@ -206,6 +208,7 @@ export class SandboxProcess {
       while (true) {
         const output = this._buffer.take(this);
         if (output) {
+          this._releases.get(output)?.();
           this._deliveredCursor = output.offset + output.data.length;
           if (this._collectOutput) this._appendText(output.stream,
             (output.stream === "stdout" ? this._stdoutDecoder : this._stderrDecoder).decode(output.data, { stream: true }));
@@ -227,7 +230,8 @@ export class SandboxProcess {
   }
   /** @internal */
   _pauseOutput(): void {
-    if (this._manual || this._exit) return;
+    // Binary channels are paused by credit instead of by detaching.
+    if (this._manual || this._exit || this._socket instanceof BinaryChannel) return;
     this._paused = true;
     if (this._id && this._socket) {
       this._detaching = this._closed;
@@ -251,6 +255,8 @@ export class SandboxProcess {
     if (this._manual) { socket.close(); throw new Error("Process is disconnected"); }
     socket.binaryType = "arraybuffer";
     this._socket = socket;
+    // A budget pause taken before the transport was known applies only to legacy sockets.
+    if (socket instanceof BinaryChannel) this._paused = false;
     let closed!: () => void;
     this._closed = new Promise<void>((resolve) => { closed = resolve; });
     const expected = request.type === "start" ? "started" : "attached";
@@ -263,7 +269,11 @@ export class SandboxProcess {
       try {
         const data = message.data;
         if (data instanceof ArrayBuffer) { this._handleOutput(data); return; }
-        if (typeof data === "object" && "stream" in data) { this._enqueueOutput(data.data, data.offset, data.stream); return; }
+        if (typeof data === "object" && "stream" in data) {
+          const channel = socket as BinaryChannel;
+          this._enqueueOutput(data.data, data.offset, data.stream, () => channel.release(data.cost));
+          return;
+        }
         const event = (typeof data === "string" ? JSON.parse(data) : data) as ProcessControlEvent;
         switch (event.type) {
           case "started": case "attached":
@@ -278,11 +288,6 @@ export class SandboxProcess {
             this._buffer.remove(this); this._complete(); this._wake?.();
             break;
           case "error":
-            if (event.error === "output_detached" && settled && this._id) {
-              this._pauseOutput();
-              if (!this._buffer.paused) this._resumeOutput();
-              return;
-            }
             throw new Error(`${event.error}: ${event.message}`);
         }
       } catch (error) {
@@ -342,14 +347,15 @@ export class SandboxProcess {
     return this._enqueueOutput(bytes.subarray(9), offset, bytes[0] === 1 ? "stdout" : "stderr");
   }
 
-  private _enqueueOutput(payload: Uint8Array, offset: number, stream: SandboxProcessStream): void {
-    if (this._paused) return;
+  /** `release` is set for binary output, whose credit returns when it is consumed. */
+  private _enqueueOutput(payload: Uint8Array, offset: number, stream: SandboxProcessStream, release?: () => void): void {
     const end = offset + payload.byteLength;
-    if (end <= this._cursor) return;
+    if (this._paused || end <= this._cursor) { release?.(); return; }
     if (offset > this._cursor) throw new Error(`Process output gap: expected offset ${this._cursor}, received ${offset}`);
     const skip = this._cursor - offset;
     const output = { stream, offset: this._cursor, data: payload.slice(skip) };
-    if (this._buffer.push(this, output)) {
+    if (this._buffer.push(this, output, release !== undefined)) {
+      if (release) this._releases.set(output, release);
       this._cursor = end;
       this._wake?.();
     }

@@ -3,6 +3,7 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import {
   EnvelopeSchema,
   Exit_Status,
+  WindowUpdateSchema,
   type Envelope,
 } from "./generated/process_pb.js";
 
@@ -67,6 +68,10 @@ export async function waitForProcessWrite(socket: WebSocket): Promise<void> {
 
 const PROTOCOL = "archil-process-v2";
 const MAX_DATA = 64 * 1024;
+// Flow control; proto/process.proto states the rules.
+const INITIAL_WINDOW = 256 * 1024;
+const MIN_DATA_COST = 256;
+const dataCost = (length: number) => Math.max(length, MIN_DATA_COST);
 const MAX_CHANNELS = 128;
 const IDLE_MS = 5000;
 
@@ -239,6 +244,13 @@ export class BinaryChannel {
     this.events,
   ) as WebSocket["addEventListener"];
   private sending: Promise<void> = Promise.resolve();
+  /** Stdin the runtime will accept. */
+  private sendCredit = INITIAL_WINDOW;
+  /** Output the runtime may still send. */
+  private receiveCredit = INITIAL_WINDOW;
+  /** Output consumed since credit was last returned. */
+  private consumed = 0;
+  private creditChanged?: () => void;
   constructor(
     private readonly connection: BinaryConnection,
     readonly id: number,
@@ -311,13 +323,33 @@ export class BinaryChannel {
   send(bytes: Uint8Array): Promise<void> {
     const sending = this.sending.then(async () => {
       for (let offset = 0; offset < bytes.length; offset += MAX_DATA) {
+        const chunk = bytes.subarray(offset, offset + MAX_DATA);
+        // Waits while the process is not reading its input.
+        while (this.sendCredit < dataCost(chunk.length)) {
+          if (this.readyState !== WebSocket.OPEN) throw new Error("Process is disconnected");
+          await new Promise<void>(resolve => { this.creditChanged = resolve; });
+        }
         if (this.readyState !== WebSocket.OPEN) throw new Error("Process is disconnected");
-        this.connection.send(this.id, { case: "stdin", value: bytes.subarray(offset, offset + MAX_DATA) });
+        this.sendCredit -= dataCost(chunk.length);
+        this.connection.send(this.id, { case: "stdin", value: chunk });
         await this.connection.writable();
       }
     });
     this.sending = sending.catch(() => {});
     return sending;
+  }
+  /** Returns credit for output the application has taken. */
+  release(cost: number): void {
+    if (this.readyState === WebSocket.CLOSED) return;
+    this.consumed += cost;
+    // Batched: with half the window held back, the runtime can still send.
+    if (this.consumed < INITIAL_WINDOW / 2) return;
+    this.receiveCredit += this.consumed;
+    this.connection.send(this.id, {
+      case: "windowUpdate",
+      value: create(WindowUpdateSchema, { bytes: this.consumed }),
+    });
+    this.consumed = 0;
   }
   async closeStdin(): Promise<void> {
     await this.sending;
@@ -344,9 +376,16 @@ export class BinaryChannel {
       case "attached":
         event = { type: body.case, process_id: body.value.processId };
         break;
+      case "windowUpdate":
+        this.sendCredit += body.value.bytes;
+        this.creditChanged?.();
+        return;
       case "stdout":
       case "stderr": {
         if (body.value.data.length > MAX_DATA) throw new Error("Process output exceeds chunk size");
+        const cost = dataCost(body.value.data.length);
+        if (cost > this.receiveCredit) throw new Error("Process output exceeded its flow-control window");
+        this.receiveCredit -= cost;
         const offset = Number(body.value.offset);
         if (!Number.isSafeInteger(offset))
           throw new Error(
@@ -354,7 +393,7 @@ export class BinaryChannel {
           );
         this.events.dispatchEvent(
           new MessageEvent("message", {
-            data: { stream: body.case, offset, data: body.value.data },
+            data: { stream: body.case, offset, data: body.value.data, cost },
           }),
         );
         return;
@@ -411,6 +450,7 @@ export class BinaryChannel {
         }),
       );
     this.readyState = WebSocket.CLOSED;
+    this.creditChanged?.();
     this.connection.remove(this.id);
     this.events.dispatchEvent(new Event("close"));
   }

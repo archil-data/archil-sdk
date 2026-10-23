@@ -3,10 +3,27 @@ package archil.process.v1;
 
 // One message per WebSocket message, or per library-delimited guest record.
 // Channel IDs identify attachments/operations, not persistent processes.
+//
+// Channels. The client opens a channel by sending an opening message (start,
+// guest_start, attach, kill or resize) on an unused ID greater than every ID it
+// used before on this connection. The server ends a channel with exactly one of
+// exit, error, killed, resized or detached; the client may ask it to with
+// detach, which discards input the process has not yet read. Messages for a
+// channel that has ended are ignored. Channel zero
+// carries connection messages (drain) and never opens.
+//
+// Flow control. stdin, stdout and stderr are data; each data message costs
+// max(len(data), MIN_DATA_COST) bytes of credit and carries at most
+// MAX_DATA_BYTES. Each direction of each channel starts with INITIAL_WINDOW
+// bytes of credit, so no handshake precedes the first message. A sender with
+// too little credit waits; it never drops or detaches. A receiver returns
+// credit with window_update on that channel as it consumes data. Sending data
+// beyond the credit granted is a protocol error that closes the connection.
+// Other messages cost nothing. The constants live in the protocol library.
 message Envelope {
   // No connection handshake: the first message can open a process channel.
   reserved 17, 18;
-  reserved "settings", "window_update";
+  reserved "settings";
   uint32 channel_id = 1;
   oneof body {
     bytes stdin = 2;
@@ -30,9 +47,11 @@ message Envelope {
     Empty detached = 21;
     ControlRequest control_request = 22;
     ControlResponse control_response = 23;
+    WindowUpdate window_update = 24;
   }
 }
 message Empty {}
+message WindowUpdate { uint32 bytes = 1; }
 message Output { uint64 offset = 1; bytes data = 2; }
 message Start {
   string command = 1;
