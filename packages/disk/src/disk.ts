@@ -23,6 +23,8 @@ import type {
   ExecDiskResult,
   ExecTiming as ExecTimingSchema,
   GrepDiskResult,
+  GrepGroup,
+  GrepGroupLine,
   GrepMatch,
   GrepStoppedReason,
 } from "./types.js";
@@ -54,7 +56,7 @@ export type ExecTiming = ExecTimingSchema;
 export type ExecResult = ExecDiskResult;
 
 export type GrepResult = GrepDiskResult;
-export type { GrepMatch, GrepStoppedReason };
+export type { GrepGroup, GrepGroupLine, GrepMatch, GrepStoppedReason };
 
 export interface GrepOptions {
   /**
@@ -62,7 +64,10 @@ export interface GrepOptions {
    * string or "/" means the disk root.
    */
   directory: string;
-  /** Extended regular expression (passed to `grep -E`). */
+  /**
+   * Regular expression in ripgrep syntax. A newline separates alternative
+   * patterns, except with `multiline`, where it matches a line break.
+   */
   pattern: string;
   /** Walk subdirectories breadth-first. Defaults to false. */
   recursive?: boolean;
@@ -81,6 +86,36 @@ export interface GrepOptions {
    * lexicographically first N. Defaults to 1000.
    */
   maxResults?: number;
+  /** Match the pattern case-insensitively (`rg -i`). Defaults to false. */
+  ignoreCase?: boolean;
+  /**
+   * Let a match span lines (`rg -U`): `\n` in the pattern matches a line
+   * break, and `.` matches one only after `(?s)`. Files with Windows line
+   * endings need `\r?\n`. Matches on adjacent lines come back as one match
+   * with `endLine` set, and count once toward `maxResults`. Defaults to false.
+   */
+  multiline?: boolean;
+  /**
+   * Path globs with ripgrep's `-g` rules, matched against paths relative to
+   * `directory`. A leading `!` excludes. If any non-`!` glob is given, files
+   * that match no glob are skipped. A file a glob matches is searched or
+   * skipped regardless of `types` and `typesNot`.
+   */
+  globs?: string[];
+  /** Only search files of these ripgrep types (for example `py`, `ts`). */
+  types?: string[];
+  /** Skip files of these ripgrep types. Takes precedence over `types`. */
+  typesNot?: string[];
+  /**
+   * Lines of context to return before each match (`rg -B`), 0 to 10. When
+   * either context field is set, the result includes `groups`.
+   */
+  contextBefore?: number;
+  /**
+   * Lines of context to return after each match (`rg -A`), 0 to 10. When
+   * either context field is set, the result includes `groups`.
+   */
+  contextAfter?: number;
 }
 
 export interface ShareUrlOptions {
@@ -695,6 +730,13 @@ export class Disk implements FileSystem {
               maxDurationSeconds: opts.maxDurationSeconds ?? 30,
               concurrency: opts.concurrency ?? 50,
               maxResults: opts.maxResults ?? 1000,
+              ignoreCase: opts.ignoreCase,
+              multiline: opts.multiline,
+              globs: opts.globs,
+              types: opts.types,
+              typesNot: opts.typesNot,
+              contextBefore: opts.contextBefore ?? 0,
+              contextAfter: opts.contextAfter ?? 0,
             },
           }),
         "transient",

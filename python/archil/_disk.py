@@ -394,10 +394,24 @@ class _Disk:
         max_duration_seconds: int = 30,
         concurrency: int = 50,
         max_results: int = 1000,
+        ignore_case: bool = False,
+        multiline: bool = False,
+        globs: Optional[List[str]] = None,
+        types: Optional[List[str]] = None,
+        types_not: Optional[List[str]] = None,
+        context_before: int = 0,
+        context_after: int = 0,
     ) -> GrepResult:
         """Constant-time parallel grep across files on this disk. The returned
         ``stopped_reason`` says whether the search ran to completion or
-        short-circuited on ``max_results`` / ``max_duration_seconds``."""
+        short-circuited on ``max_results`` / ``max_duration_seconds``.
+
+        ``pattern`` is a regular expression in ripgrep syntax. ``multiline``
+        lets a match span lines (``rg -U``); such a match sets ``end_line``.
+        ``globs`` follow ripgrep's ``-g`` rules relative to ``directory`` (a
+        leading ``!`` excludes), and ``types`` / ``types_not`` take ripgrep
+        file type names such as ``py``. Setting ``context_before`` or
+        ``context_after`` (0 to 10 lines) adds ``groups`` to the result."""
         data = await self._transport.request_json(
             "POST",
             f"/api/disks/{self.id}/grep",
@@ -408,6 +422,13 @@ class _Disk:
                 "maxDurationSeconds": max_duration_seconds,
                 "concurrency": concurrency,
                 "maxResults": max_results,
+                "ignoreCase": ignore_case,
+                "multiline": multiline,
+                "globs": globs or [],
+                "types": types or [],
+                "typesNot": types_not or [],
+                "contextBefore": context_before,
+                "contextAfter": context_after,
             },
         )
         return GrepResult.from_json(data)

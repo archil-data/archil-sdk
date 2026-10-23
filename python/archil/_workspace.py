@@ -17,11 +17,19 @@ await them directly on the shared loop.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Optional
 
 from ._http import BodyType
-from ._models import ExecResult, GrepMatch, GrepResult, ListObjectsResult, PutObjectResult, S3Object
+from ._models import (
+    ExecResult,
+    GrepGroup,
+    GrepMatch,
+    GrepResult,
+    ListObjectsResult,
+    PutObjectResult,
+    S3Object,
+)
 from ._paths import to_segments
 from ._synchronizer import translate_in, translate_out
 
@@ -29,6 +37,29 @@ from ._synchronizer import translate_in, translate_out
 # generator can resolve agent_tools()'s return type. agent_tools does not import
 # _workspace, so this does not create an import cycle.
 from .agent_tools import AgentToolset
+
+
+def _truncate_groups(
+    groups: List[GrepGroup], max_results: int, after: int, multiline: bool
+) -> List[GrepGroup]:
+    """Keep groups up to the one holding the ``max_results``-th match, and end
+    that group after up to ``after`` more lines, which become context so the
+    groups hold exactly the kept matches. With multiline, a run of matching
+    lines is one match. Mirrors the controlplane's truncation of a single
+    disk's groups."""
+    seen = 0
+    for i, g in enumerate(groups):
+        lines = g.lines
+        for j, line in enumerate(lines):
+            if line.match and not (multiline and j > 0 and lines[j - 1].match):
+                seen += 1
+            if seen == max_results and not (multiline and j + 1 < len(lines) and lines[j + 1].match):
+                kept = [
+                    replace(ln, match=False) if k > j else ln
+                    for k, ln in enumerate(lines[: j + 1 + after])
+                ]
+                return [*groups[:i], replace(g, lines=kept)]
+    return groups
 
 
 @dataclass
@@ -239,6 +270,13 @@ class _Workspace:
         max_duration_seconds: int = 30,
         concurrency: int = 50,
         max_results: int = 1000,
+        ignore_case: bool = False,
+        multiline: bool = False,
+        globs: Optional[List[str]] = None,
+        types: Optional[List[str]] = None,
+        types_not: Optional[List[str]] = None,
+        context_before: int = 0,
+        context_after: int = 0,
     ) -> GrepResult:
         covered = self._covered(directory)
         # Fan out resiliently: a disk that errors contributes a "list_failed"
@@ -252,12 +290,20 @@ class _Workspace:
                     max_duration_seconds=max_duration_seconds,
                     concurrency=concurrency,
                     max_results=max_results,
+                    ignore_case=ignore_case,
+                    multiline=multiline,
+                    globs=globs,
+                    types=types,
+                    types_not=types_not,
+                    context_before=context_before,
+                    context_after=context_after,
                 )
                 for _, entry, rel in covered
             ),
             return_exceptions=True,
         )
         matches: List[GrepMatch] = []
+        groups: List[GrepGroup] = []
         files_scanned = containers_dispatched = duration_ms = listing_ms = grep_ms = 0
         compute_seconds_used = 0.0
         reasons: set[str] = set()
@@ -273,7 +319,9 @@ class _Workspace:
             grep_ms = max(grep_ms, r.grep_ms)
             reasons.add(r.stopped_reason)
             for m in r.matches:
-                matches.append(GrepMatch(self._abs(name, entry, m.file), m.line, m.text))
+                matches.append(replace(m, file=self._abs(name, entry, m.file)))
+            for g in r.groups or []:
+                groups.append(replace(g, file=self._abs(name, entry, g.file)))
         # Merging across disks can exceed the cap even when every disk completed,
         # so flag the truncation ourselves before slicing — otherwise the extra
         # matches are dropped with no signal.
@@ -286,6 +334,8 @@ class _Workspace:
             "completed" if reasons <= {"completed"}
             else next((r for r in priority if r in reasons), "completed")
         )
+        if len(matches) > max_results:
+            groups = _truncate_groups(groups, max_results, context_after, multiline)
         return GrepResult(
             matches=matches[:max_results],
             stopped_reason=stopped_reason,
@@ -295,6 +345,7 @@ class _Workspace:
             duration_ms=duration_ms,
             listing_ms=listing_ms,
             grep_ms=grep_ms,
+            groups=groups if context_before > 0 or context_after > 0 else None,
         )
 
     async def exec(self, command: str) -> ExecResult:

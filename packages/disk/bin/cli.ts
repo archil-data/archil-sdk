@@ -235,6 +235,14 @@ program
   .option("--max-duration <seconds>", "Wall-clock deadline for the whole search", (v) => parseInt(v, 10))
   .option("--concurrency <n>", "Max parallel grep workers (clamped to fleet capacity)", (v) => parseInt(v, 10))
   .option("--max-results <n>", "Stop once this many matches are collected", (v) => parseInt(v, 10))
+  .option("-i, --ignore-case", "Match case-insensitively")
+  .option("-U, --multiline", "Let matches span lines")
+  .option("-g, --glob <glob>", "Include files matching the glob, or exclude with a leading ! (repeatable)", (value, previous: string[]) => [...previous, value], [])
+  .option("-t, --type <type>", "Only search files of this type, e.g. py (repeatable)", (value, previous: string[]) => [...previous, value], [])
+  .option("-T, --type-not <type>", "Skip files of this type (repeatable)", (value, previous: string[]) => [...previous, value], [])
+  .option("-A, --after-context <n>", "Lines of context after each match (max 10)", (v) => parseInt(v, 10))
+  .option("-B, --before-context <n>", "Lines of context before each match (max 10)", (v) => parseInt(v, 10))
+  .option("-C, --context <n>", "Lines of context before and after each match (max 10)", (v) => parseInt(v, 10))
   .option("-o, --output <format>", "Output format: text | json", "text")
   .action(
     async (
@@ -245,6 +253,14 @@ program
         maxDuration?: number;
         concurrency?: number;
         maxResults?: number;
+        ignoreCase?: boolean;
+        multiline?: boolean;
+        glob: string[];
+        type: string[];
+        typeNot: string[];
+        afterContext?: number;
+        beforeContext?: number;
+        context?: number;
         output: string;
       },
     ) => {
@@ -260,12 +276,30 @@ program
           maxDurationSeconds: opts.maxDuration,
           concurrency: opts.concurrency,
           maxResults: opts.maxResults,
+          ignoreCase: opts.ignoreCase,
+          multiline: opts.multiline,
+          globs: opts.glob,
+          types: opts.type,
+          typesNot: opts.typeNot,
+          contextBefore: opts.beforeContext ?? opts.context,
+          contextAfter: opts.afterContext ?? opts.context,
         });
         if (opts.output === "json") {
           console.log(JSON.stringify(res, null, 2));
         } else {
-          for (const m of res.matches) {
-            console.log(`${m.file}:${m.line}:${m.text}`);
+          if (res.groups) {
+            res.groups.forEach((g, i) => {
+              if (i > 0) console.log("--");
+              for (const l of g.lines) {
+                const sep = l.match ? ":" : "-";
+                console.log(`${g.file}${sep}${l.line}${sep}${l.text}`);
+              }
+            });
+          } else {
+            for (const m of res.matches) {
+              // A multiline match's text holds every line it covers.
+              m.text.split("\n").forEach((text, k) => console.log(`${m.file}:${m.line + k}:${text}`));
+            }
           }
           // grep-style: matches on stdout, run summary on stderr.
           console.error(

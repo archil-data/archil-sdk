@@ -35,6 +35,8 @@ export type ExecRequest = components["schemas"]["ExecRequest"];
 export type GrepDiskRequest = components["schemas"]["GrepDiskRequest"];
 export type GrepDiskResult = components["schemas"]["GrepDiskResult"];
 export type GrepMatch = components["schemas"]["GrepMatch"];
+export type GrepGroup = components["schemas"]["GrepGroup"];
+export type GrepGroupLine = components["schemas"]["GrepGroupLine"];
 export type GrepStoppedReason = components["schemas"]["GrepStoppedReason"];
 
 export type DiskStatus = DiskResponse["status"];
