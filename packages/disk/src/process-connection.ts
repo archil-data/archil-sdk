@@ -33,14 +33,15 @@ async function waitForSocketOpen(socket: WebSocket): Promise<void> {
   });
 }
 
-export async function openProcessSocket(
+async function openProcessSocket(
   connectionUrl: () => Promise<string>,
 ): Promise<WebSocket> {
   for (let attempt = 0; ; attempt++) {
     const url = await connectionUrl();
     let socket: WebSocket | undefined;
     try {
-      socket = new WebSocket(url);
+      socket = new WebSocket(url, PROTOCOL);
+      socket.binaryType = "arraybuffer";
       await waitForSocketOpen(socket);
       return socket;
     } catch (error) {
@@ -58,8 +59,8 @@ export async function openProcessSocket(
   }
 }
 
-/** Bound queued socket writes; logical input queue overflow is still an error. */
-export async function waitForProcessWrite(socket: WebSocket): Promise<void> {
+/** Bound queued socket writes across all channels of a connection. */
+async function waitForProcessWrite(socket: WebSocket): Promise<void> {
   while (socket.bufferedAmount > 256 * 1024) {
     if (socket.readyState !== WebSocket.OPEN) throw new Error("Process is disconnected");
     await new Promise<void>(resolve => setTimeout(resolve, 0));
@@ -87,100 +88,45 @@ type Request =
   | { type: "attach"; process_id: string; offset: number }
   | { type: "kill"; process_id: string }
   | { type: "resize"; process_id: string; rows: number; cols: number };
-export type ProcessSocket = WebSocket | BinaryChannel;
-
 /** Owns only the client connection. A disconnected transport never retries START. */
 export class ProcessConnection {
-  private opening?: Promise<BinaryConnection | WebSocket>;
+  private opening?: Promise<BinaryConnection>;
   private binary?: BinaryConnection;
-  private legacy = false;
-  private readonly sockets = new Set<WebSocket>();
   private generation = 0;
   constructor(private readonly url: () => Promise<string>) {}
 
-  async open(): Promise<ProcessSocket> {
+  async open(): Promise<BinaryChannel> {
     if (this.binary?.canOpen) return this.binary.channel();
-    if (this.legacy) return this.legacyConnection();
     if (!this.opening) {
-      const opening = this.negotiate().finally(() => {
+      const opening = this.connect().finally(() => {
         if (this.opening === opening) this.opening = undefined;
       });
       this.opening = opening;
     }
-    const connection = await this.opening;
-    if (connection instanceof BinaryConnection) return connection.channel();
-    // A legacy socket belongs to one operation. Concurrent callers each get one.
-    if (this.legacySocket === connection) {
-      this.legacySocket = undefined;
-      return connection;
-    }
-    return this.legacyConnection();
+    return (await this.opening).channel();
   }
-  private legacySocket?: WebSocket;
 
-  private async negotiate(): Promise<BinaryConnection | WebSocket> {
+  private async connect(): Promise<BinaryConnection> {
     const generation = this.generation;
-    const url = await this.url();
-    if (generation !== this.generation)
-      throw new Error("Process connection opening cancelled");
-    const socket = this.socket(url, PROTOCOL);
-    socket.binaryType = "arraybuffer";
-    const selected = await new Promise<boolean>((resolve) => {
-      socket.addEventListener(
-        "open",
-        () => resolve(socket.protocol === PROTOCOL),
-        { once: true },
-      );
-      socket.addEventListener("error", () => resolve(false), { once: true });
-      socket.addEventListener("close", () => resolve(false), { once: true });
-    });
-    if (generation !== this.generation)
-      throw new Error("Process connection opening cancelled");
-    if (!selected) {
-      this.legacy = true;
-      // Some WebSocket implementations accept an omitted subprotocol; others
-      // reject the handshake. Both paths precede any application command.
-      if (socket.readyState === WebSocket.OPEN) {
-        this.legacySocket = socket;
-        return socket;
-      }
+    const socket = await openProcessSocket(this.url);
+    if (generation !== this.generation) {
       socket.close();
-      const legacy = await this.legacyConnection();
-      this.legacySocket = legacy;
-      return legacy;
+      throw new Error("Process connection opening cancelled");
+    }
+    if (socket.protocol !== PROTOCOL) {
+      socket.close();
+      throw new Error(`Sandbox runtime does not support the ${PROTOCOL} process protocol`);
     }
     const binary = new BinaryConnection(socket);
-    if (generation !== this.generation) {
-      binary.close();
-      throw new Error("Process connection opening cancelled");
-    }
     this.binary = binary;
     return binary;
-  }
-  private async legacyConnection(): Promise<WebSocket> {
-    const socket = await openProcessSocket(this.url);
-    this.sockets.add(socket);
-    socket.addEventListener("close", () => this.sockets.delete(socket), { once: true });
-    return socket;
-  }
-  private socket(url: string, protocol?: string): WebSocket {
-    const socket = protocol ? new WebSocket(url, protocol) : new WebSocket(url);
-    this.sockets.add(socket);
-    socket.addEventListener("close", () => this.sockets.delete(socket), {
-      once: true,
-    });
-    return socket;
   }
 
   disconnect(): void {
     this.generation++;
     this.opening = undefined;
     this.binary?.close();
-    for (const socket of this.sockets) socket.close();
-    this.sockets.clear();
     this.binary = undefined;
-    // Re-negotiate after host movement or a runtime upgrade.
-    this.legacy = false;
   }
 }
 

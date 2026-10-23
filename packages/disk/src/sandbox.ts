@@ -1,5 +1,5 @@
 import { ProcessOutputBuffer } from "./process-output-buffer.js";
-import { BinaryChannel, ProcessConnection } from "./process-connection.js";
+import { ProcessConnection } from "./process-connection.js";
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty, unwrapPage } from "./client.js";
@@ -400,7 +400,7 @@ export class Sandbox {
     await new Promise<void>((resolve, reject) => {
       socket.addEventListener("message", (message) => {
         try {
-          const event = (typeof message.data === "string" ? JSON.parse(message.data) : message.data) as
+          const event = message.data as
             | { type: "killed" | "resized" }
             | { type: "error"; error: string; message: string };
           if (event.type === "error") {
@@ -426,12 +426,7 @@ export class Sandbox {
           ),
         ),
       );
-      const send = () => {
-        if (socket instanceof BinaryChannel) socket.sendRequest(request);
-        else socket.send(JSON.stringify(request));
-      };
-      if (socket.readyState === WebSocket.OPEN) send();
-      else socket.addEventListener("open", send, { once: true });
+      socket.sendRequest(request);
     });
   }
 

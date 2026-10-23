@@ -14,45 +14,27 @@ class RuntimeSocket extends EventTarget {
   static CLOSING = 2;
   static CLOSED = 3;
   static instances: RuntimeSocket[] = [];
-  static rejectProtocol = false;
+  /** Open without selecting the requested subprotocol, as an older runtime would. */
+  static ignoreProtocol = false;
   /** Return stdin credit as the guest would after reading it. */
   static grantStdin = true;
   readyState = 0;
   binaryType = "arraybuffer";
   readonly protocol: string;
   readonly sent: Envelope[] = [];
-  readonly texts: string[] = [];
   constructor(
     readonly url: string,
     protocol?: string,
   ) {
     super();
-    this.protocol = protocol ?? "";
+    this.protocol = RuntimeSocket.ignoreProtocol ? "" : protocol ?? "";
     RuntimeSocket.instances.push(this);
     queueMicrotask(() => {
-      if (protocol && RuntimeSocket.rejectProtocol) {
-        this.dispatchEvent(new Event("error"));
-        this.close();
-      } else {
-        this.readyState = 1;
-        this.dispatchEvent(new Event("open"));
-      }
+      this.readyState = 1;
+      this.dispatchEvent(new Event("open"));
     });
   }
-  send(data: Uint8Array | string) {
-    if (typeof data === "string") {
-      this.texts.push(data);
-      const request = JSON.parse(data);
-      if (request.type === "start")
-        queueMicrotask(() =>
-          this.dispatchEvent(
-            new MessageEvent("message", {
-              data: JSON.stringify({ type: "started", process_id: "legacy" }),
-            }),
-          ),
-        );
-      return;
-    }
+  send(data: Uint8Array) {
     const frame = fromBinary(EnvelopeSchema, data);
     this.sent.push(frame);
     const id = frame.channelId;
@@ -124,7 +106,7 @@ function setup() {
 afterEach(() => {
   for (const socket of RuntimeSocket.instances) socket.close();
   RuntimeSocket.instances = [];
-  RuntimeSocket.rejectProtocol = false;
+  RuntimeSocket.ignoreProtocol = false;
   RuntimeSocket.grantStdin = true;
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -222,16 +204,13 @@ test("detach, resize, and kill do not close another channel or reopen the socket
   await processes.disconnect();
 });
 
-test("unsupported subprotocol falls back before any command is sent", async () => {
-  RuntimeSocket.rejectProtocol = true;
-  const { processes } = setup();
-  const process = await processes.start("once");
-  assert.equal(process.id, "legacy");
+test("a runtime without the binary protocol fails before any command is sent", async () => {
+  RuntimeSocket.ignoreProtocol = true;
+  const { processes, post } = setup();
+  await assert.rejects(processes.start("once"), /does not support the archil-process-v2 process protocol/);
   assert.equal(RuntimeSocket.instances[0].sent.length, 0);
-  assert.equal(RuntimeSocket.instances[0].texts.length, 0);
-  assert.equal(RuntimeSocket.instances[1].texts.length, 1);
-  await process.disconnect();
-  await processes.disconnect();
+  assert.equal(RuntimeSocket.instances[0].readyState, RuntimeSocket.CLOSED);
+  assert.equal(post.mock.calls.length, 1, "an unsupported runtime is not retried");
 });
 
 test("transport loss surfaces an uncertain START without replaying it", async () => {
@@ -264,9 +243,9 @@ test("a draining socket finishes existing channels while new work gets a fresh c
   await processes.disconnect();
 });
 
-test("binary output beyond the shared budget pauses by credit and is never detached", async () => {
+test("output is paced by credit and never detached, however many channels buffer", async () => {
   const { processes } = setup();
-  // 17 full windows exceed the 4 MiB shared budget that pauses legacy sockets.
+  // Each channel buffers a full window without pausing any other.
   const started = await Promise.all(Array.from({ length: 17 }, (_, n) => processes.start(`p${n}`, { collectOutput: false })));
   const socket = RuntimeSocket.instances[0];
   const chunk = new Uint8Array(64 * 1024);
