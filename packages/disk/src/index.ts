@@ -56,7 +56,6 @@ export { SandboxProcess, SandboxProcesses } from "./sandbox-process.js";
 export type {
   SandboxProcessConnectOptions,
   SandboxProcessOutput,
-  SandboxProcessOutputHandler,
   SandboxProcessResult,
   SandboxProcessStartOptions,
   SandboxProcessStatus,

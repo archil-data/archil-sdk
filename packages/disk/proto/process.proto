@@ -4,6 +4,9 @@ package archil.process.v1;
 // One message per WebSocket message, or per library-delimited guest record.
 // Channel IDs identify attachments/operations, not persistent processes.
 message Envelope {
+  // No connection handshake: the first message can open a process channel.
+  reserved 17, 18;
+  reserved "settings", "window_update";
   uint32 channel_id = 1;
   oneof body {
     bytes stdin = 2;
@@ -21,8 +24,6 @@ message Envelope {
     Resize resize = 14;
     Empty killed = 15;
     Empty resized = 16;
-    Settings settings = 17;
-    WindowUpdate window_update = 18;
     Empty drain = 19;
     // Only runtime-to-guest. Public Start never authorizes these settings.
     GuestStart guest_start = 20;
@@ -60,14 +61,6 @@ message Exit {
   bool oom_killed = 5;
 }
 message Error { string code = 1; string message = 2; }
-message Settings {
-  // Per-channel credit in each direction. Data costs its byte length plus
-  // DATA_CREDIT_OVERHEAD, bounding both buffered bytes and tiny-message count.
-  uint32 receive_window = 1;
-  uint32 max_data_bytes = 2;
-  uint32 max_channels = 3;
-}
-message WindowUpdate { uint32 credit = 1; }
 message GuestStart {
   repeated string argv = 1;
   map<string, string> environment = 2;

@@ -1,3 +1,4 @@
+import { ProcessOutputBuffer } from "./process-output-buffer.js";
 import { BinaryChannel, ProcessConnection } from "./process-connection.js";
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
@@ -272,6 +273,7 @@ export class Sandbox {
   /** @internal */
   private readonly _client: ApiClient;
   private readonly _processConnection: ProcessConnection;
+  private readonly _processOutput = new ProcessOutputBuffer();
 
   /** @internal */
   constructor(data: SandboxWire, client: ApiClient) {
@@ -338,8 +340,8 @@ export class Sandbox {
     const process = new SandboxProcess(
       "",
       0,
-      options.onOutput,
       options.collectOutput ?? true,
+      this._processOutput,
       () => this._processConnection.open(),
       (request) => this._control(request),
     );
@@ -370,8 +372,8 @@ export class Sandbox {
     const process = new SandboxProcess(
       processId,
       offset,
-      options.onOutput,
       options.collectOutput ?? true,
+      this._processOutput,
       () => this._processConnection.open(),
       (request) => this._control(request),
     );

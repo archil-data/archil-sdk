@@ -1033,12 +1033,6 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
     terminal: false,
     env: { HELLO: "world" },
     timeoutSeconds: 10,
-    onOutput: (event) =>
-      output.push({
-        stream: event.stream,
-        offset: event.offset,
-        data: Array.from(event.data),
-      }),
   });
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const first = TestWebSocket.instances[0];
@@ -1046,6 +1040,12 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
     data: JSON.stringify({ type: "started", process_id: "0198-process" }),
   });
   const process = await starting;
+  void collectStream(process, (event) =>
+      output.push({
+        stream: event.stream,
+        offset: event.offset,
+        data: Array.from(event.data),
+      })).catch(() => {});
 
   assert.ok(process instanceof SandboxProcess);
   assert.equal(process.id, "0198-process");
@@ -1075,12 +1075,6 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
 
   const connecting = attach(process.id, {
     offset: process.cursor,
-    onOutput: (event) =>
-      output.push({
-        stream: event.stream,
-        offset: event.offset,
-        data: Array.from(event.data),
-      }),
   });
   await vi.waitFor(() => assert.equal(TestWebSocket.instances.length, 2));
   const resumed = TestWebSocket.instances[1];
@@ -1094,6 +1088,12 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
     data: JSON.stringify({ type: "attached", process_id: "0198-process" }),
   });
   const resumedProcess = await connecting;
+  void collectStream(resumedProcess, (event) =>
+      output.push({
+        stream: event.stream,
+        offset: event.offset,
+        data: Array.from(event.data),
+      })).catch(() => {});
   const waiting = resumedProcess.wait();
   resumed.emit("message", { data: outputFrame(2, 6, "warning\n") });
   resumed.emit("message", {
@@ -1117,6 +1117,7 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
   assert.equal(process.cursor, 6);
   assert.equal(resumedProcess.status, "completed");
   assert.equal(resumedProcess.cursor, 14);
+  await vi.waitFor(() => assert.equal(output.length, 2));
   assert.deepEqual(output, [
     {
       stream: "stdout",
@@ -1141,8 +1142,7 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
   ]);
 });
 
-test("processes reconnect by ID and an explicit output cursor", async () => {
-  const output: Array<{ stream: string; offset: number; data: number[] }> = [];
+test("process iterators report a replay gap after retention expires", async () => {
   const client = {
     POST: async () =>
       ok({
@@ -1156,12 +1156,6 @@ test("processes reconnect by ID and an explicit output cursor", async () => {
 
   const connecting = sandbox.attach("0198-process", {
     offset: 1_000,
-    onOutput: (event) =>
-      output.push({
-        stream: event.stream,
-        offset: event.offset,
-        data: Array.from(event.data),
-      }),
   });
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
@@ -1174,6 +1168,7 @@ test("processes reconnect by ID and an explicit output cursor", async () => {
     data: JSON.stringify({ type: "attached", process_id: "0198-process" }),
   });
   const process = await connecting;
+  const waiting = process.wait();
 
   socket.emit("message", { data: outputFrame(1, 1024, "retained\n") });
   socket.emit("message", {
@@ -1186,21 +1181,7 @@ test("processes reconnect by ID and an explicit output cursor", async () => {
   });
   socket.emit("close", { code: 1000, reason: "process exited with code 0" });
 
-  assert.deepEqual(await process.wait(), {
-    status: "completed",
-    exitCode: 0,
-    exitReason: undefined,
-    stdout: "retained\n",
-    stderr: "",
-  });
-  assert.equal(process.cursor, 1033);
-  assert.deepEqual(output, [
-    {
-      stream: "stdout",
-      offset: 1024,
-      data: Array.from(new TextEncoder().encode("retained\n")),
-    },
-  ]);
+  await assert.rejects(waiting, /output gap/);
 });
 
 test("a terminal is a process with terminal sizing, input, and kill", async () => {
@@ -1286,12 +1267,6 @@ test("process input is streamed as ordered WebSocket frames", async () => {
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
   const starting = sandbox.run("cat", {
-    onOutput: (event) =>
-      output.push({
-        stream: event.stream,
-        offset: event.offset,
-        data: new TextDecoder().decode(event.data),
-      }),
   });
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
@@ -1299,6 +1274,12 @@ test("process input is streamed as ordered WebSocket frames", async () => {
     data: JSON.stringify({ type: "started", process_id: "0198-process" }),
   });
   const process = await starting;
+  void collectStream(process, (event) =>
+      output.push({
+        stream: event.stream,
+        offset: event.offset,
+        data: new TextDecoder().decode(event.data),
+      })).catch(() => {});
   const input = new Uint8Array(2 * 1024 * 1024 + 3);
   input.fill(7);
 
@@ -1306,12 +1287,13 @@ test("process input is streamed as ordered WebSocket frames", async () => {
   socket.emit("message", { data: outputFrame(1, 0, "output\n") });
   await vi.waitFor(() => assert.equal(process.cursor, 7));
   assert.equal(process.cursor, 7);
+  await vi.waitFor(() => assert.equal(output.length, 1));
   assert.deepEqual(output, [{ stream: "stdout", offset: 0, data: "output\n" }]);
 
   const chunks = socket.sent.slice(1) as Uint8Array[];
   assert.deepEqual(
     chunks.map((chunk) => chunk.byteLength),
-    [1024 * 1024, 1024 * 1024, 3],
+    [...Array(32).fill(64 * 1024), 3],
   );
   assert.equal(process.connected, true);
 });
@@ -1381,7 +1363,7 @@ test("process exit closes stdin locally", async () => {
   await assert.rejects(process.sendInput("later"), /stdin is closed/);
 });
 
-test("output callbacks cannot hide runtime connection errors", async () => {
+test("output iterators surface runtime connection errors", async () => {
   const client = {
     POST: async () =>
       ok({
@@ -1393,22 +1375,17 @@ test("output callbacks cannot hide runtime connection errors", async () => {
   TestWebSocket.instances = [];
   const sandbox = new Sandbox(sandboxWire("running") as any, client);
 
-  const starting = sandbox.run("echo hello", {
-    onOutput: () => {
-      throw new Error("callback failed");
-    },
-  });
+  const starting = sandbox.run("echo hello");
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
   socket.emit("message", {
     data: JSON.stringify({ type: "started", process_id: "0198-process" }),
   });
   const process = await starting;
+  const iterator = process.output[Symbol.asyncIterator]();
 
-  assert.throws(
-    () => socket.emit("message", { data: outputFrame(1, 0, "hello\n") }),
-    /callback failed/,
-  );
+  socket.emit("message", { data: outputFrame(1, 0, "hello\n") });
+  assert.equal(new TextDecoder().decode((await iterator.next()).value?.data), "hello\n");
   assert.equal(process.connected, true);
 
   const waiting = process.wait();
@@ -1437,7 +1414,6 @@ test("process output collection can be disabled while streaming", async () => {
 
   const starting = sandbox.run("echo hello", {
     collectOutput: false,
-    onOutput: ({ data }) => output.push(new TextDecoder().decode(data)),
   });
   await vi.waitFor(() => assert.equal(TestWebSocket.instances[0].sent.length, 1));
   const socket = TestWebSocket.instances[0];
@@ -1445,6 +1421,7 @@ test("process output collection can be disabled while streaming", async () => {
     data: JSON.stringify({ type: "started", process_id: "0198-process" }),
   });
   const process = await starting;
+  const streaming = collectStream(process, ({ data }) => output.push(new TextDecoder().decode(data)));
 
   socket.emit("message", { data: outputFrame(1, 0, "hello\n") });
   socket.emit("message", {
@@ -1456,6 +1433,7 @@ test("process output collection can be disabled while streaming", async () => {
     }),
   });
 
+  await streaming;
   assert.deepEqual(output, ["hello\n"]);
   assert.deepEqual(await process.wait(), {
     status: "completed",
@@ -1663,3 +1641,7 @@ test("pause reports a snapshot failure with the failed sandbox", async () => {
     return true;
   });
 });
+
+async function collectStream(process: SandboxProcess, consume: (output: import("../src/sandbox-process.js").SandboxProcessOutput) => unknown): Promise<void> {
+  for await (const output of process.output) consume(output);
+}

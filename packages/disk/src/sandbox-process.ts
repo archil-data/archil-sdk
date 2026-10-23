@@ -1,4 +1,5 @@
-import { BinaryChannel, type ProcessSocket } from "./process-connection.js";
+import { ProcessOutputBuffer } from "./process-output-buffer.js";
+import { BinaryChannel, waitForProcessWrite, type ProcessSocket } from "./process-connection.js";
 import type { Sandbox } from "./sandbox.js";
 
 export type SandboxProcessStatus =
@@ -16,8 +17,6 @@ export interface SandboxProcessOutput {
   data: Uint8Array;
 }
 
-export type SandboxProcessOutputHandler = (output: SandboxProcessOutput) => void;
-
 export interface SandboxTerminalOptions {
   cols?: number;
   rows?: number;
@@ -25,7 +24,6 @@ export interface SandboxTerminalOptions {
 
 export interface SandboxProcessConnectOptions {
   offset?: number;
-  onOutput?: SandboxProcessOutputHandler;
   /** Retain decoded stdout and stderr on the handle and result. Defaults to true. */
   collectOutput?: boolean;
 }
@@ -37,7 +35,6 @@ export interface SandboxProcessStartOptions {
   terminal?: boolean | SandboxTerminalOptions;
   env?: Record<string, string>;
   timeoutSeconds?: number;
-  onOutput?: SandboxProcessOutputHandler;
   /** Retain decoded stdout and stderr on the handle and result. Defaults to true. */
   collectOutput?: boolean;
 }
@@ -81,7 +78,7 @@ type ProcessControlEvent =
     }
   | { type: "error"; error: string; message: string };
 
-const PROCESS_STDIN_CHUNK_BYTES = 1024 * 1024;
+const PROCESS_STDIN_CHUNK_BYTES = 64 * 1024;
 
 /** @deprecated Use Sandbox.run() and Sandbox.attach(). Removed in the next version. */
 export class SandboxProcesses {
@@ -115,248 +112,223 @@ export class SandboxProcess {
   status: SandboxProcessStatus = "running";
   stdout = "";
   stderr = "";
-
   private _id: string;
   private _cursor: number;
-  private readonly _onOutput?: SandboxProcessOutputHandler;
-  private readonly _collectOutput: boolean;
-  private readonly _openConnection: () => Promise<ProcessSocket>;
-  private readonly _controlProcess: (
-    request: ProcessControlRequest,
-  ) => Promise<void>;
+  private _deliveredCursor: number;
   private readonly _stdoutDecoder = new TextDecoder();
   private readonly _stderrDecoder = new TextDecoder();
-  private readonly _terminal: Promise<SandboxProcessResult>;
-  private _resolveTerminal!: (result: SandboxProcessResult) => void;
-  private _result?: SandboxProcessResult;
   private _socket?: ProcessSocket;
-  private _connectionClosed?: Promise<void>;
-  private _connectionError?: Error;
+  private _closed?: Promise<void>;
+  private _detaching?: Promise<void>;
+  private _resuming?: Promise<void>;
+  private _paused = false;
+  private _manual = false;
   private _stdinClosed = false;
+  private _iteratorTaken = false;
+  private _wake?: () => void;
+  private _error?: Error;
+  private _exit?: Extract<ProcessControlEvent, { type: "exit" }>;
+  private _result?: SandboxProcessResult;
+  private _resolveDone!: () => void;
+  private readonly _done = new Promise<void>((resolve) => { this._resolveDone = resolve; });
+
+  /** Pull output from the shared buffer. One iterator may consume each handle. */
+  readonly output: AsyncIterable<SandboxProcessOutput> = {
+    [Symbol.asyncIterator]: () => {
+      if (this._iteratorTaken) throw new Error("Process output already has a consumer");
+      this._iteratorTaken = true;
+      return this._iterateOutput();
+    },
+  };
 
   /** @internal */
   constructor(
     processId: string,
     cursor: number,
-    onOutput: SandboxProcessOutputHandler | undefined,
-    collectOutput: boolean,
-    openConnection: () => Promise<ProcessSocket>,
-    controlProcess: (request: ProcessControlRequest) => Promise<void>,
-  ) {
-    this._id = processId;
-    this._cursor = cursor;
-    this._onOutput = onOutput;
-    this._collectOutput = collectOutput;
-    this._openConnection = openConnection;
-    this._controlProcess = controlProcess;
-    this._terminal = new Promise((resolve) => {
-      this._resolveTerminal = resolve;
-    });
-  }
+    private readonly _collectOutput: boolean,
+    private readonly _buffer: ProcessOutputBuffer,
+    private readonly _openConnection: () => Promise<ProcessSocket>,
+    private readonly _controlProcess: (request: ProcessControlRequest) => Promise<void>,
+  ) { this._id = processId; this._cursor = cursor; this._deliveredCursor = cursor; }
 
-  get id(): string {
-    return this._id;
-  }
-
-  get cursor(): number {
-    return this._cursor;
-  }
-
-  get connected(): boolean {
-    return this._socket?.readyState === WebSocket.OPEN;
-  }
+  get id(): string { return this._id; }
+  /** Next byte after output accepted into the SDK buffer. */
+  get cursor(): number { return this._cursor; }
+  get connected(): boolean { return this._socket?.readyState === WebSocket.OPEN && !this._paused; }
 
   async sendInput(data: string | Uint8Array): Promise<void> {
-    if (this._stdinClosed) {
-      throw new Error("Process stdin is closed");
+    if (this._stdinClosed) throw new Error("Process stdin is closed");
+    await this._resuming;
+    if (this._paused) throw new Error("Process output is paused; consume output before sending input");
+    const socket = this._openSocket();
+    const bytes = typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data);
+    if (socket instanceof BinaryChannel) { await socket.send(bytes); return; }
+    for (let offset = 0; offset < bytes.length; offset += PROCESS_STDIN_CHUNK_BYTES) {
+      socket.send(bytes.slice(offset, offset + PROCESS_STDIN_CHUNK_BYTES));
+      await waitForProcessWrite(socket);
     }
-    const bytes =
-      typeof data === "string"
-        ? new TextEncoder().encode(data)
-        : new Uint8Array(data);
-    await this._sendInput(bytes);
   }
-
-  async resize(size: { cols: number; rows: number }): Promise<void> {
-    if (this.status !== "running") throw new Error("Process has exited");
-    await this._controlProcess({
-      type: "resize",
-      process_id: this._id,
-      ...size,
-    });
-  }
-
-  /** Close stdin. Piped processes only. */
   async closeStdin(): Promise<void> {
     if (this._stdinClosed) return;
-    const socket = this._openSocket();
     this._stdinClosed = true;
     try {
+      await this._resuming;
+      const socket = this._openSocket();
       if (socket instanceof BinaryChannel) await socket.closeStdin();
       else socket.send(JSON.stringify({ type: "close_stdin" }));
-    } catch (error) {
-      this._stdinClosed = false;
-      throw error;
+    } catch (error) { this._stdinClosed = false; throw error; }
+  }
+  async resize(size: { cols: number; rows: number }): Promise<void> {
+    if (this.status !== "running") throw new Error("Process has exited");
+    await this._controlProcess({ type: "resize", process_id: this._id, ...size });
+  }
+  async kill(): Promise<void> {
+    if (!this._exit) await this._controlProcess({ type: "kill", process_id: this._id });
+  }
+  async disconnect(): Promise<void> {
+    this._manual = true;
+    this._buffer.remove(this);
+    const socket = this._socket;
+    socket?.close();
+    await this._closed;
+    if (!this._exit) this._fail(new Error("Process is disconnected"));
+  }
+  async wait(): Promise<SandboxProcessResult> {
+    if (!this._iteratorTaken) {
+      for await (const _output of this.output) { /* Collect or discard while waiting. */ }
+    }
+    await this._done;
+    if (this._error) throw this._error;
+    return this._result!;
+  }
+  private async *_iterateOutput(): AsyncGenerator<SandboxProcessOutput> {
+    try {
+      while (true) {
+        const output = this._buffer.take(this);
+        if (output) {
+          this._deliveredCursor = output.offset + output.data.length;
+          if (this._collectOutput) this._appendText(output.stream,
+            (output.stream === "stdout" ? this._stdoutDecoder : this._stderrDecoder).decode(output.data, { stream: true }));
+          this._complete();
+          yield output;
+        } else {
+          this._complete();
+          if (this._error) throw this._error;
+          if (this._exit) return;
+          await new Promise<void>((resolve) => { this._wake = resolve; });
+          this._wake = undefined;
+        }
+      }
+    } finally {
+      if (!this._exit && !this._error) await this.disconnect();
+      this._buffer.discard(this);
+      this._cursor = this._deliveredCursor;
     }
   }
-
-  /** Close this client connection without terminating the process. */
-  async disconnect(): Promise<void> {
-    const socket = this._socket;
-    const closed = this._connectionClosed;
-    if (!socket) return;
-
-    this._socket = undefined;
-    socket.close();
-    await closed;
+  /** @internal */
+  _pauseOutput(): void {
+    if (this._manual || this._exit) return;
+    this._paused = true;
+    if (this._id && this._socket) {
+      this._detaching = this._closed;
+      this._socket.close();
+    }
   }
-
-  async wait(): Promise<SandboxProcessResult> {
-    if (this._result) return this._result;
-    const closed = this._connectionClosed;
-    if (!closed) throw new Error("Process is disconnected");
-    await Promise.race([this._terminal, closed]);
-    if (this._result) return this._result;
-    if (this._connectionError) throw this._connectionError;
-    throw new Error("Process connection closed before exit");
+  /** @internal */
+  _resumeOutput(): void {
+    if (!this._paused || this._resuming || this._manual || this._exit) return;
+    this._resuming = (async () => {
+      await this._detaching;
+      if (this._buffer.paused || this._manual || this._exit) return;
+      this._paused = false;
+      if (this._id && !this.connected) await this._connect({ type: "attach", process_id: this._id, offset: this._cursor });
+    })().catch((error) => this._fail(error)).finally(() => { this._resuming = undefined; });
   }
-
-  async kill(): Promise<void> {
-    if (this._result) return;
-    await this._controlProcess({ type: "kill", process_id: this._id });
-  }
-
   /** @internal */
   async _connect(request: ProcessConnectionRequest): Promise<void> {
+    this._buffer.add(this);
     const socket = await this._openConnection();
+    if (this._manual) { socket.close(); throw new Error("Process is disconnected"); }
     socket.binaryType = "arraybuffer";
     this._socket = socket;
-
-    let resolveClosed!: () => void;
-    this._connectionClosed = new Promise((resolve) => {
-      resolveClosed = resolve;
-    });
-
+    let closed!: () => void;
+    this._closed = new Promise<void>((resolve) => { closed = resolve; });
+    const expected = request.type === "start" ? "started" : "attached";
+    let settled = false;
     let resolveReady!: () => void;
     let rejectReady!: (error: Error) => void;
-    let readySettled = false;
-    const ready = new Promise<void>((resolve, reject) => {
-      resolveReady = () => {
-        readySettled = true;
-        resolve();
-      };
-      rejectReady = (error) => {
-        readySettled = true;
-        reject(error);
-      };
-    });
-    const expectedReady = request.type === "start" ? "started" : "attached";
-    const fail = (error: unknown) => {
-      if (!readySettled) {
-        rejectReady(error instanceof Error ? error : new Error(String(error)));
-      }
-    };
-
+    const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
     socket.addEventListener("message", (message) => {
-      let output: SandboxProcessOutput | undefined;
+      if (this._socket !== socket) return;
       try {
-        output = this._handleMessage(message.data, expectedReady, resolveReady);
+        const data = message.data;
+        if (data instanceof ArrayBuffer) { this._handleOutput(data); return; }
+        if (typeof data === "object" && "stream" in data) { this._enqueueOutput(data.data, data.offset, data.stream); return; }
+        const event = (typeof data === "string" ? JSON.parse(data) : data) as ProcessControlEvent;
+        switch (event.type) {
+          case "started": case "attached":
+            if (event.type !== expected || (this._id && this._id !== event.process_id)) throw new Error("Unexpected process identity");
+            this._id = event.process_id;
+            settled = true; resolveReady();
+            if (this._paused) this._pauseOutput();
+            break;
+          case "exit":
+            if (this._paused) return;
+            this._exit = event; this.status = event.status; this._stdinClosed = true;
+            this._buffer.remove(this); this._complete(); this._wake?.();
+            break;
+          case "error":
+            if (event.error === "output_detached" && settled && this._id) {
+              this._pauseOutput();
+              if (!this._buffer.paused) this._resumeOutput();
+              return;
+            }
+            throw new Error(`${event.error}: ${event.message}`);
+        }
       } catch (error) {
-        const connectionError =
-          error instanceof Error ? error : new Error(String(error));
-        this._connectionError = connectionError;
-        fail(connectionError);
-        socket.close();
-        return;
+        const failure = error instanceof Error ? error : new Error(String(error));
+        if (!settled) rejectReady(failure);
+        this._fail(failure); socket.close();
       }
-      if (output) this._onOutput?.(output);
     });
     socket.addEventListener("error", () => {
       const error = new Error("Process connection failed");
-      this._connectionError = error;
-      fail(error);
+      if (!settled) rejectReady(error);
+      this._fail(error);
     });
-    socket.addEventListener(
-      "close",
-      () => {
-        if (this._socket === socket) this._socket = undefined;
-        if (!readySettled) {
-          rejectReady(new Error("Process connection closed before ready"));
-        }
-        resolveClosed();
-      },
-      { once: true },
-    );
-
+    socket.addEventListener("close", () => {
+      if (this._socket === socket) this._socket = undefined;
+      closed();
+      if (!settled) rejectReady(new Error("Process connection closed before ready"));
+      if (!this._paused && !this._exit && !this._manual) this._fail(new Error("Process connection closed before exit"));
+    }, { once: true });
     const send = () => {
       try {
         if (socket instanceof BinaryChannel) socket.sendRequest(request);
         else socket.send(JSON.stringify(request));
-      } catch (error) { fail(error); socket.close(); }
+      } catch (error) { rejectReady(error instanceof Error ? error : new Error(String(error))); this._fail(error); socket.close(); }
     };
     if (socket.readyState === WebSocket.OPEN) send();
     else socket.addEventListener("open", send, { once: true });
     await ready;
   }
-
   private _openSocket(): ProcessSocket {
-    if (this.status !== "running") {
-      throw new Error("Process has exited");
-    }
-    if (!this._socket || this._socket.readyState !== WebSocket.OPEN) {
-      throw new Error("Process is disconnected");
-    }
-    return this._socket;
+    if (this.status !== "running") throw new Error("Process has exited");
+    if (!this.connected) throw new Error("Process is disconnected");
+    return this._socket!;
   }
-
-  private async _sendInput(data: Uint8Array): Promise<void> {
-    const socket = this._openSocket();
-    if (socket instanceof BinaryChannel) {
-      await socket.send(data);
-      return;
-    }
-    for (let offset = 0; offset < data.byteLength; offset += PROCESS_STDIN_CHUNK_BYTES) {
-      const chunk = new Uint8Array(
-        Math.min(PROCESS_STDIN_CHUNK_BYTES, data.byteLength - offset),
-      );
-      chunk.set(data.subarray(offset, offset + chunk.byteLength));
-      socket.send(chunk);
-    }
+  private _fail(error: unknown): void {
+    this._error ??= error instanceof Error ? error : new Error(String(error));
+    this._buffer.remove(this); this._resolveDone(); this._wake?.();
   }
-
-  private _handleMessage(
-    data: string | ArrayBuffer | ProcessControlEvent | SandboxProcessOutput,
-    expectedReady: "started" | "attached",
-    ready: () => void,
-  ): SandboxProcessOutput | undefined {
-    if (data instanceof ArrayBuffer) return this._handleOutput(data);
-    if (typeof data === "object" && "stream" in data) {
-      return this._consumeOutput(data.data, data.offset, data.stream);
-    }
-    const event = (typeof data === "string" ? JSON.parse(data) : data) as ProcessControlEvent;
-    switch (event.type) {
-      case "started":
-      case "attached":
-        if (event.type !== expectedReady) {
-          throw new Error(`Expected ${expectedReady}, received ${event.type}`);
-        }
-        if (this._id && this._id !== event.process_id) {
-          throw new Error("Runtime returned a different process ID");
-        }
-        this._id = event.process_id;
-        ready();
-        return;
-      case "exit":
-        this._finish(event);
-        return;
-      case "error": {
-        const error = new Error(`${event.error}: ${event.message}`);
-        throw error;
-      }
-    }
+  private _complete(): void {
+    if (!this._exit || this._buffer.has(this) || this._result) return;
+    this._flushDecoders();
+    this._result = { status: this._exit.status, exitCode: this._exit.exit_code ?? undefined,
+      exitReason: this._exit.exit_reason ?? undefined, stdout: this.stdout, stderr: this.stderr };
+    this._resolveDone();
   }
-
-  private _handleOutput(data: ArrayBuffer): SandboxProcessOutput | undefined {
+  private _handleOutput(data: ArrayBuffer): void {
     const bytes = new Uint8Array(data);
     if (bytes.byteLength < 9 || (bytes[0] !== 1 && bytes[0] !== 2)) {
       throw new Error("Invalid process output frame");
@@ -367,33 +339,21 @@ export class SandboxProcess {
         1,
       ),
     );
-    return this._consumeOutput(bytes.subarray(9), offset, bytes[0] === 1 ? "stdout" : "stderr");
+    return this._enqueueOutput(bytes.subarray(9), offset, bytes[0] === 1 ? "stdout" : "stderr");
   }
 
-  private _consumeOutput(payload: Uint8Array, offset: number, stream: SandboxProcessStream): SandboxProcessOutput | undefined {
+  private _enqueueOutput(payload: Uint8Array, offset: number, stream: SandboxProcessStream): void {
+    if (this._paused) return;
     const end = offset + payload.byteLength;
     if (end <= this._cursor) return;
-
-    if (offset > this._cursor) {
-      this._flushDecoders();
-      this._cursor = offset;
+    if (offset > this._cursor) throw new Error(`Process output gap: expected offset ${this._cursor}, received ${offset}`);
+    const skip = this._cursor - offset;
+    const output = { stream, offset: this._cursor, data: payload.slice(skip) };
+    if (this._buffer.push(this, output)) {
+      this._cursor = end;
+      this._wake?.();
     }
-
-    const skip = Math.max(0, this._cursor - offset);
-    const unread = payload.subarray(skip);
-    const unreadOffset = offset + skip;
-    this._cursor = end;
-    if (this._collectOutput) {
-      this._appendText(
-        stream,
-        (stream === "stdout" ? this._stdoutDecoder : this._stderrDecoder).decode(unread, {
-          stream: true,
-        }),
-      );
-    }
-    return { stream, offset: unreadOffset, data: unread };
   }
-
   private _appendText(stream: SandboxProcessStream, data: string): void {
     if (stream === "stdout") this.stdout += data;
     else this.stderr += data;
@@ -405,19 +365,4 @@ export class SandboxProcess {
     this._appendText("stderr", this._stderrDecoder.decode());
   }
 
-  private _finish(event: Extract<ProcessControlEvent, { type: "exit" }>): void {
-    if (this._result) return;
-    this.status = event.status;
-    this._stdinClosed = true;
-    this._flushDecoders();
-    this._cursor = Math.max(this._cursor, event.cursor);
-    this._result = {
-      status: event.status,
-      exitCode: event.exit_code ?? undefined,
-      exitReason: event.exit_reason ?? undefined,
-      stdout: this.stdout,
-      stderr: this.stderr,
-    };
-    this._resolveTerminal(this._result);
-  }
 }

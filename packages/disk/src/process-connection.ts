@@ -4,7 +4,6 @@ import {
   EnvelopeSchema,
   Exit_Status,
   type Envelope,
-  type Settings,
 } from "./generated/process_pb.js";
 
 async function waitForSocketOpen(socket: WebSocket): Promise<void> {
@@ -58,12 +57,18 @@ export async function openProcessSocket(
   }
 }
 
+/** Bound queued socket writes; logical input queue overflow is still an error. */
+export async function waitForProcessWrite(socket: WebSocket): Promise<void> {
+  while (socket.bufferedAmount > 256 * 1024) {
+    if (socket.readyState !== WebSocket.OPEN) throw new Error("Process is disconnected");
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+  }
+}
+
 const PROTOCOL = "archil-process-v2";
 const MAX_DATA = 64 * 1024;
-const OVERHEAD = 64;
-const WINDOW = 256 * 1024;
+const MAX_CHANNELS = 128;
 const IDLE_MS = 5000;
-const SETTINGS_TIMEOUT_MS = 10000;
 
 type Request =
   | {
@@ -140,7 +145,6 @@ export class ProcessConnection {
       return legacy;
     }
     const binary = new BinaryConnection(socket);
-    await binary.ready;
     if (generation !== this.generation) {
       binary.close();
       throw new Error("Process connection opening cancelled");
@@ -178,93 +182,30 @@ export class ProcessConnection {
 class BinaryConnection {
   readonly channels = new Map<number, BinaryChannel>();
   private next = 1;
-  private peer?: Settings;
   private draining = false;
   private idle?: ReturnType<typeof setTimeout>;
-  readonly ready: Promise<void>;
   get canOpen(): boolean {
-    return (
-      !this.draining &&
-      this.socket.readyState === WebSocket.OPEN &&
-      this.next < 0xffffffff
-    );
+    return !this.draining && this.socket.readyState === WebSocket.OPEN &&
+      this.next < 0xffffffff && this.channels.size < MAX_CHANNELS;
   }
   constructor(private readonly socket: WebSocket) {
-    this.ready = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("Process settings timed out"));
-        this.close();
-      }, SETTINGS_TIMEOUT_MS);
-      socket.addEventListener("message", (message) => {
-        try {
-          const frame = fromBinary(
-            EnvelopeSchema,
-            new Uint8Array(message.data as ArrayBuffer),
-          );
-          if (frame.channelId === 0) {
-            if (frame.body.case === "settings" && !this.peer) {
-              const peer = frame.body.value;
-              if (
-                !peer.maxChannels ||
-                !peer.maxDataBytes ||
-                peer.maxDataBytes > MAX_DATA ||
-                peer.receiveWindow < peer.maxDataBytes + OVERHEAD
-              )
-                throw new Error("Invalid process settings");
-              this.peer = peer;
-              clearTimeout(timeout);
-              resolve();
-            } else if (frame.body.case === "drain") {
-              this.draining = true;
-              if (!this.channels.size) this.close();
-            } else throw new Error("Unexpected process connection message");
-            return;
-          }
-          this.channels.get(frame.channelId)?.receive(frame);
-        } catch (error) {
-          reject(error);
-          this.close(error);
-        }
-      });
-      socket.addEventListener(
-        "close",
-        () => {
-          clearTimeout(timeout);
-          reject(new Error("Process connection closed before settings"));
-          this.close(new Error("Process connection closed before exit"));
-        },
-        { once: true },
-      );
-      socket.addEventListener(
-        "error",
-        () => {
-          reject(new Error("Process connection failed"));
-          this.close(new Error("Process connection failed"));
-        },
-        { once: true },
-      );
+    socket.addEventListener("message", (message) => {
+      try {
+        const frame = fromBinary(EnvelopeSchema, new Uint8Array(message.data as ArrayBuffer));
+        if (frame.channelId === 0) {
+          if (frame.body.case !== "drain") throw new Error("Unexpected process connection message");
+          this.draining = true;
+          if (!this.channels.size) this.close();
+        } else this.channels.get(frame.channelId)?.receive(frame);
+      } catch (error) { this.close(error); }
     });
-    this.send(
-      0,
-      create(EnvelopeSchema, {
-        body: {
-          case: "settings",
-          value: {
-            receiveWindow: WINDOW,
-            maxDataBytes: MAX_DATA,
-            maxChannels: 128,
-          },
-        },
-      }).body,
-    );
+    socket.addEventListener("close", () => this.close(new Error("Process connection closed before exit")), { once: true });
+    socket.addEventListener("error", () => this.close(new Error("Process connection failed")), { once: true });
   }
   channel(): BinaryChannel {
-    if (!this.canOpen || !this.peer)
-      throw new Error("Process connection is draining");
-    if (this.channels.size >= this.peer.maxChannels)
-      throw new Error("Process channel limit reached");
+    if (!this.canOpen) throw new Error("Process connection is draining or full");
     clearTimeout(this.idle);
-    const channel = new BinaryChannel(this, this.next++, this.peer);
+    const channel = new BinaryChannel(this, this.next++);
     this.channels.set(channel.id, channel);
     return channel;
   }
@@ -273,6 +214,7 @@ class BinaryConnection {
       toBinary(EnvelopeSchema, create(EnvelopeSchema, { channelId: id, body })),
     );
   }
+  async writable(): Promise<void> { await waitForProcessWrite(this.socket); }
   remove(id: number): void {
     this.channels.delete(id);
     if (!this.channels.size) {
@@ -296,18 +238,11 @@ export class BinaryChannel {
   readonly addEventListener = this.events.addEventListener.bind(
     this.events,
   ) as WebSocket["addEventListener"];
-  private available: number;
-  private outstanding = 0;
-  private receiveCredit = WINDOW;
-  private wake?: () => void;
   private sending: Promise<void> = Promise.resolve();
   constructor(
     private readonly connection: BinaryConnection,
     readonly id: number,
-    private readonly peer: Settings,
-  ) {
-    this.available = peer.receiveWindow;
-  }
+  ) {}
   sendRequest(request: Request): void {
     switch (request.type) {
       case "start": {
@@ -374,28 +309,11 @@ export class BinaryChannel {
     }
   }
   send(bytes: Uint8Array): Promise<void> {
-    // Serialize input calls so EOF cannot overtake accepted input while it waits
-    // for credit. Retain the caller's copy only for the duration of sendInput.
     const sending = this.sending.then(async () => {
-      for (
-        let offset = 0;
-        offset < bytes.length;
-        offset += this.peer.maxDataBytes
-      ) {
-        const data = bytes.subarray(offset, offset + this.peer.maxDataBytes);
-        const cost = data.length + OVERHEAD;
-        while (this.available < cost) {
-          if (this.readyState !== WebSocket.OPEN)
-            throw new Error("Process is disconnected");
-          await new Promise<void>((resolve) => {
-            this.wake = resolve;
-          });
-        }
-        if (this.readyState !== WebSocket.OPEN)
-          throw new Error("Process is disconnected");
-        this.available -= cost;
-        this.outstanding += cost;
-        this.connection.send(this.id, { case: "stdin", value: data });
+      for (let offset = 0; offset < bytes.length; offset += MAX_DATA) {
+        if (this.readyState !== WebSocket.OPEN) throw new Error("Process is disconnected");
+        this.connection.send(this.id, { case: "stdin", value: bytes.subarray(offset, offset + MAX_DATA) });
+        await this.connection.writable();
       }
     });
     this.sending = sending.catch(() => {});
@@ -413,7 +331,6 @@ export class BinaryChannel {
   close(): void {
     if (this.readyState !== WebSocket.OPEN) return;
     this.readyState = WebSocket.CLOSING;
-    this.wake?.();
     this.connection.send(
       this.id,
       create(EnvelopeSchema, { body: { case: "detach", value: {} } }).body,
@@ -423,24 +340,13 @@ export class BinaryChannel {
     const body = frame.body;
     let event: unknown;
     switch (body.case) {
-      case "windowUpdate":
-        if (body.value.credit > this.outstanding)
-          throw new Error("Invalid process window update");
-        this.outstanding -= body.value.credit;
-        this.available += body.value.credit;
-        this.wake?.();
-        this.wake = undefined;
-        return;
       case "started":
       case "attached":
         event = { type: body.case, process_id: body.value.processId };
         break;
       case "stdout":
       case "stderr": {
-        const cost = body.value.data.length + OVERHEAD;
-        this.receiveCredit -= cost;
-        if (body.value.data.length > MAX_DATA || this.receiveCredit < 0)
-          throw new Error("Process output exceeds receive credit");
+        if (body.value.data.length > MAX_DATA) throw new Error("Process output exceeds chunk size");
         const offset = Number(body.value.offset);
         if (!Number.isSafeInteger(offset))
           throw new Error(
@@ -450,14 +356,6 @@ export class BinaryChannel {
           new MessageEvent("message", {
             data: { stream: body.case, offset, data: body.value.data },
           }),
-        );
-        // Output callbacks are synchronous; collection/consumer now owns bytes.
-        this.receiveCredit += cost;
-        this.connection.send(
-          this.id,
-          create(EnvelopeSchema, {
-            body: { case: "windowUpdate", value: { credit: cost } },
-          }).body,
         );
         return;
       }
@@ -513,8 +411,6 @@ export class BinaryChannel {
         }),
       );
     this.readyState = WebSocket.CLOSED;
-    this.wake?.();
-    this.wake = undefined;
     this.connection.remove(this.id);
     this.events.dispatchEvent(new Event("close"));
   }

@@ -41,28 +41,31 @@ function harness(processOverrides: Partial<SandboxProcess> = {}, startError?: Er
   const stdout = new FakeOutput();
   const stderr = new FakeOutput();
   const signals = new EventEmitter();
-  let output: ((event: { data: Uint8Array }) => void) | undefined;
+  let controller!: ReadableStreamDefaultController<{ data: Uint8Array }>;
+  const output = new ReadableStream<{ data: Uint8Array }>({ start: value => { controller = value; } });
+  let closed = false;
+  const closeOutput = () => { if (!closed) { closed = true; controller.close(); } };
   const result: SandboxProcessResult = { status: "completed", exitCode: 0, stdout: "", stderr: "" };
   const remote = {
+    output,
     id: "process-123",
     status: "running",
     sendInput: vi.fn(async () => undefined),
     resize: vi.fn(async () => undefined),
     kill: vi.fn(async () => undefined),
-    wait: vi.fn(async () => result),
-    disconnect: vi.fn(async () => undefined),
+    wait: vi.fn(async () => { closeOutput(); return result; }),
+    disconnect: vi.fn(async () => closeOutput()),
     ...processOverrides,
   } as unknown as SandboxProcess;
   const sandbox = {
     processes: { disconnect: vi.fn(async () => undefined) },
-    run: vi.fn(async (_command: string, options: { onOutput?: typeof output }) => {
+    run: vi.fn(async (_command: string, _options: unknown) => {
       if (startError) throw startError;
       await startGate;
-      output = options.onOutput;
       return remote;
     }),
   } as unknown as Sandbox;
-  return { stdin, stdout, stderr, signals, remote, sandbox, getOutput: () => output };
+  return { stdin, stdout, stderr, signals, remote, sandbox, getOutput: () => (event: { data: Uint8Array }) => controller.enqueue(event) };
 }
 
 test("normal shell exit restores raw mode and removes every listener", async () => {
@@ -167,7 +170,7 @@ test("resize and local signals control the remote process", async () => {
     finish({ status: "cancelled", stdout: "", stderr: "" });
   });
   const shell = runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
-  await vi.waitFor(() => assert.ok(h.getOutput()));
+  await vi.waitFor(() => assert.equal(h.stdin.listenerCount("data"), 1));
   h.stdout.columns = 80;
   h.stdout.rows = 24;
   h.stdout.emit("resize");
@@ -200,7 +203,7 @@ test("startup, connection, resize, and output failures always clean up", async (
     };
     const shell = runSandboxShell({ sandbox: h.sandbox, stdin: h.stdin, stdout: h.stdout, stderr: h.stderr, signals: h.signals as never });
     const rejected = assert.rejects(shell, new RegExp(`${failure} failed`));
-    await vi.waitFor(() => assert.ok(h.getOutput()));
+    await vi.waitFor(() => assert.equal(h.stdin.listenerCount("data"), 1));
     if (failure === "resize") h.stdout.emit("resize");
     else h.getOutput()!({ data: new Uint8Array([65]) });
     await rejected;

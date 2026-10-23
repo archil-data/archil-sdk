@@ -241,9 +241,10 @@ test("run preserves argv, streams output, and propagates remote status", async (
   const result: SandboxProcessResult = { status: "failed", exitCode: 7, stdout: "", stderr: "" };
   const closeStdin = vi.fn(async () => undefined);
   const start = vi.fn(async (_command: string, options: Parameters<Sandbox["run"]>[1]) => {
-    options?.onOutput?.({ stream: "stdout", offset: 0, data: new TextEncoder().encode("out") });
-    options?.onOutput?.({ stream: "stderr", offset: 3, data: new TextEncoder().encode("err") });
-    return { wait: vi.fn(async () => result), closeStdin, kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
+    return { output: { async *[Symbol.asyncIterator]() {
+      yield { stream: "stdout", offset: 0, data: new TextEncoder().encode("out") };
+      yield { stream: "stderr", offset: 3, data: new TextEncoder().encode("err") };
+    } }, wait: vi.fn(async () => result), closeStdin, kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
   });
   const item = fakeSandbox({ run: start as unknown as Sandbox["run"] });
   const cli = harness([item]);
@@ -273,10 +274,9 @@ test("run supports JSON and kills the remote process on local signals", async ()
   await json.run("run", "one", "echo", "ok", "--output", "json");
   assert.deepEqual(JSON.parse(text(json.stdout.values)), completed);
   assert.equal(jsonStart.mock.calls[0]![1]?.collectOutput, true);
-  assert.equal(jsonStart.mock.calls[0]![1]?.onOutput, undefined);
 
   const wait = new Promise<SandboxProcessResult>(() => {});
-  const interruptedRemote = { wait: vi.fn(() => wait), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
+  const interruptedRemote = { output: { async *[Symbol.asyncIterator]() {} }, wait: vi.fn(() => wait), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
   const interrupted = harness([fakeSandbox({ run: vi.fn(async () => interruptedRemote) as unknown as Sandbox["run"] })]);
   const running = interrupted.run("run", "one", "sleep", "30");
   await vi.waitFor(() => assert.equal(interrupted.signals.listenerCount("SIGINT"), 1));
@@ -290,7 +290,7 @@ test("run supports JSON and kills the remote process on local signals", async ()
 
   let acknowledgeKill!: () => void;
   const hungKill = new Promise<void>((resolve) => { acknowledgeKill = resolve; });
-  const hungRemote = { wait: vi.fn(() => wait), closeStdin: vi.fn(async () => undefined), kill: vi.fn(() => hungKill), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
+  const hungRemote = { output: { async *[Symbol.asyncIterator]() {} }, wait: vi.fn(() => wait), closeStdin: vi.fn(async () => undefined), kill: vi.fn(() => hungKill), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
   const hung = harness([fakeSandbox({ run: vi.fn(async () => hungRemote) as unknown as Sandbox["run"] })]);
   const hungRun = hung.run("run", "one", "sleep", "30");
   await vi.waitFor(() => assert.equal(hung.signals.listenerCount("SIGINT"), 1));
@@ -303,7 +303,7 @@ test("run supports JSON and kills the remote process on local signals", async ()
 
   let releaseStart!: () => void;
   const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });
-  const startingRemote = { wait: vi.fn(async () => completed), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
+  const startingRemote = { output: { async *[Symbol.asyncIterator]() {} }, wait: vi.fn(async () => completed), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
   const gatedStart = vi.fn(async () => { await startGate; return startingRemote; });
   const starting = harness([fakeSandbox({ run: gatedStart as unknown as Sandbox["run"] })]);
   const startingRun = starting.run("run", "one", "echo", "ok");
@@ -315,6 +315,7 @@ test("run supports JSON and kills the remote process on local signals", async ()
 
 test("run kills the remote process if its output connection fails", async () => {
   const remote = {
+    output: { async *[Symbol.asyncIterator]() {} },
     wait: vi.fn(async () => { throw new Error("connection closed"); }),
     closeStdin: vi.fn(async () => undefined),
     kill: vi.fn(async () => undefined),
@@ -334,7 +335,7 @@ test("run reports failures without remote stderr", async () => {
     [{ status: "failed", exitCode: 9, exitReason: "signal", stdout: "", stderr: "" }, ["false"], /Process failed with exit code 9: signal/],
     [{ status: "cancelled", exitReason: "sandbox stopped", stdout: "", stderr: "" }, ["false"], /Process cancelled: sandbox stopped/],
   ] as const) {
-    const remote = { wait: vi.fn(async () => result), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
+    const remote = { output: { async *[Symbol.asyncIterator]() {} }, wait: vi.fn(async () => result), closeStdin: vi.fn(async () => undefined), kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined), stdout: "", stderr: "" };
     const item = fakeSandbox({ run: vi.fn(async () => remote) as unknown as Sandbox["run"] });
     const cli = harness([item]);
     await cli.run("run", "one", ...args);

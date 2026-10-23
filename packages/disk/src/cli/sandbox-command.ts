@@ -35,6 +35,7 @@ export interface SandboxService {
 
 interface WritableOutput {
   write(data: string | Uint8Array): unknown;
+  once?(event: "drain", listener: () => void): unknown;
 }
 
 interface SandboxCliDependencies {
@@ -294,10 +295,6 @@ Use -- before the command so its flags are not parsed as sandbox options.
         remote = await sandbox.run(shellCommand, {
           ...runOptions,
           collectOutput: options.output === "json",
-          onOutput: options.output === "json" ? undefined : ({ stream, data }) => {
-            if (stream === "stderr" && data.byteLength > 0) receivedStderr = true;
-            return (stream === "stdout" ? stdout : stderr).write(data);
-          },
         });
         try {
           await remote.closeStdin();
@@ -307,7 +304,16 @@ Use -- before the command so its flags are not parsed as sandbox options.
         signals.on("SIGINT", onSigint);
         signals.on("SIGTERM", onSigterm);
         signals.on("SIGHUP", onSighup);
-        result = await Promise.race([remote.wait(), termination]);
+        const streaming = options.output === "json" ? Promise.resolve() : (async () => {
+          for await (const { stream, data } of remote!.output) {
+            if (stream === "stderr" && data.length) receivedStderr = true;
+            const destination = stream === "stdout" ? stdout : stderr;
+            if (destination.write(data) === false && destination.once) await new Promise<void>(resolve => destination.once!("drain", resolve));
+          }
+        })();
+        result = await Promise.race([
+          Promise.all([remote.wait(), streaming]).then(([result]) => result), termination,
+        ]);
         if (options.output === "json") {
           output(JSON.stringify(result, null, 2));
         } else if (result.status !== "completed" && !receivedStderr) {

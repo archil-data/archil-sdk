@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file process.proto.
  */
 export const file_process: GenFile = /*@__PURE__*/
-  fileDesc("Cg1wcm9jZXNzLnByb3RvEhFhcmNoaWwucHJvY2Vzcy52MSKwCAoIRW52ZWxvcGUSEgoKY2hhbm5lbF9pZBgBIAEoDRIPCgVzdGRpbhgCIAEoDEgAEisKBnN0ZG91dBgDIAEoCzIZLmFyY2hpbC5wcm9jZXNzLnYxLk91dHB1dEgAEisKBnN0ZGVychgEIAEoCzIZLmFyY2hpbC5wcm9jZXNzLnYxLk91dHB1dEgAEikKBXN0YXJ0GAUgASgLMhguYXJjaGlsLnByb2Nlc3MudjEuU3RhcnRIABIrCgZhdHRhY2gYBiABKAsyGS5hcmNoaWwucHJvY2Vzcy52MS5BdHRhY2hIABI1CgdzdGFydGVkGAcgASgLMiIuYXJjaGlsLnByb2Nlc3MudjEuUHJvY2Vzc0lkZW50aXR5SAASNgoIYXR0YWNoZWQYCCABKAsyIi5hcmNoaWwucHJvY2Vzcy52MS5Qcm9jZXNzSWRlbnRpdHlIABInCgRleGl0GAkgASgLMhcuYXJjaGlsLnByb2Nlc3MudjEuRXhpdEgAEikKBWVycm9yGAogASgLMhguYXJjaGlsLnByb2Nlc3MudjEuRXJyb3JIABIvCgtjbG9zZV9zdGRpbhgLIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASKgoGZGV0YWNoGAwgASgLMhguYXJjaGlsLnByb2Nlc3MudjEuRW1wdHlIABInCgRraWxsGA0gASgLMhcuYXJjaGlsLnByb2Nlc3MudjEuS2lsbEgAEisKBnJlc2l6ZRgOIAEoCzIZLmFyY2hpbC5wcm9jZXNzLnYxLlJlc2l6ZUgAEioKBmtpbGxlZBgPIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASKwoHcmVzaXplZBgQIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASLwoIc2V0dGluZ3MYESABKAsyGy5hcmNoaWwucHJvY2Vzcy52MS5TZXR0aW5nc0gAEjgKDXdpbmRvd191cGRhdGUYEiABKAsyHy5hcmNoaWwucHJvY2Vzcy52MS5XaW5kb3dVcGRhdGVIABIpCgVkcmFpbhgTIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASNAoLZ3Vlc3Rfc3RhcnQYFCABKAsyHS5hcmNoaWwucHJvY2Vzcy52MS5HdWVzdFN0YXJ0SAASLAoIZGV0YWNoZWQYFSABKAsyGC5hcmNoaWwucHJvY2Vzcy52MS5FbXB0eUgAEjwKD2NvbnRyb2xfcmVxdWVzdBgWIAEoCzIhLmFyY2hpbC5wcm9jZXNzLnYxLkNvbnRyb2xSZXF1ZXN0SAASPgoQY29udHJvbF9yZXNwb25zZRgXIAEoCzIiLmFyY2hpbC5wcm9jZXNzLnYxLkNvbnRyb2xSZXNwb25zZUgAQgYKBGJvZHkiBwoFRW1wdHkiJgoGT3V0cHV0Eg4KBm9mZnNldBgBIAEoBBIMCgRkYXRhGAIgASgMIvMBCgVTdGFydBIPCgdjb21tYW5kGAEgASgJEhAKA2N3ZBgCIAEoCUgAiAEBEjEKCHRlcm1pbmFsGAMgASgLMh8uYXJjaGlsLnByb2Nlc3MudjEuVGVybWluYWxTaXplEi4KA2VudhgEIAMoCzIhLmFyY2hpbC5wcm9jZXNzLnYxLlN0YXJ0LkVudkVudHJ5EhwKD3RpbWVvdXRfc2Vjb25kcxgFIAEoBEgBiAEBGioKCEVudkVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFCBgoEX2N3ZEISChBfdGltZW91dF9zZWNvbmRzIioKDFRlcm1pbmFsU2l6ZRIMCgRyb3dzGAEgASgNEgwKBGNvbHMYAiABKA0iLAoGQXR0YWNoEhIKCnByb2Nlc3NfaWQYASABKAkSDgoGb2Zmc2V0GAIgASgEIiUKD1Byb2Nlc3NJZGVudGl0eRISCgpwcm9jZXNzX2lkGAEgASgJIhoKBEtpbGwSEgoKcHJvY2Vzc19pZBgBIAEoCSJPCgZSZXNpemUSEgoKcHJvY2Vzc19pZBgBIAEoCRIxCgh0ZXJtaW5hbBgCIAEoCzIfLmFyY2hpbC5wcm9jZXNzLnYxLlRlcm1pbmFsU2l6ZSL+AQoERXhpdBIuCgZzdGF0dXMYASABKA4yHi5hcmNoaWwucHJvY2Vzcy52MS5FeGl0LlN0YXR1cxIWCglleGl0X2NvZGUYAiABKAVIAIgBARIYCgtleGl0X3JlYXNvbhgDIAEoCUgBiAEBEg4KBmN1cnNvchgEIAEoBBISCgpvb21fa2lsbGVkGAUgASgIIlIKBlN0YXR1cxIPCgtVTlNQRUNJRklFRBAAEg0KCUNPTVBMRVRFRBABEgoKBkZBSUxFRBACEg0KCUNBTkNFTExFRBADEg0KCVRJTUVEX09VVBAEQgwKCl9leGl0X2NvZGVCDgoMX2V4aXRfcmVhc29uIiYKBUVycm9yEgwKBGNvZGUYASABKAkSDwoHbWVzc2FnZRgCIAEoCSJQCghTZXR0aW5ncxIWCg5yZWNlaXZlX3dpbmRvdxgBIAEoDRIWCg5tYXhfZGF0YV9ieXRlcxgCIAEoDRIUCgxtYXhfY2hhbm5lbHMYAyABKA0iHgoMV2luZG93VXBkYXRlEg4KBmNyZWRpdBgBIAEoDSLRAgoKR3Vlc3RTdGFydBIMCgRhcmd2GAEgAygJEkMKC2Vudmlyb25tZW50GAIgAygLMi4uYXJjaGlsLnByb2Nlc3MudjEuR3Vlc3RTdGFydC5FbnZpcm9ubWVudEVudHJ5Eh4KEXdvcmtpbmdfZGlyZWN0b3J5GAMgASgJSACIAQESCwoDcHR5GAQgASgIEhQKDGtlZXBfbW91bnRlZBgFIAEoCBIxCgh0ZXJtaW5hbBgGIAEoCzIfLmFyY2hpbC5wcm9jZXNzLnYxLlRlcm1pbmFsU2l6ZRIcCg90aW1lb3V0X3NlY29uZHMYByABKARIAYgBARoyChBFbnZpcm9ubWVudEVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFCFAoSX3dvcmtpbmdfZGlyZWN0b3J5QhIKEF90aW1lb3V0X3NlY29uZHMihwQKDkNvbnRyb2xSZXF1ZXN0EioKBmhlYWx0aBgBIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASMwoKaW5pdGlhbGl6ZRgCIAEoCzIdLmFyY2hpbC5wcm9jZXNzLnYxLkluaXRpYWxpemVIABIwCglzZXRfY2xvY2sYAyABKAsyGy5hcmNoaWwucHJvY2Vzcy52MS5TZXRDbG9ja0gAEigKBHN5bmMYBCABKAsyGC5hcmNoaWwucHJvY2Vzcy52MS5FbXB0eUgAEi8KCHNodXRkb3duGAUgASgLMhsuYXJjaGlsLnByb2Nlc3MudjEuU2h1dGRvd25IABI+ChpyZWZyZXNoX3NlcnZpY2VfcHJvamVjdGlvbhgGIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASPgoQaW5zdGFsbF9pZGVudGl0eRgHIAEoCzIiLmFyY2hpbC5wcm9jZXNzLnYxLkluc3RhbGxJZGVudGl0eUgAEj8KEWluc3RhbGxfZWdyZXNzX2NhGAggASgLMiIuYXJjaGlsLnByb2Nlc3MudjEuSW5zdGFsbEVncmVzc0NhSAASPgoaY2xvc2Vfb3V0Z29pbmdfY29ubmVjdGlvbnMYCSABKAsyGC5hcmNoaWwucHJvY2Vzcy52MS5FbXB0eUgAQgYKBGJvZHkiuQMKD0NvbnRyb2xSZXNwb25zZRIrCgZoZWFsdGgYASABKAsyGS5hcmNoaWwucHJvY2Vzcy52MS5IZWFsdGhIABItCgljbG9ja19zZXQYAiABKAsyGC5hcmNoaWwucHJvY2Vzcy52MS5FbXB0eUgAEjEKDXN5bmNfY29tcGxldGUYAyABKAsyGC5hcmNoaWwucHJvY2Vzcy52MS5FbXB0eUgAEjUKEXNodXRkb3duX2NvbXBsZXRlGAQgASgLMhguYXJjaGlsLnByb2Nlc3MudjEuRW1wdHlIABIyCgZvdXRwdXQYBSABKAsyIC5hcmNoaWwucHJvY2Vzcy52MS5Db21tYW5kT3V0cHV0SAASLgoEZXhpdBgGIAEoCzIeLmFyY2hpbC5wcm9jZXNzLnYxLkNvbW1hbmRFeGl0SAASMAoFZXJyb3IYByABKAsyHy5hcmNoaWwucHJvY2Vzcy52MS5BZ2VudEZhaWx1cmVIABJCChJzZXJ2aWNlX3Byb2plY3Rpb24YCCABKAsyJC5hcmNoaWwucHJvY2Vzcy52MS5TZXJ2aWNlUHJvamVjdGlvbkgAQgYKBGJvZHki6AEKCkluaXRpYWxpemUSFAoMY29udGFpbmVyX2lkGAEgASgJEjkKBm1vdW50cxgCIAMoCzIpLmFyY2hpbC5wcm9jZXNzLnYxLkluaXRpYWxpemUuTW91bnRzRW50cnkSIgoVd2FsbF9jbG9ja191bml4X25hbm9zGAMgASgESACIAQEaSwoLTW91bnRzRW50cnkSCwoDa2V5GAEgASgJEisKBXZhbHVlGAIgASgLMhwuYXJjaGlsLnByb2Nlc3MudjEuRGlza01vdW50OgI4AUIYChZfd2FsbF9jbG9ja191bml4X25hbm9zIpIDCglEaXNrTW91bnQSDwoHZGlza19pZBgBIAEoCRITCgZyZWdpb24YAiABKAlIAIgBARIYCgtlbnZpcm9ubWVudBgDIAEoCUgBiAEBEhMKBnNlcnZlchgEIAEoCUgCiAEBEhIKCmF1dGhfdG9rZW4YBSABKAkSDgoGc2hhcmVkGAYgASgIEhAKCGluc2VjdXJlGAcgASgIEhQKDHN1YmRpcmVjdG9yeRgIIAEoCRIRCglyZWFkX29ubHkYCSABKAgSEwoLY29uZGl0aW9uYWwYCiABKAgSKAobZGVsZWdhdGlvbl9xdWV1ZV90aW1lb3V0X21zGAsgASgESAOIAQESFgoOY2hlY2tvdXRfcGF0aHMYDCADKAkSHgoRcHJlYmFrZWRfZW5kcG9pbnQYDSABKAlIBIgBAUIJCgdfcmVnaW9uQg4KDF9lbnZpcm9ubWVudEIJCgdfc2VydmVyQh4KHF9kZWxlZ2F0aW9uX3F1ZXVlX3RpbWVvdXRfbXNCFAoSX3ByZWJha2VkX2VuZHBvaW50Ih4KCFNldENsb2NrEhIKCnVuaXhfbmFub3MYASABKAMiQgoIU2h1dGRvd24SGAoQc3luY19maWxlc3lzdGVtcxgBIAEoCBIcChR0ZXJtaW5hdGlvbl9ncmFjZV9tcxgCIAEoBCKhAQoPSW5zdGFsbElkZW50aXR5EhwKFHNzaF9ob3N0X2VkMjU1MTlfa2V5GAEgASgJEiAKGHNzaF9ob3N0X2VkMjU1MTlfa2V5X3B1YhgCIAEoCRIaChJzc2hfaG9zdF9lY2RzYV9rZXkYAyABKAkSHgoWc3NoX2hvc3RfZWNkc2Ffa2V5X3B1YhgEIAEoCRISCgptYWNoaW5lX2lkGAUgASgJIioKD0luc3RhbGxFZ3Jlc3NDYRIXCg9jZXJ0aWZpY2F0ZV9wZW0YASABKAkitwEKBkhlYWx0aBI2CglsaWZlY3ljbGUYASABKA4yIy5hcmNoaWwucHJvY2Vzcy52MS5IZWFsdGguTGlmZWN5Y2xlInUKCUxpZmVjeWNsZRIPCgtVTlNQRUNJRklFRBAAEhIKDkFXQUlUSU5HX01PVU5UEAESDAoITU9VTlRJTkcQAhIJCgVSRUFEWRADEhAKDFRFQVJJTkdfRE9XThAEEgwKCEZJTklTSEVEEAUSCgoGRkFJTEVEEAYiLQoNQ29tbWFuZE91dHB1dBIOCgZzdGRlcnIYASABKAgSDAoEZGF0YRgCIAEoDCJnCgtDb21tYW5kRXhpdBIMCgRjb2RlGAEgASgFEhIKCm9vbV9raWxsZWQYAiABKAgSHwoSbW91bnRfdGltaW5nc19qc29uGAMgASgMSACIAQFCFQoTX21vdW50X3RpbWluZ3NfanNvbiJPCgxBZ2VudEZhaWx1cmUSDwoHbWVzc2FnZRgBIAEoCRIbCg5wdWJsaWNfbWVzc2FnZRgCIAEoCUgAiAEBQhEKD19wdWJsaWNfbWVzc2FnZSI0ChFTZXJ2aWNlUHJvamVjdGlvbhIQCghyZXZpc2lvbhgBIAEoBBINCgVwb3J0cxgCIAMoDWIGcHJvdG8z");
+  fileDesc("Cg1wcm9jZXNzLnByb3RvEhFhcmNoaWwucHJvY2Vzcy52MSLqBwoIRW52ZWxvcGUSEgoKY2hhbm5lbF9pZBgBIAEoDRIPCgVzdGRpbhgCIAEoDEgAEisKBnN0ZG91dBgDIAEoCzIZLmFyY2hpbC5wcm9jZXNzLnYxLk91dHB1dEgAEisKBnN0ZGVychgEIAEoCzIZLmFyY2hpbC5wcm9jZXNzLnYxLk91dHB1dEgAEikKBXN0YXJ0GAUgASgLMhguYXJjaGlsLnByb2Nlc3MudjEuU3RhcnRIABIrCgZhdHRhY2gYBiABKAsyGS5hcmNoaWwucHJvY2Vzcy52MS5BdHRhY2hIABI1CgdzdGFydGVkGAcgASgLMiIuYXJjaGlsLnByb2Nlc3MudjEuUHJvY2Vzc0lkZW50aXR5SAASNgoIYXR0YWNoZWQYCCABKAsyIi5hcmNoaWwucHJvY2Vzcy52MS5Qcm9jZXNzSWRlbnRpdHlIABInCgRleGl0GAkgASgLMhcuYXJjaGlsLnByb2Nlc3MudjEuRXhpdEgAEikKBWVycm9yGAogASgLMhguYXJjaGlsLnByb2Nlc3MudjEuRXJyb3JIABIvCgtjbG9zZV9zdGRpbhgLIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASKgoGZGV0YWNoGAwgASgLMhguYXJjaGlsLnByb2Nlc3MudjEuRW1wdHlIABInCgRraWxsGA0gASgLMhcuYXJjaGlsLnByb2Nlc3MudjEuS2lsbEgAEisKBnJlc2l6ZRgOIAEoCzIZLmFyY2hpbC5wcm9jZXNzLnYxLlJlc2l6ZUgAEioKBmtpbGxlZBgPIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASKwoHcmVzaXplZBgQIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASKQoFZHJhaW4YEyABKAsyGC5hcmNoaWwucHJvY2Vzcy52MS5FbXB0eUgAEjQKC2d1ZXN0X3N0YXJ0GBQgASgLMh0uYXJjaGlsLnByb2Nlc3MudjEuR3Vlc3RTdGFydEgAEiwKCGRldGFjaGVkGBUgASgLMhguYXJjaGlsLnByb2Nlc3MudjEuRW1wdHlIABI8Cg9jb250cm9sX3JlcXVlc3QYFiABKAsyIS5hcmNoaWwucHJvY2Vzcy52MS5Db250cm9sUmVxdWVzdEgAEj4KEGNvbnRyb2xfcmVzcG9uc2UYFyABKAsyIi5hcmNoaWwucHJvY2Vzcy52MS5Db250cm9sUmVzcG9uc2VIAEIGCgRib2R5SgQIERASSgQIEhATUghzZXR0aW5nc1INd2luZG93X3VwZGF0ZSIHCgVFbXB0eSImCgZPdXRwdXQSDgoGb2Zmc2V0GAEgASgEEgwKBGRhdGEYAiABKAwi8wEKBVN0YXJ0Eg8KB2NvbW1hbmQYASABKAkSEAoDY3dkGAIgASgJSACIAQESMQoIdGVybWluYWwYAyABKAsyHy5hcmNoaWwucHJvY2Vzcy52MS5UZXJtaW5hbFNpemUSLgoDZW52GAQgAygLMiEuYXJjaGlsLnByb2Nlc3MudjEuU3RhcnQuRW52RW50cnkSHAoPdGltZW91dF9zZWNvbmRzGAUgASgESAGIAQEaKgoIRW52RW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4AUIGCgRfY3dkQhIKEF90aW1lb3V0X3NlY29uZHMiKgoMVGVybWluYWxTaXplEgwKBHJvd3MYASABKA0SDAoEY29scxgCIAEoDSIsCgZBdHRhY2gSEgoKcHJvY2Vzc19pZBgBIAEoCRIOCgZvZmZzZXQYAiABKAQiJQoPUHJvY2Vzc0lkZW50aXR5EhIKCnByb2Nlc3NfaWQYASABKAkiGgoES2lsbBISCgpwcm9jZXNzX2lkGAEgASgJIk8KBlJlc2l6ZRISCgpwcm9jZXNzX2lkGAEgASgJEjEKCHRlcm1pbmFsGAIgASgLMh8uYXJjaGlsLnByb2Nlc3MudjEuVGVybWluYWxTaXplIv4BCgRFeGl0Ei4KBnN0YXR1cxgBIAEoDjIeLmFyY2hpbC5wcm9jZXNzLnYxLkV4aXQuU3RhdHVzEhYKCWV4aXRfY29kZRgCIAEoBUgAiAEBEhgKC2V4aXRfcmVhc29uGAMgASgJSAGIAQESDgoGY3Vyc29yGAQgASgEEhIKCm9vbV9raWxsZWQYBSABKAgiUgoGU3RhdHVzEg8KC1VOU1BFQ0lGSUVEEAASDQoJQ09NUExFVEVEEAESCgoGRkFJTEVEEAISDQoJQ0FOQ0VMTEVEEAMSDQoJVElNRURfT1VUEARCDAoKX2V4aXRfY29kZUIOCgxfZXhpdF9yZWFzb24iJgoFRXJyb3ISDAoEY29kZRgBIAEoCRIPCgdtZXNzYWdlGAIgASgJItECCgpHdWVzdFN0YXJ0EgwKBGFyZ3YYASADKAkSQwoLZW52aXJvbm1lbnQYAiADKAsyLi5hcmNoaWwucHJvY2Vzcy52MS5HdWVzdFN0YXJ0LkVudmlyb25tZW50RW50cnkSHgoRd29ya2luZ19kaXJlY3RvcnkYAyABKAlIAIgBARILCgNwdHkYBCABKAgSFAoMa2VlcF9tb3VudGVkGAUgASgIEjEKCHRlcm1pbmFsGAYgASgLMh8uYXJjaGlsLnByb2Nlc3MudjEuVGVybWluYWxTaXplEhwKD3RpbWVvdXRfc2Vjb25kcxgHIAEoBEgBiAEBGjIKEEVudmlyb25tZW50RW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4AUIUChJfd29ya2luZ19kaXJlY3RvcnlCEgoQX3RpbWVvdXRfc2Vjb25kcyKHBAoOQ29udHJvbFJlcXVlc3QSKgoGaGVhbHRoGAEgASgLMhguYXJjaGlsLnByb2Nlc3MudjEuRW1wdHlIABIzCgppbml0aWFsaXplGAIgASgLMh0uYXJjaGlsLnByb2Nlc3MudjEuSW5pdGlhbGl6ZUgAEjAKCXNldF9jbG9jaxgDIAEoCzIbLmFyY2hpbC5wcm9jZXNzLnYxLlNldENsb2NrSAASKAoEc3luYxgEIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASLwoIc2h1dGRvd24YBSABKAsyGy5hcmNoaWwucHJvY2Vzcy52MS5TaHV0ZG93bkgAEj4KGnJlZnJlc2hfc2VydmljZV9wcm9qZWN0aW9uGAYgASgLMhguYXJjaGlsLnByb2Nlc3MudjEuRW1wdHlIABI+ChBpbnN0YWxsX2lkZW50aXR5GAcgASgLMiIuYXJjaGlsLnByb2Nlc3MudjEuSW5zdGFsbElkZW50aXR5SAASPwoRaW5zdGFsbF9lZ3Jlc3NfY2EYCCABKAsyIi5hcmNoaWwucHJvY2Vzcy52MS5JbnN0YWxsRWdyZXNzQ2FIABI+ChpjbG9zZV9vdXRnb2luZ19jb25uZWN0aW9ucxgJIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SABCBgoEYm9keSK5AwoPQ29udHJvbFJlc3BvbnNlEisKBmhlYWx0aBgBIAEoCzIZLmFyY2hpbC5wcm9jZXNzLnYxLkhlYWx0aEgAEi0KCWNsb2NrX3NldBgCIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASMQoNc3luY19jb21wbGV0ZRgDIAEoCzIYLmFyY2hpbC5wcm9jZXNzLnYxLkVtcHR5SAASNQoRc2h1dGRvd25fY29tcGxldGUYBCABKAsyGC5hcmNoaWwucHJvY2Vzcy52MS5FbXB0eUgAEjIKBm91dHB1dBgFIAEoCzIgLmFyY2hpbC5wcm9jZXNzLnYxLkNvbW1hbmRPdXRwdXRIABIuCgRleGl0GAYgASgLMh4uYXJjaGlsLnByb2Nlc3MudjEuQ29tbWFuZEV4aXRIABIwCgVlcnJvchgHIAEoCzIfLmFyY2hpbC5wcm9jZXNzLnYxLkFnZW50RmFpbHVyZUgAEkIKEnNlcnZpY2VfcHJvamVjdGlvbhgIIAEoCzIkLmFyY2hpbC5wcm9jZXNzLnYxLlNlcnZpY2VQcm9qZWN0aW9uSABCBgoEYm9keSLoAQoKSW5pdGlhbGl6ZRIUCgxjb250YWluZXJfaWQYASABKAkSOQoGbW91bnRzGAIgAygLMikuYXJjaGlsLnByb2Nlc3MudjEuSW5pdGlhbGl6ZS5Nb3VudHNFbnRyeRIiChV3YWxsX2Nsb2NrX3VuaXhfbmFub3MYAyABKARIAIgBARpLCgtNb3VudHNFbnRyeRILCgNrZXkYASABKAkSKwoFdmFsdWUYAiABKAsyHC5hcmNoaWwucHJvY2Vzcy52MS5EaXNrTW91bnQ6AjgBQhgKFl93YWxsX2Nsb2NrX3VuaXhfbmFub3MikgMKCURpc2tNb3VudBIPCgdkaXNrX2lkGAEgASgJEhMKBnJlZ2lvbhgCIAEoCUgAiAEBEhgKC2Vudmlyb25tZW50GAMgASgJSAGIAQESEwoGc2VydmVyGAQgASgJSAKIAQESEgoKYXV0aF90b2tlbhgFIAEoCRIOCgZzaGFyZWQYBiABKAgSEAoIaW5zZWN1cmUYByABKAgSFAoMc3ViZGlyZWN0b3J5GAggASgJEhEKCXJlYWRfb25seRgJIAEoCBITCgtjb25kaXRpb25hbBgKIAEoCBIoChtkZWxlZ2F0aW9uX3F1ZXVlX3RpbWVvdXRfbXMYCyABKARIA4gBARIWCg5jaGVja291dF9wYXRocxgMIAMoCRIeChFwcmViYWtlZF9lbmRwb2ludBgNIAEoCUgEiAEBQgkKB19yZWdpb25CDgoMX2Vudmlyb25tZW50QgkKB19zZXJ2ZXJCHgocX2RlbGVnYXRpb25fcXVldWVfdGltZW91dF9tc0IUChJfcHJlYmFrZWRfZW5kcG9pbnQiHgoIU2V0Q2xvY2sSEgoKdW5peF9uYW5vcxgBIAEoAyJCCghTaHV0ZG93bhIYChBzeW5jX2ZpbGVzeXN0ZW1zGAEgASgIEhwKFHRlcm1pbmF0aW9uX2dyYWNlX21zGAIgASgEIqEBCg9JbnN0YWxsSWRlbnRpdHkSHAoUc3NoX2hvc3RfZWQyNTUxOV9rZXkYASABKAkSIAoYc3NoX2hvc3RfZWQyNTUxOV9rZXlfcHViGAIgASgJEhoKEnNzaF9ob3N0X2VjZHNhX2tleRgDIAEoCRIeChZzc2hfaG9zdF9lY2RzYV9rZXlfcHViGAQgASgJEhIKCm1hY2hpbmVfaWQYBSABKAkiKgoPSW5zdGFsbEVncmVzc0NhEhcKD2NlcnRpZmljYXRlX3BlbRgBIAEoCSK3AQoGSGVhbHRoEjYKCWxpZmVjeWNsZRgBIAEoDjIjLmFyY2hpbC5wcm9jZXNzLnYxLkhlYWx0aC5MaWZlY3ljbGUidQoJTGlmZWN5Y2xlEg8KC1VOU1BFQ0lGSUVEEAASEgoOQVdBSVRJTkdfTU9VTlQQARIMCghNT1VOVElORxACEgkKBVJFQURZEAMSEAoMVEVBUklOR19ET1dOEAQSDAoIRklOSVNIRUQQBRIKCgZGQUlMRUQQBiItCg1Db21tYW5kT3V0cHV0Eg4KBnN0ZGVychgBIAEoCBIMCgRkYXRhGAIgASgMImcKC0NvbW1hbmRFeGl0EgwKBGNvZGUYASABKAUSEgoKb29tX2tpbGxlZBgCIAEoCBIfChJtb3VudF90aW1pbmdzX2pzb24YAyABKAxIAIgBAUIVChNfbW91bnRfdGltaW5nc19qc29uIk8KDEFnZW50RmFpbHVyZRIPCgdtZXNzYWdlGAEgASgJEhsKDnB1YmxpY19tZXNzYWdlGAIgASgJSACIAQFCEQoPX3B1YmxpY19tZXNzYWdlIjQKEVNlcnZpY2VQcm9qZWN0aW9uEhAKCHJldmlzaW9uGAEgASgEEg0KBXBvcnRzGAIgAygNYgZwcm90bzM");
 
 /**
  * One message per WebSocket message, or per library-delimited guest record.
@@ -117,18 +117,6 @@ export type Envelope = Message<"archil.process.v1.Envelope"> & {
      */
     value: Empty;
     case: "resized";
-  } | {
-    /**
-     * @generated from field: archil.process.v1.Settings settings = 17;
-     */
-    value: Settings;
-    case: "settings";
-  } | {
-    /**
-     * @generated from field: archil.process.v1.WindowUpdate window_update = 18;
-     */
-    value: WindowUpdate;
-    case: "windowUpdate";
   } | {
     /**
      * @generated from field: archil.process.v1.Empty drain = 19;
@@ -439,53 +427,6 @@ export const ErrorSchema: GenMessage<Error> = /*@__PURE__*/
   messageDesc(file_process, 10);
 
 /**
- * @generated from message archil.process.v1.Settings
- */
-export type Settings = Message<"archil.process.v1.Settings"> & {
-  /**
-   * Per-channel credit in each direction. Data costs its byte length plus
-   * DATA_CREDIT_OVERHEAD, bounding both buffered bytes and tiny-message count.
-   *
-   * @generated from field: uint32 receive_window = 1;
-   */
-  receiveWindow: number;
-
-  /**
-   * @generated from field: uint32 max_data_bytes = 2;
-   */
-  maxDataBytes: number;
-
-  /**
-   * @generated from field: uint32 max_channels = 3;
-   */
-  maxChannels: number;
-};
-
-/**
- * Describes the message archil.process.v1.Settings.
- * Use `create(SettingsSchema)` to create a new message.
- */
-export const SettingsSchema: GenMessage<Settings> = /*@__PURE__*/
-  messageDesc(file_process, 11);
-
-/**
- * @generated from message archil.process.v1.WindowUpdate
- */
-export type WindowUpdate = Message<"archil.process.v1.WindowUpdate"> & {
-  /**
-   * @generated from field: uint32 credit = 1;
-   */
-  credit: number;
-};
-
-/**
- * Describes the message archil.process.v1.WindowUpdate.
- * Use `create(WindowUpdateSchema)` to create a new message.
- */
-export const WindowUpdateSchema: GenMessage<WindowUpdate> = /*@__PURE__*/
-  messageDesc(file_process, 12);
-
-/**
  * @generated from message archil.process.v1.GuestStart
  */
 export type GuestStart = Message<"archil.process.v1.GuestStart"> & {
@@ -530,7 +471,7 @@ export type GuestStart = Message<"archil.process.v1.GuestStart"> & {
  * Use `create(GuestStartSchema)` to create a new message.
  */
 export const GuestStartSchema: GenMessage<GuestStart> = /*@__PURE__*/
-  messageDesc(file_process, 13);
+  messageDesc(file_process, 11);
 
 /**
  * Lifecycle RPCs use channel zero and are binary from the first message.
@@ -603,7 +544,7 @@ export type ControlRequest = Message<"archil.process.v1.ControlRequest"> & {
  * Use `create(ControlRequestSchema)` to create a new message.
  */
 export const ControlRequestSchema: GenMessage<ControlRequest> = /*@__PURE__*/
-  messageDesc(file_process, 14);
+  messageDesc(file_process, 12);
 
 /**
  * @generated from message archil.process.v1.ControlResponse
@@ -668,7 +609,7 @@ export type ControlResponse = Message<"archil.process.v1.ControlResponse"> & {
  * Use `create(ControlResponseSchema)` to create a new message.
  */
 export const ControlResponseSchema: GenMessage<ControlResponse> = /*@__PURE__*/
-  messageDesc(file_process, 15);
+  messageDesc(file_process, 13);
 
 /**
  * @generated from message archil.process.v1.Initialize
@@ -695,7 +636,7 @@ export type Initialize = Message<"archil.process.v1.Initialize"> & {
  * Use `create(InitializeSchema)` to create a new message.
  */
 export const InitializeSchema: GenMessage<Initialize> = /*@__PURE__*/
-  messageDesc(file_process, 16);
+  messageDesc(file_process, 14);
 
 /**
  * @generated from message archil.process.v1.DiskMount
@@ -772,7 +713,7 @@ export type DiskMount = Message<"archil.process.v1.DiskMount"> & {
  * Use `create(DiskMountSchema)` to create a new message.
  */
 export const DiskMountSchema: GenMessage<DiskMount> = /*@__PURE__*/
-  messageDesc(file_process, 17);
+  messageDesc(file_process, 15);
 
 /**
  * @generated from message archil.process.v1.SetClock
@@ -789,7 +730,7 @@ export type SetClock = Message<"archil.process.v1.SetClock"> & {
  * Use `create(SetClockSchema)` to create a new message.
  */
 export const SetClockSchema: GenMessage<SetClock> = /*@__PURE__*/
-  messageDesc(file_process, 18);
+  messageDesc(file_process, 16);
 
 /**
  * @generated from message archil.process.v1.Shutdown
@@ -811,7 +752,7 @@ export type Shutdown = Message<"archil.process.v1.Shutdown"> & {
  * Use `create(ShutdownSchema)` to create a new message.
  */
 export const ShutdownSchema: GenMessage<Shutdown> = /*@__PURE__*/
-  messageDesc(file_process, 19);
+  messageDesc(file_process, 17);
 
 /**
  * @generated from message archil.process.v1.InstallIdentity
@@ -848,7 +789,7 @@ export type InstallIdentity = Message<"archil.process.v1.InstallIdentity"> & {
  * Use `create(InstallIdentitySchema)` to create a new message.
  */
 export const InstallIdentitySchema: GenMessage<InstallIdentity> = /*@__PURE__*/
-  messageDesc(file_process, 20);
+  messageDesc(file_process, 18);
 
 /**
  * @generated from message archil.process.v1.InstallEgressCa
@@ -865,7 +806,7 @@ export type InstallEgressCa = Message<"archil.process.v1.InstallEgressCa"> & {
  * Use `create(InstallEgressCaSchema)` to create a new message.
  */
 export const InstallEgressCaSchema: GenMessage<InstallEgressCa> = /*@__PURE__*/
-  messageDesc(file_process, 21);
+  messageDesc(file_process, 19);
 
 /**
  * @generated from message archil.process.v1.Health
@@ -882,7 +823,7 @@ export type Health = Message<"archil.process.v1.Health"> & {
  * Use `create(HealthSchema)` to create a new message.
  */
 export const HealthSchema: GenMessage<Health> = /*@__PURE__*/
-  messageDesc(file_process, 22);
+  messageDesc(file_process, 20);
 
 /**
  * @generated from enum archil.process.v1.Health.Lifecycle
@@ -928,7 +869,7 @@ export enum Health_Lifecycle {
  * Describes the enum archil.process.v1.Health.Lifecycle.
  */
 export const Health_LifecycleSchema: GenEnum<Health_Lifecycle> = /*@__PURE__*/
-  enumDesc(file_process, 22, 0);
+  enumDesc(file_process, 20, 0);
 
 /**
  * @generated from message archil.process.v1.CommandOutput
@@ -950,7 +891,7 @@ export type CommandOutput = Message<"archil.process.v1.CommandOutput"> & {
  * Use `create(CommandOutputSchema)` to create a new message.
  */
 export const CommandOutputSchema: GenMessage<CommandOutput> = /*@__PURE__*/
-  messageDesc(file_process, 23);
+  messageDesc(file_process, 21);
 
 /**
  * @generated from message archil.process.v1.CommandExit
@@ -979,7 +920,7 @@ export type CommandExit = Message<"archil.process.v1.CommandExit"> & {
  * Use `create(CommandExitSchema)` to create a new message.
  */
 export const CommandExitSchema: GenMessage<CommandExit> = /*@__PURE__*/
-  messageDesc(file_process, 24);
+  messageDesc(file_process, 22);
 
 /**
  * @generated from message archil.process.v1.AgentFailure
@@ -1001,7 +942,7 @@ export type AgentFailure = Message<"archil.process.v1.AgentFailure"> & {
  * Use `create(AgentFailureSchema)` to create a new message.
  */
 export const AgentFailureSchema: GenMessage<AgentFailure> = /*@__PURE__*/
-  messageDesc(file_process, 25);
+  messageDesc(file_process, 23);
 
 /**
  * @generated from message archil.process.v1.ServiceProjection
@@ -1023,5 +964,5 @@ export type ServiceProjection = Message<"archil.process.v1.ServiceProjection"> &
  * Use `create(ServiceProjectionSchema)` to create a new message.
  */
 export const ServiceProjectionSchema: GenMessage<ServiceProjection> = /*@__PURE__*/
-  messageDesc(file_process, 26);
+  messageDesc(file_process, 24);
 
