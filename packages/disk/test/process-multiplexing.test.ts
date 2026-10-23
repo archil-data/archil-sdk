@@ -77,6 +77,13 @@ class RuntimeSocket extends EventTarget {
     );
     this.dispatchEvent(new MessageEvent("message", { data: data.buffer }));
   }
+  /** A message carrying a body type added after this SDK was built. */
+  emitFuture(id: number) {
+    const known = toBinary(EnvelopeSchema, create(EnvelopeSchema, { channelId: id }));
+    // Field 1000, varint 1.
+    const data = new Uint8Array([...known, 0xc0, 0x3e, 0x01]);
+    this.dispatchEvent(new MessageEvent("message", { data: data.buffer }));
+  }
   exit(id: number) {
     this.emit(id, {
       case: "exit",
@@ -201,6 +208,33 @@ test("detach, resize, and kill do not close another channel or reopen the socket
   RuntimeSocket.instances[0].exit(2);
   await second.wait();
   assert.equal(post.mock.calls.length, 1);
+  await processes.disconnect();
+});
+
+test("messages from a newer runtime are ignored without disturbing the connection", async () => {
+  const { processes } = setup();
+  const [first, second] = await Promise.all([processes.start("one"), processes.start("two")]);
+  const socket = RuntimeSocket.instances[0];
+  socket.emitFuture(0);
+  socket.emitFuture(1);
+  socket.emit(1, { case: "stdout", value: { offset: 0n, data: new TextEncoder().encode("ok") } });
+  socket.exit(1);
+  socket.exit(2);
+  assert.equal((await first.wait()).stdout, "ok");
+  await second.wait();
+  assert.equal(socket.readyState, RuntimeSocket.OPEN);
+  await processes.disconnect();
+});
+
+test("an exit status from a newer runtime fails only its own process", async () => {
+  const { processes } = setup();
+  const [first, second] = await Promise.all([processes.start("one"), processes.start("two")]);
+  const socket = RuntimeSocket.instances[0];
+  socket.emit(1, { case: "exit", value: { status: 99 as Exit_Status, exitCode: 0 } });
+  await assert.rejects(first.wait(), /unsupported_exit_status/);
+  socket.exit(2);
+  assert.equal((await second.wait()).exitCode, 0);
+  assert.equal(socket.readyState, RuntimeSocket.OPEN);
   await processes.disconnect();
 });
 

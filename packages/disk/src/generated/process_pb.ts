@@ -33,6 +33,13 @@ export const file_process: GenFile = /*@__PURE__*/
  * beyond the credit granted is a protocol error that closes the connection.
  * Other messages cost nothing. The constants live in the protocol library.
  *
+ * Evolution. Receivers ignore message types and fields they do not know, so a
+ * new message that peers may safely miss needs no coordination. A server
+ * answers an unknown message on an unused channel ID with error code
+ * unsupported_message, so a client can tell that its peer predates a new kind
+ * of channel. Never reuse a field number; reserve removed ones. A change older
+ * peers cannot ignore needs a new WebSocket subprotocol and guest endpoint.
+ *
  * @generated from message archil.process.v1.Envelope
  */
 export type Envelope = Message<"archil.process.v1.Envelope"> & {

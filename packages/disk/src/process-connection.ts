@@ -144,7 +144,8 @@ class BinaryConnection {
       try {
         const frame = fromBinary(EnvelopeSchema, new Uint8Array(message.data as ArrayBuffer));
         if (frame.channelId === 0) {
-          if (frame.body.case !== "drain") throw new Error("Unexpected process connection message");
+          // Other connection messages come from newer runtimes; ignore them.
+          if (frame.body.case !== "drain") return;
           this.draining = true;
           if (!this.channels.size) this.close();
         } else this.channels.get(frame.channelId)?.receive(frame);
@@ -333,10 +334,10 @@ export class BinaryChannel {
         if (cost > this.receiveCredit) throw new Error("Process output exceeded its flow-control window");
         this.receiveCredit -= cost;
         const offset = Number(body.value.offset);
-        if (!Number.isSafeInteger(offset))
-          throw new Error(
-            "Process offset exceeds JavaScript integer precision",
-          );
+        if (!Number.isSafeInteger(offset)) {
+          this.fail("output_offset_overflow", "Process offset exceeds JavaScript integer precision");
+          return;
+        }
         this.events.dispatchEvent(
           new MessageEvent("message", {
             data: { stream: body.case, offset, data: body.value.data, cost },
@@ -352,7 +353,10 @@ export class BinaryChannel {
           [Exit_Status.TIMED_OUT]: "timed_out",
         };
         const status = statuses[body.value.status as keyof typeof statuses];
-        if (!status) throw new Error("Unknown process exit status");
+        if (!status) {
+          this.fail("unsupported_exit_status", `Unknown process exit status ${body.value.status}`);
+          return;
+        }
         event = {
           type: "exit",
           status,
@@ -376,12 +380,22 @@ export class BinaryChannel {
       case "detached":
         this.finish();
         return;
+      case undefined:
+        // A message type from a newer runtime; proto/process.proto says to ignore it.
+        return;
       default:
         throw new Error("Unexpected process channel message");
     }
     this.events.dispatchEvent(new MessageEvent("message", { data: event }));
     if (["exit", "error", "killed", "resized"].includes(body.case!))
       this.finish();
+  }
+  /** Fails only this channel, for a message whose value it cannot represent. */
+  private fail(error: string, message: string): void {
+    if (this.readyState === WebSocket.OPEN)
+      this.connection.send(this.id, create(EnvelopeSchema, { body: { case: "detach", value: {} } }).body);
+    this.events.dispatchEvent(new MessageEvent("message", { data: { type: "error", error, message } }));
+    this.finish();
   }
   finish(reason?: unknown): void {
     if (this.readyState === WebSocket.CLOSED) return;
