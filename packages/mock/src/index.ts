@@ -175,8 +175,11 @@ class MockDiskImpl implements FileSystem {
 
   async grep(opts: GrepOptions): Promise<GrepResult> {
     this.calls.grep.push({ ...opts });
+    if (opts.multiline || opts.globs?.length || opts.types?.length || opts.typesNot?.length || opts.contextBefore || opts.contextAfter) {
+      throw new Error("mock grep supports only pattern, directory, maxResults, and ignoreCase");
+    }
     const directory = normalizePrefix(opts.directory ?? "");
-    const pattern = new RegExp(opts.pattern);
+    const pattern = new RegExp(opts.pattern, opts.ignoreCase ? "i" : "");
     const maxResults = opts.maxResults ?? 1000;
     const matches: GrepResult["matches"] = [];
     let filesScanned = 0;

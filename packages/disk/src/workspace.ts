@@ -1,6 +1,7 @@
 import type {
   Disk,
   ExecResult,
+  GrepGroup,
   GrepMatch,
   GrepOptions,
   GrepResult,
@@ -23,6 +24,25 @@ export interface WorkspaceExecCapable {
 
 function isExecMountSpec(m: ExecMount): m is ExecMountSpec {
   return typeof m === "object" && m !== null && "disk" in m;
+}
+
+/** Keep groups up to the one holding the `maxResults`-th match, and end that
+ * group after up to `after` more lines, which become context so the groups
+ * hold exactly the kept matches. With multiline, a run of matching lines is
+ * one match. Mirrors the controlplane's truncation of a single disk's groups. */
+function truncateGroups(groups: GrepGroup[], maxResults: number, after: number, multiline: boolean): GrepGroup[] {
+  let seen = 0;
+  for (let i = 0; i < groups.length; i++) {
+    const lines = groups[i].lines;
+    for (let j = 0; j < lines.length; j++) {
+      if (lines[j].match && !(multiline && j > 0 && lines[j - 1].match)) seen++;
+      if (seen === maxResults && !(multiline && j + 1 < lines.length && lines[j + 1].match)) {
+        const kept = lines.slice(0, Math.min(j + 1 + after, lines.length)).map((l, k) => (k > j ? { ...l, match: false } : l));
+        return [...groups.slice(0, i), { ...groups[i], lines: kept }];
+      }
+    }
+  }
+  return groups;
 }
 
 interface MountEntry {
@@ -248,6 +268,7 @@ export class Workspace implements FileSystem {
       covered.map(({ entry, rel }) => entry.disk.grep({ ...opts, directory: rel })),
     );
     const matches: GrepMatch[] = [];
+    const groups: GrepGroup[] = [];
     let filesScanned = 0;
     let containersDispatched = 0;
     let computeSecondsUsed = 0;
@@ -269,7 +290,8 @@ export class Workspace implements FileSystem {
       listingMs = Math.max(listingMs, r.listingMs ?? 0);
       grepMs = Math.max(grepMs, r.grepMs ?? 0);
       reasons.add(r.stoppedReason);
-      for (const m of r.matches) matches.push({ file: this.abs(name, entry, m.file), line: m.line, text: m.text });
+      for (const m of r.matches) matches.push({ ...m, file: this.abs(name, entry, m.file) });
+      for (const g of r.groups ?? []) groups.push({ ...g, file: this.abs(name, entry, g.file) });
     });
     // Merging across disks can exceed the cap even when every disk completed, so
     // flag the truncation ourselves before slicing — otherwise the extra matches
@@ -282,8 +304,15 @@ export class Workspace implements FileSystem {
     const stoppedReason = [...reasons].every((x) => x === "completed")
       ? "completed"
       : (priority.find((x) => reasons.has(x)) ?? "completed");
+    const withGroups = (opts.contextBefore ?? 0) > 0 || (opts.contextAfter ?? 0) > 0;
     return {
       matches: matches.slice(0, cap),
+      ...(withGroups && {
+        groups:
+          matches.length > cap
+            ? truncateGroups(groups, cap, opts.contextAfter ?? 0, opts.multiline ?? false)
+            : groups,
+      }),
       stoppedReason,
       filesScanned,
       containersDispatched,

@@ -78,6 +78,8 @@ export type {
   GrepOptions,
   GrepResult,
   GrepMatch,
+  GrepGroup,
+  GrepGroupLine,
   GrepStoppedReason,
   ListObjectsOptions,
   ListObjectsResult,

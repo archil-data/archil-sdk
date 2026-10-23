@@ -215,6 +215,108 @@ test("workspace: grep flags max_results when merged matches exceed the cap", asy
   assert.equal(r.stoppedReason, "max_results");
 });
 
+test("workspace: grep forwards options and merges context groups within the cap", async () => {
+  const seen: Array<Record<string, unknown>> = [];
+  const mk = (name: string, matches: object[], groups: object[]) => ({
+    name,
+    grep: async (opts: Record<string, unknown>) => {
+      seen.push(opts);
+      return {
+        matches,
+        groups,
+        stoppedReason: "completed",
+        filesScanned: 1,
+        containersDispatched: 0,
+        computeSecondsUsed: 0,
+        durationMs: 0,
+        listingMs: 0,
+        grepMs: 0,
+      };
+    },
+  });
+  const data = mk(
+    "data",
+    [
+      { file: "a.txt", line: 1, text: "x" },
+      { file: "a.txt", line: 3, endLine: 4, text: "x\ny" },
+    ],
+    [
+      {
+        file: "a.txt",
+        lines: [
+          { line: 1, text: "x", match: true },
+          { line: 2, text: "-", match: false },
+          { line: 3, text: "x", match: true },
+          { line: 4, text: "y", match: true },
+        ],
+      },
+    ],
+  );
+  const cache = mk(
+    "cache",
+    [
+      { file: "b.txt", line: 5, text: "x" },
+      { file: "b.txt", line: 7, text: "x" },
+    ],
+    [
+      {
+        file: "b.txt",
+        lines: [
+          { line: 5, text: "x", match: true },
+          { line: 6, text: "-", match: false },
+          { line: 7, text: "x", match: true },
+          { line: 8, text: "-", match: false },
+        ],
+      },
+    ],
+  );
+  const w = ws({ data, cache });
+  const r = await w.grep({
+    pattern: "x",
+    directory: "",
+    maxResults: 3,
+    multiline: true,
+    ignoreCase: true,
+    globs: ["*.txt"],
+    contextAfter: 2,
+  });
+  assert.deepEqual(
+    seen.map((o) => [o.multiline, o.ignoreCase, o.globs, o.contextAfter]),
+    [
+      [true, true, ["*.txt"], 2],
+      [true, true, ["*.txt"], 2],
+    ],
+  );
+  assert.deepEqual(r.matches[1], { file: "data/a.txt", line: 3, endLine: 4, text: "x\ny" });
+  // The multiline run on lines 3-4 counts once, so the cap lands on b.txt:5.
+  // b.txt:7 falls in its after-context and comes back as context.
+  assert.deepEqual(r.groups, [
+    {
+      file: "data/a.txt",
+      lines: [
+        { line: 1, text: "x", match: true },
+        { line: 2, text: "-", match: false },
+        { line: 3, text: "x", match: true },
+        { line: 4, text: "y", match: true },
+      ],
+    },
+    {
+      file: "cache/b.txt",
+      lines: [
+        { line: 5, text: "x", match: true },
+        { line: 6, text: "-", match: false },
+        { line: 7, text: "x", match: false },
+      ],
+    },
+  ]);
+});
+
+test("workspace: grep omits groups without context", async () => {
+  const w = ws({ data: fakeDisk("data") });
+  const r = await w.grep({ pattern: "x", directory: "" });
+  assert.equal(r.groups, undefined);
+});
+
 test("workspace: read-only mounts refuse writes and deletes", async () => {
   const data = fakeDisk("data");
   const w = ws({ data: { disk: data, readOnly: true } });

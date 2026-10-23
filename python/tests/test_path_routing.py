@@ -14,7 +14,7 @@ import asyncio
 import pytest
 
 from archil._archil import ExecMountSpec
-from archil._models import GrepMatch, GrepResult, ListObjectsResult, S3Object
+from archil._models import GrepGroup, GrepGroupLine, GrepMatch, GrepResult, ListObjectsResult, S3Object
 from archil._paths import to_segments
 from archil._workspace import _Workspace
 
@@ -213,6 +213,56 @@ def test_workspace_grep_flags_max_results_across_disks():
     r = asyncio.run(ws.grep(directory="", pattern="x", max_results=3))
     assert len(r.matches) == 3
     assert r.stopped_reason == "max_results"
+    assert r.groups is None
+
+
+def _lines(*specs: tuple[int, bool]) -> list[GrepGroupLine]:
+    return [GrepGroupLine(n, "x" if m else "-", m) for n, m in specs]
+
+
+class _GroupedDisk:
+    def __init__(self, matches: list[GrepMatch], groups: list[GrepGroup]) -> None:
+        self.matches = matches
+        self.groups = groups
+        self.kwargs: dict = {}
+
+    async def grep(self, *, directory, **kwargs):
+        self.kwargs = kwargs
+        return GrepResult(
+            matches=self.matches, stopped_reason="completed", files_scanned=1,
+            containers_dispatched=0, compute_seconds_used=0.0, duration_ms=0,
+            listing_ms=0, grep_ms=0, groups=self.groups,
+        )
+
+
+def test_workspace_grep_forwards_options_and_merges_groups_within_cap():
+    data = _GroupedDisk(
+        [GrepMatch("a.txt", 1, "x"), GrepMatch("a.txt", 3, "x\nx", end_line=4)],
+        [GrepGroup("a.txt", _lines((1, True), (2, False), (3, True), (4, True)))],
+    )
+    cache = _GroupedDisk(
+        [GrepMatch("b.txt", 5, "x"), GrepMatch("b.txt", 7, "x")],
+        [GrepGroup("b.txt", _lines((5, True), (6, False), (7, True), (8, False)))],
+    )
+    ws = _ws(data=data, cache=cache)
+    r = asyncio.run(
+        ws.grep(
+            directory="", pattern="x", max_results=3, multiline=True,
+            ignore_case=True, globs=["*.txt"], context_after=2,
+        )
+    )
+    for disk in (data, cache):
+        assert disk.kwargs["multiline"] is True
+        assert disk.kwargs["ignore_case"] is True
+        assert disk.kwargs["globs"] == ["*.txt"]
+        assert disk.kwargs["context_after"] == 2
+    assert r.matches[1] == GrepMatch("data/a.txt", 3, "x\nx", end_line=4)
+    # The multiline run on lines 3-4 counts once, so the cap lands on b.txt:5.
+    # b.txt:7 falls in its after-context and comes back as context.
+    assert r.groups == [
+        GrepGroup("data/a.txt", _lines((1, True), (2, False), (3, True), (4, True))),
+        GrepGroup("cache/b.txt", [*_lines((5, True), (6, False)), GrepGroupLine(7, "x", False)]),
+    ]
 
 
 # --- read-only -------------------------------------------------------------

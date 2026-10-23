@@ -580,10 +580,32 @@ class GrepMatch:
     file: str
     line: int
     text: str
+    end_line: Optional[int] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "GrepMatch":
-        return cls(file=d["file"], line=d["line"], text=d["text"])
+        return cls(file=d["file"], line=d["line"], text=d["text"], end_line=d.get("endLine"))
+
+
+@dataclass(frozen=True)
+class GrepGroupLine:
+    line: int
+    text: str
+    match: bool
+
+    @classmethod
+    def from_json(cls, d: dict) -> "GrepGroupLine":
+        return cls(line=d["line"], text=d["text"], match=d["match"])
+
+
+@dataclass(frozen=True)
+class GrepGroup:
+    file: str
+    lines: list[GrepGroupLine]
+
+    @classmethod
+    def from_json(cls, d: dict) -> "GrepGroup":
+        return cls(file=d["file"], lines=[GrepGroupLine.from_json(line) for line in d["lines"]])
 
 
 @dataclass(frozen=True)
@@ -596,9 +618,11 @@ class GrepResult:
     duration_ms: int
     listing_ms: int
     grep_ms: int
+    groups: Optional[list[GrepGroup]] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "GrepResult":
+        groups = d.get("groups")
         return cls(
             matches=[GrepMatch.from_json(m) for m in (d.get("matches") or [])],
             stopped_reason=d["stoppedReason"],
@@ -608,6 +632,7 @@ class GrepResult:
             duration_ms=d["durationMs"],
             listing_ms=d["listingMs"],
             grep_ms=d["grepMs"],
+            groups=None if groups is None else [GrepGroup.from_json(g) for g in groups],
         )
 
 
