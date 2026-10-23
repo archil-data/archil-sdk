@@ -77,8 +77,8 @@ importers:
   packages/disk:
     dependencies:
       '@archildata/api-types':
-        specifier: ^0.0.54
-        version: 0.0.54
+        specifier: ^0.0.69
+        version: 0.0.69
       '@clack/prompts':
         specifier: ^1.7.0
         version: 1.7.0
@@ -374,8 +374,8 @@ packages:
     peerDependencies:
       zod: ^3.23.8
 
-  '@archildata/api-types@0.0.54':
-    resolution: {integrity: sha512-kfT/x1AcxYb/c/FdtUEa/5dF3o1LdvbBbMMxljhetdm9rxq6NR43yKYoNMye+URhDdQ+xonZexlBNoETVkwMTA==}
+  '@archildata/api-types@0.0.69':
+    resolution: {integrity: sha512-/JEOmSmnqF7BVppGR2gk8RED2fnXooVC1dvBrq72JXhjfE0NCWbeYW/9efpeSFwYe0lBJ+JJKOdD5urbmmN/gw==}
 
   '@archildata/native@0.8.18':
     resolution: {integrity: sha512-/gKLR8H9kbQdULY5wbfGXgsYo4wLr0f4iAsDfNeYA8QZufZH0AQXm/7CfpQTDzcXZ9vgUrQwkXQkCkhPOjx2Sg==}
@@ -2884,7 +2884,7 @@ snapshots:
       zod: 4.4.3
       zod-to-json-schema: 3.25.2(zod@4.4.3)
 
-  '@archildata/api-types@0.0.54': {}
+  '@archildata/api-types@0.0.69': {}
 
   '@archildata/native@0.8.18': {}
 
