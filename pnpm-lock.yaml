@@ -79,6 +79,9 @@ importers:
       '@archildata/api-types':
         specifier: ^0.0.54
         version: 0.0.54
+      '@bufbuild/protobuf':
+        specifier: ^2.16.0
+        version: 2.16.0
       '@clack/prompts':
         specifier: ^1.7.0
         version: 1.7.0
@@ -236,7 +239,7 @@ importers:
         version: link:../mock
       '@mastra/core':
         specifier: ^1.49.0
-        version: 1.49.0(@cfworker/json-schema@4.1.1)(express@5.2.1)(zod@4.4.3)
+        version: 1.49.0(@bufbuild/protobuf@2.16.0)(@cfworker/json-schema@4.1.1)(express@5.2.1)(zod@4.4.3)
       '@types/node':
         specifier: ^20.19.33
         version: 20.19.43
@@ -380,6 +383,7 @@ packages:
   '@archildata/native@0.8.18':
     resolution: {integrity: sha512-/gKLR8H9kbQdULY5wbfGXgsYo4wLr0f4iAsDfNeYA8QZufZH0AQXm/7CfpQTDzcXZ9vgUrQwkXQkCkhPOjx2Sg==}
     engines: {node: '>= 18'}
+    deprecated: 'SECURITY (ARCHIL-SA-2026-001): versions before 0.10.0 can trust certificates from compromised eMudhra CA keys. Upgrade to 0.10.0 or later now; older clients are rejected from 2026-11-20 20:00 UTC. https://archil.com/security/advisories/2026-10-emudhra'
 
   '@babel/generator@8.0.0':
     resolution: {integrity: sha512-NT9NrVwJsbSV6Y2FSstWa71EETOnzrjkL5/wX3D2mYHtKM+qvqB1DvR4D0Setb/gDBsHzRICifwEWMO8CnTF6g==}
@@ -404,6 +408,9 @@ packages:
 
   '@borewit/text-codec@0.2.2':
     resolution: {integrity: sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ==}
+
+  '@bufbuild/protobuf@2.16.0':
+    resolution: {integrity: sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q==}
 
   '@cfworker/json-schema@4.1.1':
     resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
@@ -2801,10 +2808,11 @@ packages:
 
 snapshots:
 
-  '@a2a-js/sdk@0.3.13(express@5.2.1)':
+  '@a2a-js/sdk@0.3.13(@bufbuild/protobuf@2.16.0)(express@5.2.1)':
     dependencies:
       uuid: 11.1.1
     optionalDependencies:
+      '@bufbuild/protobuf': 2.16.0
       express: 5.2.1
 
   '@ai-sdk/gateway@4.0.12(zod@4.4.3)':
@@ -2911,6 +2919,8 @@ snapshots:
       '@babel/helper-validator-identifier': 8.0.2
 
   '@borewit/text-codec@0.2.2': {}
+
+  '@bufbuild/protobuf@2.16.0': {}
 
   '@cfworker/json-schema@4.1.1': {}
 
@@ -3206,9 +3216,9 @@ snapshots:
       tinyglobby: 0.2.17
       yaml: 2.9.0
 
-  '@mastra/core@1.49.0(@cfworker/json-schema@4.1.1)(express@5.2.1)(zod@4.4.3)':
+  '@mastra/core@1.49.0(@bufbuild/protobuf@2.16.0)(@cfworker/json-schema@4.1.1)(express@5.2.1)(zod@4.4.3)':
     dependencies:
-      '@a2a-js/sdk': 0.3.13(express@5.2.1)
+      '@a2a-js/sdk': 0.3.13(@bufbuild/protobuf@2.16.0)(express@5.2.1)
       '@ai-sdk/provider-utils-v5': '@ai-sdk/provider-utils@3.0.25(zod@4.4.3)'
       '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.27(zod@4.4.3)'
       '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.0(zod@4.4.3)'
