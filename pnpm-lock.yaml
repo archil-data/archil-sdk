@@ -104,9 +104,6 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      '@bufbuild/protoc-gen-es':
-        specifier: ^2.16.0
-        version: 2.16.0(@bufbuild/protobuf@2.16.0)
       '@types/node':
         specifier: ^26.0.1
         version: 26.1.0
@@ -386,6 +383,7 @@ packages:
   '@archildata/native@0.8.18':
     resolution: {integrity: sha512-/gKLR8H9kbQdULY5wbfGXgsYo4wLr0f4iAsDfNeYA8QZufZH0AQXm/7CfpQTDzcXZ9vgUrQwkXQkCkhPOjx2Sg==}
     engines: {node: '>= 18'}
+    deprecated: 'SECURITY (ARCHIL-SA-2026-001): versions before 0.10.0 can trust certificates from compromised eMudhra CA keys. Upgrade to 0.10.0 or later now; older clients are rejected from 2026-11-20 20:00 UTC. https://archil.com/security/advisories/2026-10-emudhra'
 
   '@babel/generator@8.0.0':
     resolution: {integrity: sha512-NT9NrVwJsbSV6Y2FSstWa71EETOnzrjkL5/wX3D2mYHtKM+qvqB1DvR4D0Setb/gDBsHzRICifwEWMO8CnTF6g==}
@@ -413,19 +411,6 @@ packages:
 
   '@bufbuild/protobuf@2.16.0':
     resolution: {integrity: sha512-FWa0sPlqYGJgpTs6OxBRcL/AW4JT0OIO+W1ajerluoTVh8CV0B7XM1qsNCRgnkSCkRCgOICKHRQlY17jrsm0+Q==}
-
-  '@bufbuild/protoc-gen-es@2.16.0':
-    resolution: {integrity: sha512-LbPrEaGd7bOxKbJHllTR5439+PZjqd6fM7xyDZkDVtZ+Efzr7TMdMqShG9Qkf/nYVyiNS/SK5r9JhRaBTFkfZw==}
-    engines: {node: '>=22'}
-    hasBin: true
-    peerDependencies:
-      '@bufbuild/protobuf': 2.16.0
-    peerDependenciesMeta:
-      '@bufbuild/protobuf':
-        optional: true
-
-  '@bufbuild/protoplugin@2.16.0':
-    resolution: {integrity: sha512-3FdYJys34VhFnBQsjiV9wurBkX/DBACQAkAk+nCKdO1p8ROVNi7gmaRAcba+4qq8hQq8rYVukuutwvGCvd4kJA==}
 
   '@cfworker/json-schema@4.1.1':
     resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
@@ -1052,11 +1037,6 @@ packages:
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
-
-  '@typescript/vfs@1.6.5':
-    resolution: {integrity: sha512-gobLHQLmvQGJInFk31NvgMd1uYzRXsd8qgnOssyLD055R2QPnw1ubRbBQ4+T+5qC7IQVuYXdvNDE2G7tMDVHgw==}
-    peerDependencies:
-      typescript: '*'
 
   '@vercel/oidc@3.2.0':
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
@@ -2535,11 +2515,6 @@ packages:
     resolution: {integrity: sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA==}
     engines: {node: '>= 18'}
 
-  typescript@5.4.5:
-    resolution: {integrity: sha512-vcI4UpRgg81oIRUFwR0WSIHKt11nJ7SAVlYNIu+QpqeyXP+gpQJy/Z4+F0aGxSE4MqwjyXvW/TzgkLAx2AGHwQ==}
-    engines: {node: '>=14.17'}
-    hasBin: true
-
   typescript@6.0.3:
     resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
     engines: {node: '>=14.17'}
@@ -2946,22 +2921,6 @@ snapshots:
   '@borewit/text-codec@0.2.2': {}
 
   '@bufbuild/protobuf@2.16.0': {}
-
-  '@bufbuild/protoc-gen-es@2.16.0(@bufbuild/protobuf@2.16.0)':
-    dependencies:
-      '@bufbuild/protoplugin': 2.16.0
-    optionalDependencies:
-      '@bufbuild/protobuf': 2.16.0
-    transitivePeerDependencies:
-      - supports-color
-
-  '@bufbuild/protoplugin@2.16.0':
-    dependencies:
-      '@bufbuild/protobuf': 2.16.0
-      '@typescript/vfs': 1.6.5(typescript@5.4.5)
-      typescript: 5.4.5
-    transitivePeerDependencies:
-      - supports-color
 
   '@cfworker/json-schema@4.1.1': {}
 
@@ -3535,13 +3494,6 @@ snapshots:
       undici-types: 8.3.0
 
   '@types/unist@3.0.3': {}
-
-  '@typescript/vfs@1.6.5(typescript@5.4.5)':
-    dependencies:
-      debug: 4.4.3
-      typescript: 5.4.5
-    transitivePeerDependencies:
-      - supports-color
 
   '@vercel/oidc@3.2.0': {}
 
@@ -5203,8 +5155,6 @@ snapshots:
       content-type: 2.0.0
       media-typer: 1.1.0
       mime-types: 3.0.2
-
-  typescript@5.4.5: {}
 
   typescript@6.0.3: {}
 

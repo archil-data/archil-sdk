@@ -9,7 +9,12 @@ import { Sandbox } from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
 import { json, startOrigin, type CannedResponse, type Respond } from "./helpers/origin.js";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { EnvelopeSchema, Exit_Status, type Envelope } from "../src/generated/process_pb.js";
+import {
+  ClientFrameSchema,
+  Exit_Status,
+  ServerFrameSchema,
+  type ClientFrame,
+} from "@archildata/api-types/process";
 
 const now = "2026-07-22T12:00:00Z";
 const nowDate = new Date(now);
@@ -35,7 +40,7 @@ function sandboxWire(status: string = "pending", id: string = "0198-sandbox") {
   };
 }
 
-type ReplyBody = NonNullable<Parameters<typeof create<typeof EnvelopeSchema>>[1]>["body"];
+type ReplyBody = NonNullable<Parameters<typeof create<typeof ServerFrameSchema>>[1]>["body"];
 
 const started = (processId = "0198-process"): ReplyBody => ({ case: "started", value: { processId } });
 const output = (stream: "stdout" | "stderr", offset: number, data: string): ReplyBody =>
@@ -82,7 +87,7 @@ class TestWebSocket {
 
   readonly url: string;
   readonly protocol: string;
-  readonly sent: Envelope[] = [];
+  readonly sent: ClientFrame[] = [];
   readyState = 0;
   binaryType = "blob";
   private readonly listeners = new Map<
@@ -116,7 +121,7 @@ class TestWebSocket {
   }
 
   send(data: Uint8Array) {
-    const frame = fromBinary(EnvelopeSchema, data);
+    const frame = fromBinary(ClientFrameSchema, data);
     this.sent.push(frame);
     // Return stdin credit as the guest would, and confirm detaches.
     if (frame.body.case === "stdin") {
@@ -128,14 +133,14 @@ class TestWebSocket {
   }
 
   /** The first message the SDK sent with this body type. */
-  request<C extends Envelope["body"]["case"]>(kind: C) {
+  request<C extends ClientFrame["body"]["case"]>(kind: C) {
     const frame = this.sent.find((frame) => frame.body.case === kind);
     assert.ok(frame, `no ${kind} message was sent`);
-    return frame as Envelope & { body: Extract<Envelope["body"], { case: C }> };
+    return frame as ClientFrame & { body: Extract<ClientFrame["body"], { case: C }> };
   }
 
   reply(channelId: number, body: ReplyBody) {
-    const data = toBinary(EnvelopeSchema, create(EnvelopeSchema, { channelId, body }));
+    const data = toBinary(ServerFrameSchema, create(ServerFrameSchema, { channelId, body }));
     this.emit("message", { data: data.slice().buffer });
   }
 

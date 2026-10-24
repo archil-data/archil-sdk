@@ -1,11 +1,14 @@
 import { MAX_RETRIES, retrySleep } from "./retry.js";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import {
-  EnvelopeSchema,
+  ClientFrameSchema,
   Exit_Status,
+  Limits,
+  ServerFrameSchema,
   WindowUpdateSchema,
-  type Envelope,
-} from "./generated/process_pb.js";
+  type ClientFrame,
+  type ServerFrame,
+} from "@archildata/api-types/process";
 
 async function waitForSocketOpen(socket: WebSocket): Promise<void> {
   if (socket.readyState === WebSocket.OPEN) return;
@@ -68,10 +71,10 @@ async function waitForProcessWrite(socket: WebSocket): Promise<void> {
 }
 
 const PROTOCOL = "archil-process-v2";
-const MAX_DATA = 64 * 1024;
-// Flow control; proto/process.proto states the rules.
-const INITIAL_WINDOW = 256 * 1024;
-const MIN_DATA_COST = 256;
+// Flow-control limits; process.proto, which generates these, states the rules.
+const MAX_DATA: number = Limits.MAX_DATA_BYTES;
+const INITIAL_WINDOW: number = Limits.INITIAL_WINDOW;
+const MIN_DATA_COST: number = Limits.MIN_DATA_COST;
 const dataCost = (length: number) => Math.max(length, MIN_DATA_COST);
 const MAX_CHANNELS = 128;
 const IDLE_MS = 5000;
@@ -142,7 +145,7 @@ class BinaryConnection {
   constructor(private readonly socket: WebSocket) {
     socket.addEventListener("message", (message) => {
       try {
-        const frame = fromBinary(EnvelopeSchema, new Uint8Array(message.data as ArrayBuffer));
+        const frame = fromBinary(ServerFrameSchema, new Uint8Array(message.data as ArrayBuffer));
         if (frame.channelId === 0) {
           // Other connection messages come from newer runtimes; ignore them.
           if (frame.body.case !== "drain") return;
@@ -161,9 +164,9 @@ class BinaryConnection {
     this.channels.set(channel.id, channel);
     return channel;
   }
-  send(id: number, body: Envelope["body"]): void {
+  send(id: number, body: ClientFrame["body"]): void {
     this.socket.send(
-      toBinary(EnvelopeSchema, create(EnvelopeSchema, { channelId: id, body })),
+      toBinary(ClientFrameSchema, create(ClientFrameSchema, { channelId: id, body })),
     );
   }
   async writable(): Promise<void> { await waitForProcessWrite(this.socket); }
@@ -211,7 +214,7 @@ export class BinaryChannel {
             : request.terminal || undefined;
         this.connection.send(
           this.id,
-          create(EnvelopeSchema, {
+          create(ClientFrameSchema, {
             body: {
               case: "start",
               value: {
@@ -232,7 +235,7 @@ export class BinaryChannel {
       case "attach":
         this.connection.send(
           this.id,
-          create(EnvelopeSchema, {
+          create(ClientFrameSchema, {
             body: {
               case: "attach",
               value: {
@@ -246,7 +249,7 @@ export class BinaryChannel {
       case "kill":
         this.connection.send(
           this.id,
-          create(EnvelopeSchema, {
+          create(ClientFrameSchema, {
             body: { case: "kill", value: { processId: request.process_id } },
           }).body,
         );
@@ -254,7 +257,7 @@ export class BinaryChannel {
       case "resize":
         this.connection.send(
           this.id,
-          create(EnvelopeSchema, {
+          create(ClientFrameSchema, {
             body: {
               case: "resize",
               value: {
@@ -304,7 +307,7 @@ export class BinaryChannel {
       throw new Error("Process is disconnected");
     this.connection.send(
       this.id,
-      create(EnvelopeSchema, { body: { case: "closeStdin", value: {} } }).body,
+      create(ClientFrameSchema, { body: { case: "closeStdin", value: {} } }).body,
     );
   }
   close(): void {
@@ -312,10 +315,10 @@ export class BinaryChannel {
     this.readyState = WebSocket.CLOSING;
     this.connection.send(
       this.id,
-      create(EnvelopeSchema, { body: { case: "detach", value: {} } }).body,
+      create(ClientFrameSchema, { body: { case: "detach", value: {} } }).body,
     );
   }
-  receive(frame: Envelope): void {
+  receive(frame: ServerFrame): void {
     const body = frame.body;
     let event: unknown;
     switch (body.case) {
@@ -381,7 +384,7 @@ export class BinaryChannel {
         this.finish();
         return;
       case undefined:
-        // A message type from a newer runtime; proto/process.proto says to ignore it.
+        // A message type from a newer runtime; the protocol says to ignore it.
         return;
       default:
         throw new Error("Unexpected process channel message");
@@ -393,7 +396,7 @@ export class BinaryChannel {
   /** Fails only this channel, for a message whose value it cannot represent. */
   private fail(error: string, message: string): void {
     if (this.readyState === WebSocket.OPEN)
-      this.connection.send(this.id, create(EnvelopeSchema, { body: { case: "detach", value: {} } }).body);
+      this.connection.send(this.id, create(ClientFrameSchema, { body: { case: "detach", value: {} } }).body);
     this.events.dispatchEvent(new MessageEvent("message", { data: { type: "error", error, message } }));
     this.finish();
   }

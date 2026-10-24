@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import {
-  EnvelopeSchema,
+  ClientFrameSchema,
   Exit_Status,
-  type Envelope,
-} from "../src/generated/process_pb.js";
+  ServerFrameSchema,
+  type ClientFrame,
+} from "@archildata/api-types/process";
 import { Sandbox, type SandboxWire } from "../src/sandbox.js";
 import type { ApiClient } from "../src/client.js";
 
@@ -21,7 +22,7 @@ class RuntimeSocket extends EventTarget {
   readyState = 0;
   binaryType = "arraybuffer";
   readonly protocol: string;
-  readonly sent: Envelope[] = [];
+  readonly sent: ClientFrame[] = [];
   constructor(
     readonly url: string,
     protocol?: string,
@@ -35,7 +36,7 @@ class RuntimeSocket extends EventTarget {
     });
   }
   send(data: Uint8Array) {
-    const frame = fromBinary(EnvelopeSchema, data);
+    const frame = fromBinary(ClientFrameSchema, data);
     this.sent.push(frame);
     const id = frame.channelId;
     switch (frame.body.case) {
@@ -68,18 +69,18 @@ class RuntimeSocket extends EventTarget {
   emit(
     id: number,
     body: NonNullable<
-      Parameters<typeof create<typeof EnvelopeSchema>>[1]
+      Parameters<typeof create<typeof ServerFrameSchema>>[1]
     >["body"],
   ) {
     const data = toBinary(
-      EnvelopeSchema,
-      create(EnvelopeSchema, { channelId: id, body }),
+      ServerFrameSchema,
+      create(ServerFrameSchema, { channelId: id, body }),
     );
     this.dispatchEvent(new MessageEvent("message", { data: data.buffer }));
   }
   /** A message carrying a body type added after this SDK was built. */
   emitFuture(id: number) {
-    const known = toBinary(EnvelopeSchema, create(EnvelopeSchema, { channelId: id }));
+    const known = toBinary(ServerFrameSchema, create(ServerFrameSchema, { channelId: id }));
     // Field 1000, varint 1.
     const data = new Uint8Array([...known, 0xc0, 0x3e, 0x01]);
     this.dispatchEvent(new MessageEvent("message", { data: data.buffer }));
