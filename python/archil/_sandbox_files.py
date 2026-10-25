@@ -15,23 +15,26 @@ from .errors import SandboxFileTransferError
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 _DOWNLOAD_CHUNK_BYTES = 512 * 1024
 
+# mktemp creates each temp file 0600, so other guest users never see
+# transfer contents, even from a temp file a killed transfer leaves behind.
 _UPLOAD_COMMAND = """set -eu
 mkdir -p "$ARCHIL_FILE_PARENT"
-trap 'rm -f "$ARCHIL_FILE_TEMP"' EXIT HUP INT TERM
-: > "$ARCHIL_FILE_TEMP"
-cat > "$ARCHIL_FILE_TEMP"
-chmod "$ARCHIL_FILE_MODE" "$ARCHIL_FILE_TEMP"
-mv -f "$ARCHIL_FILE_TEMP" "$ARCHIL_FILE_TARGET"
+temp=$(mktemp "$ARCHIL_FILE_PARENT/.archil-upload.XXXXXX")
+trap 'rm -f "$temp"' EXIT HUP INT TERM
+cat > "$temp"
+chmod "$ARCHIL_FILE_MODE" "$temp"
+mv -f "$temp" "$ARCHIL_FILE_TARGET"
 trap - EXIT HUP INT TERM"""
 
 _DOWNLOAD_COMMAND = """set -eu
-trap 'rm -f "$ARCHIL_FILE_TEMP"' EXIT HUP INT TERM
+temp=$(mktemp "${TMPDIR:-/tmp}/.archil-download.XXXXXX")
+trap 'rm -f "$temp"' EXIT HUP INT TERM
 exec 3< "$ARCHIL_FILE_PATH"
 while IFS= read -r count; do
-    dd bs="$count" count=1 <&3 > "$ARCHIL_FILE_TEMP" 2>/dev/null
-    size=$(wc -c < "$ARCHIL_FILE_TEMP")
+    dd bs="$count" count=1 <&3 > "$temp" 2>/dev/null
+    size=$(wc -c < "$temp")
     printf '%s\n' "$size"
-    cat "$ARCHIL_FILE_TEMP"
+    cat "$temp"
     [ "$size" -eq "$count" ] || break
 done"""
 
@@ -130,7 +133,6 @@ class _SandboxFiles:
         if not 0 <= file_mode <= 0o7777:
             raise ValueError("mode must be between 0 and 0o7777")
 
-        temporary = str(remote.parent / f".archil-upload-{uuid4().hex}")
         process: Optional[_SandboxProcess] = None
         try:
             transfer: _SandboxProcess = await self._sandbox.run(
@@ -138,7 +140,6 @@ class _SandboxFiles:
                 env={
                     "ARCHIL_FILE_PARENT": str(remote.parent),
                     "ARCHIL_FILE_TARGET": str(remote),
-                    "ARCHIL_FILE_TEMP": temporary,
                     "ARCHIL_FILE_MODE": f"{file_mode:o}",
                 },
             )
@@ -174,10 +175,7 @@ class _SandboxFiles:
         try:
             transfer: _SandboxProcess = await self._sandbox.run(
                 _DOWNLOAD_COMMAND,
-                env={
-                    "ARCHIL_FILE_PATH": str(remote),
-                    "ARCHIL_FILE_TEMP": f"/tmp/.archil-download-{uuid4().hex}",
-                },
+                env={"ARCHIL_FILE_PATH": str(remote)},
                 on_output=reader.feed,
                 collect_output=False,
             )
