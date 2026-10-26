@@ -8,6 +8,7 @@ import {
   resolveProgramCredentials,
 } from "../src/cli/common.js";
 import { renderTable } from "../src/cli/output.js";
+import { optionalInteger } from "../src/cli/sandbox-options.js";
 import {
   ArchilApiError,
   configure,
@@ -232,17 +233,17 @@ program
       "search (defaults to the disk root). Accepts a disk id or name.",
   )
   .option("--no-recursive", "Search only the given directory, not its subdirectories (recursive is the default)")
-  .option("--max-duration <seconds>", "Wall-clock deadline for the whole search", (v) => parseInt(v, 10))
-  .option("--concurrency <n>", "Max parallel grep workers (clamped to fleet capacity)", (v) => parseInt(v, 10))
-  .option("--max-results <n>", "Stop once this many matches are collected", (v) => parseInt(v, 10))
+  .option("--max-duration <seconds>", "Wall-clock deadline for the whole search")
+  .option("--concurrency <n>", "Max parallel grep workers (clamped to fleet capacity)")
+  .option("--max-results <n>", "Stop once this many matches are collected")
   .option("-i, --ignore-case", "Match case-insensitively")
   .option("-U, --multiline", "Let matches span lines")
   .option("-g, --glob <glob>", "Include files matching the glob, or exclude with a leading ! (repeatable)", (value, previous: string[]) => [...previous, value], [])
   .option("-t, --type <type>", "Only search files of this type, e.g. py (repeatable)", (value, previous: string[]) => [...previous, value], [])
   .option("-T, --type-not <type>", "Skip files of this type (repeatable)", (value, previous: string[]) => [...previous, value], [])
-  .option("-A, --after-context <n>", "Lines of context after each match (max 10)", (v) => parseInt(v, 10))
-  .option("-B, --before-context <n>", "Lines of context before each match (max 10)", (v) => parseInt(v, 10))
-  .option("-C, --context <n>", "Lines of context before and after each match (max 10)", (v) => parseInt(v, 10))
+  .option("-A, --after-context <n>", "Lines of context after each match (max 10)")
+  .option("-B, --before-context <n>", "Lines of context before each match (max 10)")
+  .option("-C, --context <n>", "Lines of context before and after each match (max 10)")
   .option("-o, --output <format>", "Output format: text | json", "text")
   .action(
     async (
@@ -250,21 +251,28 @@ program
       target: string,
       opts: {
         recursive?: boolean;
-        maxDuration?: number;
-        concurrency?: number;
-        maxResults?: number;
+        maxDuration?: string;
+        concurrency?: string;
+        maxResults?: string;
         ignoreCase?: boolean;
         multiline?: boolean;
         glob: string[];
         type: string[];
         typeNot: string[];
-        afterContext?: number;
-        beforeContext?: number;
-        context?: number;
+        afterContext?: string;
+        beforeContext?: string;
+        context?: string;
         output: string;
       },
     ) => {
       try {
+        // The control plane's limits, checked before resolving the disk.
+        const context = optionalInteger(opts.context, "Context", 0, 10);
+        const contextBefore = optionalInteger(opts.beforeContext, "Before context", 0, 10) ?? context;
+        const contextAfter = optionalInteger(opts.afterContext, "After context", 0, 10) ?? context;
+        const maxDurationSeconds = optionalInteger(opts.maxDuration, "Max duration", 1, 30);
+        const concurrency = optionalInteger(opts.concurrency, "Concurrency", 1, 100);
+        const maxResults = optionalInteger(opts.maxResults, "Max results", 1, 10_000);
         const slash = target.indexOf("/");
         const idOrName = slash === -1 ? target : target.slice(0, slash);
         const directory = slash === -1 ? "" : target.slice(slash + 1);
@@ -273,16 +281,16 @@ program
           directory,
           pattern,
           recursive: opts.recursive !== false,
-          maxDurationSeconds: opts.maxDuration,
-          concurrency: opts.concurrency,
-          maxResults: opts.maxResults,
+          maxDurationSeconds,
+          concurrency,
+          maxResults,
           ignoreCase: opts.ignoreCase,
           multiline: opts.multiline,
           globs: opts.glob,
           types: opts.type,
           typesNot: opts.typeNot,
-          contextBefore: opts.beforeContext ?? opts.context,
-          contextAfter: opts.afterContext ?? opts.context,
+          contextBefore,
+          contextAfter,
         });
         if (opts.output === "json") {
           console.log(JSON.stringify(res, null, 2));
