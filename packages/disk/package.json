@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "@archildata/api-types": "^0.0.81",
+    "@bufbuild/protobuf": "^2.16.0",
     "undici": "^8.12.3"
   },
   "peerDependencies": {
