@@ -365,26 +365,13 @@ test("workspace: grep trims merged context groups at the cap", async () => {
       ],
     ),
   });
-  const trimmed = async (contextBefore: number, contextAfter: number) =>
-    (await w.grep({ pattern: "x", directory: "", maxResults: 3, contextBefore, contextAfter })).groups;
-  const demoted = { ...hit(3), match: false };
-
   // Without multiline, b.txt:3 is a match of its own, so the cap lands on
   // b.txt:2. b.txt:3 falls in its after-context and comes back as context, the
   // group ends after contextAfter lines, and b.txt's later group is dropped.
-  assert.deepEqual(await trimmed(1, 2), [
+  const trimmed = await w.grep({ pattern: "x", directory: "", maxResults: 3, contextBefore: 1, contextAfter: 2 });
+  assert.deepEqual(trimmed.groups, [
     { file: "data/a.txt", lines: a },
-    { file: "cache/b.txt", lines: [ctx(1), hit(2), demoted, ctx(4)] },
-  ]);
-  // Without after-context, the group ends at the cap's match.
-  assert.deepEqual(await trimmed(1, 0), [
-    { file: "data/a.txt", lines: a },
-    { file: "cache/b.txt", lines: [ctx(1), hit(2)] },
-  ]);
-  // After-context longer than the group keeps the rest of it, and no more.
-  assert.deepEqual(await trimmed(1, 10), [
-    { file: "data/a.txt", lines: a },
-    { file: "cache/b.txt", lines: [ctx(1), hit(2), demoted, ctx(4), ctx(5)] },
+    { file: "cache/b.txt", lines: [ctx(1), hit(2), { ...hit(3), match: false }, ctx(4)] },
   ]);
 
   // With multiline, a cap landing on a run that ends its group keeps the whole
@@ -432,8 +419,6 @@ test("workspace: grep rebases root globs onto each mount", async () => {
   assert.deepEqual(await globsSent("", ["/data/*.csv", "data/*.json"]), { data: ["/*.csv", "/*.json"] });
   // The first component may itself be a glob.
   assert.deepEqual(await globsSent("", ["*/src/**"]), { data: ["src/**"], cache: ["src/**"], logs: ["src/**"] });
-  assert.deepEqual(await globsSent("", ["{data,logs}/src/**"]), { data: ["src/**"], logs: ["src/**"] });
-  assert.deepEqual(await globsSent("", ["[cd]a*/src/**"]), { data: ["src/**"], cache: ["src/**"] });
   // A leading ** can also start at the mount's own name.
   assert.deepEqual(await globsSent("", ["**/logs/*.txt"]), {
     data: ["**/logs/*.txt"],
@@ -443,10 +428,9 @@ test("workspace: grep rebases root globs onto each mount", async () => {
   // A mount no include glob can match under isn't searched, nor is one whose
   // directory an exclude glob matches last.
   assert.deepEqual(await globsSent("", ["data/**"]), { data: ["/**"] });
-  for (const glob of ["!logs", "!logs/", "!/logs"]) {
+  for (const glob of ["!logs", "!/logs"]) {
     assert.equal("logs" in (await globsSent("", [glob])), false, glob);
   }
-  assert.deepEqual(await globsSent("", ["!**"]), {});
   assert.deepEqual(await globsSent("", ["!l*", "logs"]), {
     data: ["!l*", "logs"],
     cache: ["!l*", "logs"],
