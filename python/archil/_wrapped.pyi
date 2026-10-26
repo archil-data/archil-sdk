@@ -1793,9 +1793,23 @@ class Workspace:
 
     class __grep_spec(typing_extensions.Protocol):
         def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000, ignore_case: bool = False, multiline: bool = False, globs: typing.List[str] | None = None, types: typing.List[str] | None = None, types_not: typing.List[str] | None = None, context_before: int = 0, context_after: int = 0) -> archil._models.GrepResult:
+            """Grep the disks ``directory`` covers in parallel and merge their
+            results. At the workspace root, a glob with a ``/`` must start with a
+            mount name, like ``data/src/**``, which applies to that mount only, or
+            with ``**/``. A glob with no ``/``, like ``*.ts``, or one starting with
+            ``**/`` applies inside every mount, and also to a mount it names
+            exactly, so ``!cache`` skips the cache mount.
+            """
             ...
 
         async def aio(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000, ignore_case: bool = False, multiline: bool = False, globs: typing.List[str] | None = None, types: typing.List[str] | None = None, types_not: typing.List[str] | None = None, context_before: int = 0, context_after: int = 0) -> archil._models.GrepResult:
+            """Grep the disks ``directory`` covers in parallel and merge their
+            results. At the workspace root, a glob with a ``/`` must start with a
+            mount name, like ``data/src/**``, which applies to that mount only, or
+            with ``**/``. A glob with no ``/``, like ``*.ts``, or one starting with
+            ``**/`` applies inside every mount, and also to a mount it names
+            exactly, so ``!cache`` skips the cache mount.
+            """
             ...
 
     grep: __grep_spec

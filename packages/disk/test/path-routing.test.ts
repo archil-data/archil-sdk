@@ -392,7 +392,7 @@ test("workspace: grep omits groups without context", async () => {
   assert.equal(r.groups, undefined);
 });
 
-test("workspace: grep rebases root globs onto each mount", async () => {
+test("workspace: grep routes root globs by mount name", async () => {
   const sent = new Map<string, string[] | undefined>();
   const mk = (name: string) => ({
     name,
@@ -408,55 +408,32 @@ test("workspace: grep rebases root globs onto each mount", async () => {
     return Object.fromEntries(sent);
   };
 
-  // A path glob reaches only its mount, as a path under it, while a basename
-  // glob reaches every mount as written.
-  assert.deepEqual(await globsSent("", ["data/src/**", "*.ts", "!cache/tmp/**"]), {
-    data: ["src/**", "*.ts"],
-    cache: ["*.ts", "!tmp/**"],
-    logs: ["*.ts"],
+  // A glob starting with a mount name reaches only that mount, without the
+  // name, while one with no `/` or starting with `**/` reaches every mount.
+  assert.deepEqual(await globsSent("", ["data/src/**", "*.ts", "!cache/tmp/**", "!**/node_modules/**"]), {
+    data: ["src/**", "*.ts", "!**/node_modules/**"],
+    cache: ["*.ts", "!tmp/**", "!**/node_modules/**"],
+    logs: ["*.ts", "!**/node_modules/**"],
   });
-  // Left without a `/`, these would match at any depth, so they're anchored.
-  assert.deepEqual(await globsSent("", ["/data/*.csv", "data/*.json"]), { data: ["/*.csv", "/*.json"] });
-  // The first component may itself be a glob.
-  assert.deepEqual(await globsSent("", ["*/src/**"]), { data: ["src/**"], cache: ["src/**"], logs: ["src/**"] });
-  // A leading ** can also start at the mount's own name.
-  assert.deepEqual(await globsSent("", ["**/logs/*.txt"]), {
-    data: ["**/logs/*.txt"],
-    cache: ["**/logs/*.txt"],
-    logs: ["**/logs/*.txt", "/*.txt"],
+  // Left without a `/`, these would match at any depth, so they're anchored. A
+  // mount no include reaches isn't searched.
+  assert.deepEqual(await globsSent("", ["/data/*.csv", "data/*.json", "data/**"]), { data: ["/*.csv", "/*.json", "/**"] });
+  // An exclude naming a mount exactly skips it, and one with no `/` of its own
+  // still applies inside the other mounts. A wildcard applies only inside them.
+  assert.deepEqual(await globsSent("", ["!/logs"]), { data: [], cache: [] });
+  assert.deepEqual(await globsSent("", ["!logs", "!cache/"]), { data: ["!logs", "!cache/"] });
+  assert.deepEqual(await globsSent("", ["!l*"]), { data: ["!l*"], cache: ["!l*"], logs: ["!l*"] });
+  // After a leading `**/`, a mount name also reaches the paths under that mount.
+  assert.deepEqual(await globsSent("", ["**/logs/**", "!**/cache"]), {
+    data: ["**/logs/**", "!**/cache"],
+    logs: ["**/logs/**", "/**", "!**/cache"],
   });
-  // A mount no include glob can match under isn't searched, nor is one whose
-  // directory an exclude glob matches last.
-  assert.deepEqual(await globsSent("", ["data/**"]), { data: ["/**"] });
-  for (const glob of ["!logs", "!/logs"]) {
-    assert.equal("logs" in (await globsSent("", [glob])), false, glob);
+  // The control plane still checks the glob after the mount name.
+  assert.deepEqual(await globsSent("", ["data/[", "["]), { data: ["/[", "["], cache: ["["], logs: ["["] });
+  // Any other glob with a `/` is refused.
+  for (const glob of ["*/src/**", "{data,cache}/**", "dta/**", "/*.csv"]) {
+    await assert.rejects(w.grep({ pattern: "x", directory: "", globs: [glob] }), /must start with a mount name/, glob);
   }
-  assert.deepEqual(await globsSent("", ["!l*", "logs"]), {
-    data: ["!l*", "logs"],
-    cache: ["!l*", "logs"],
-    logs: ["!l*", "logs"],
-  });
-  // Braces holding a `/` are rebased one alternative at a time.
-  assert.deepEqual(await globsSent("", ["{data/src,cache}/**"]), { data: ["src/**"], cache: ["/**"] });
-  assert.deepEqual(await globsSent("", ["{**/*.ts,data/src/**}"]), {
-    data: ["*.ts", "src/**"],
-    cache: ["*.ts"],
-    logs: ["*.ts"],
-  });
-  // Globs it can't take apart go to every mount as written: braces with a `*`
-  // beside them that could read differently once spliced, and a class with a `/`.
-  const unsplittable = ["{data/**,cache}/x", "d[/]x/**"];
-  assert.deepEqual(await globsSent("", unsplittable), { data: unsplittable, cache: unsplittable, logs: unsplittable });
-  // A glob the control plane rejects sends them all as written, even one under
-  // no mount, so every disk returns the 400.
-  for (const malformed of ["[", "", "[z-a]*.py", "other/["]) {
-    const globs = ["data/**", malformed];
-    assert.deepEqual(await globsSent("", globs), { data: globs, cache: globs, logs: globs }, malformed);
-  }
-  // `?` and classes match one character, even one outside the BMP.
-  sent.clear();
-  await ws({ "📁": mk("📁") }).grep({ pattern: "x", directory: "", globs: ["?/a.log", "??/b.log", "![😀-😎]*"] });
-  assert.deepEqual(Object.fromEntries(sent), { "📁": ["/a.log", "![😀-😎]*"] });
   // Below the root, globs are already relative to the disk's directory.
   assert.deepEqual(await globsSent("data/src", ["lib/**"]), { data: ["lib/**"] });
 });

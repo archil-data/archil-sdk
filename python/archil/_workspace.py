@@ -17,9 +17,8 @@ await them directly on the shared loop.
 from __future__ import annotations
 
 import asyncio
-import re
 from dataclasses import dataclass, replace
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from ._http import BodyType
 from ._models import (
@@ -62,263 +61,6 @@ def _truncate_groups(
                 ]
                 return [*groups[:i], replace(g, lines=kept)]
     return groups
-
-
-def _globs_for_mount(globs: List[str], mount: str) -> Optional[List[str]]:
-    """Rebase grep globs written against the workspace root onto one mount. At
-    the root a path is ``<mount>/<path>``, but the mount's disk matches globs
-    against ``<path>`` alone. Returns the globs that make the disk search
-    exactly the files ``globs`` select under ``<mount>/``, or None when they
-    select none there: the last glob matching the mount's directory excludes
-    it, or no include can match under it. Mirrors the controlplane's ripgrep
-    rules: ``!`` excludes, a trailing ``/`` matches only directories, a leading
-    ``/`` anchors, a glob without a ``/`` matches a name at any depth, ``*`` and
-    ``?`` stay within a path component while a whole ``**`` component spans
-    any number of them, and the last match wins. When the control plane would
-    reject a glob, every glob goes as written, so each disk returns the 400 a
-    single disk would."""
-    out: List[str] = []
-    has_include = includes_under = mount_excluded = False
-    for glob in globs:
-        exclude = glob.startswith("!")
-        body = glob[1:] if exclude else glob
-        dir_only = body.endswith("/")
-        if dir_only:
-            body = body[:-1]
-        anchored = body.startswith("/")
-        if anchored:
-            body = body[1:]
-        # Rebasing reads past the first component only on a mount it names, so
-        # check the whole body here: _component_regex reads `/` as any character.
-        if not body or _component_regex(body) is None:
-            return globs
-        has_include = has_include or not exclude
-        if not anchored and "/" not in body:
-            body = f"**/{body}"
-        rebased = _glob_under_mount(body, mount)
-        if rebased is None:
-            # Send a glob this can't take apart, like one with a `/` in a class,
-            # as written.
-            out.append(glob)
-            includes_under = includes_under or not exclude
-            continue
-        if _glob_names_mount(body, mount):
-            mount_excluded = exclude
-        out.extend(_disk_glob(exclude, rest, dir_only) for rest in rebased)
-        includes_under = includes_under or (not exclude and not dir_only and bool(rebased))
-    return None if mount_excluded or (has_include and not includes_under) else out
-
-
-def _glob_under_mount(body: str, mount: str) -> Optional[List[str]]:
-    """The glob bodies that match ``<path>`` exactly when ``body`` matches
-    ``<mount>/<path>``, or None when ``body`` can't be split into components."""
-    if body == "**":
-        return ["**"]
-    split = _split_first_component(body)
-    if split is None:
-        # A `/` inside braces: rebase the alternatives one at a time.
-        alternatives = _expand_first_braces(body)
-        if alternatives is None:
-            return None
-        rebased: List[str] = []
-        for alternative in alternatives:
-            under = _glob_under_mount(alternative, mount)
-            if under is None:
-                return None
-            rebased.extend(under)
-        return rebased
-    first, rest = split
-    if rest is None:
-        return []
-    if rest == "":
-        return None
-    if first == "**":
-        deeper = _glob_under_mount(rest, mount)
-        return None if deeper is None else [body, *deeper]
-    component = _component_regex(first)
-    if component is None:
-        return None
-    return [rest] if component.fullmatch(mount) else []
-
-
-def _glob_names_mount(body: str, mount: str) -> bool:
-    """Whether glob ``body`` matches the mount's own directory, ``<mount>``."""
-    if body == "**":
-        return True
-    split = _split_first_component(body)
-    if split is None:
-        alternatives = _expand_first_braces(body)
-        return alternatives is not None and any(_glob_names_mount(a, mount) for a in alternatives)
-    first, rest = split
-    if rest is None:
-        component = _component_regex(first)
-        return component is not None and component.fullmatch(mount) is not None
-    return first == "**" and _glob_names_mount(rest, mount)
-
-
-def _disk_glob(exclude: bool, body: str, dir_only: bool) -> str:
-    """Write a rebased glob body as the glob the control plane reads back as it."""
-    # The control plane reads a glob without a `/` as `**/` and the glob, and
-    # any other glob as matching the whole path, so only a body without a `/`
-    # needs anchoring. A basename glob comes back as the caller wrote it.
-    glob = body
-    if body.startswith("**/") and "/" not in body[3:]:
-        glob = body[3:]
-    elif "/" not in body:
-        glob = f"/{body}"
-    return f"{'!' if exclude else ''}{glob}{'/' if dir_only else ''}"
-
-
-def _split_first_component(body: str) -> Optional[Tuple[str, Optional[str]]]:
-    """Split off a glob's first path component, with the rest None when there
-    is no ``/``. None when a ``/`` falls inside braces or a character class, or
-    either is unclosed."""
-    in_braces = False
-    i = 0
-    while i < len(body):
-        c = body[i]
-        if c == "\\":
-            # An escaped `/` still matches the separator.
-            if body[i + 1 : i + 2] == "/":
-                return None if in_braces else (body[:i], body[i + 2 :])
-            i += 1
-        elif c == "[":
-            end = _glob_class_end(body, i)
-            if end < 0 or "/" in body[i:end]:
-                return None
-            i = end
-        elif c == "{":
-            in_braces = True
-        elif c == "}":
-            in_braces = False
-        elif c == "/":
-            return None if in_braces else (body[:i], body[i + 1 :])
-        i += 1
-    return None if in_braces else (body, None)
-
-
-def _expand_first_braces(body: str) -> Optional[List[str]]:
-    """The globs that together match what ``body`` does, one for each
-    alternative of its first braces, or None when it has none or an
-    alternative could read differently outside them."""
-    open_ = close = -1
-    start = 0
-    alternatives: List[str] = []
-    i = 0
-    while i < len(body) and close < 0:
-        c = body[i]
-        if c == "\\":
-            i += 1
-        elif c == "[":
-            i = _glob_class_end(body, i)
-            if i < 0:
-                return None
-        elif c == "{":
-            open_ = i
-            start = i + 1
-        elif open_ >= 0 and c in ",}":
-            alternatives.append(body[start:i])
-            start = i + 1
-            if c == "}":
-                close = i
-        i += 1
-    if close < 0:
-        return None
-    prefix, suffix = body[:open_], body[close + 1 :]
-    expanded: List[str] = []
-    for alternative in alternatives:
-        glob = f"{prefix}{alternative}{suffix}"
-        # The control plane reads a `**` by the characters beside it, which
-        # splicing changes only at the braces' edges. A `**/` opening an
-        # alternative after the start or a `/` reads the same either way, as
-        # does a `/**` closing one at the end. Any other `*` at an edge could
-        # join another or read differently, so the glob is sent as written
-        # instead.
-        left = alternative.startswith("**/") and (not prefix or prefix.endswith("/"))
-        right = alternative.endswith("/**") and not suffix
-        if not left and _stars_meet(glob, len(prefix)):
-            return None
-        if not right and _stars_meet(glob, len(prefix) + len(alternative)):
-            return None
-        expanded.append(glob)
-    return expanded
-
-
-def _stars_meet(glob: str, at: int) -> bool:
-    """Whether ``*``s meet at index ``at`` of ``glob``: on both sides of it, or
-    two or more on one side, whose reading depends on the character on the
-    other."""
-    before = at - len(glob[:at].rstrip("*"))
-    after = len(glob) - at - len(glob[at:].lstrip("*"))
-    return (before > 0 and after > 0) or before > 1 or after > 1
-
-
-def _glob_class_end(glob: str, start: int) -> int:
-    """Index of the ``]`` closing the glob class at ``start``, or -1. A ``]``
-    first in the class is literal."""
-    i = start + 1
-    if glob[i : i + 1] in ("!", "^"):
-        i += 1
-    first = True
-    while i < len(glob):
-        if glob[i] == "]" and not first:
-            return i
-        first = False
-        i += 1
-    return -1
-
-
-def _component_regex(glob: str) -> Optional[re.Pattern[str]]:
-    """One path component's glob as a regexp to fullmatch, or None if
-    malformed."""
-    source: List[str] = []
-    in_braces = False
-    i = 0
-    while i < len(glob):
-        c = glob[i]
-        if c == "*":
-            # Within a component, `**` is no different from `*`.
-            if glob[i + 1 : i + 2] == "*":
-                i += 1
-            source.append("[^/]*")
-        elif c == "?":
-            source.append("[^/]")
-        elif c == "[":
-            end = _glob_class_end(glob, i)
-            if end < 0:
-                return None
-            members = glob[i + 1 : end]
-            negated = members[:1] in ("!", "^")
-            if negated:
-                members = members[1:]
-            members = re.sub(r"[\\\]\[^&~|]", r"\\\g<0>", members)
-            source.append(f"[{'^' if negated else ''}{members}]")
-            i = end
-        elif c == "{":
-            if in_braces:
-                return None
-            in_braces = True
-            source.append("(?:")
-        elif c == "}" and in_braces:
-            in_braces = False
-            source.append(")")
-        elif c == "," and in_braces:
-            source.append("|")
-        elif c == "\\":
-            if i + 1 == len(glob):
-                return None
-            i += 1
-            source.append(re.escape(glob[i]))
-        else:
-            source.append(re.escape(c))
-        i += 1
-    if in_braces:
-        return None
-    try:
-        return re.compile("".join(source))
-    except re.error:
-        # A class that doesn't compile, like a reversed range, is malformed too.
-        return None
 
 
 @dataclass
@@ -418,6 +160,60 @@ class _Workspace:
         if entry is None:
             raise self._unknown_disk(segs[0])
         return [(segs[0], entry, self._disk_key(entry, "/".join(segs[1:])))]
+
+    def _root_globs(self, globs: List[str]) -> dict[str, List[str]]:
+        """Route grep globs written against the workspace root to the mounts they
+        can match. A glob that starts with a mount's name goes to that mount
+        without the name. One with no ``/`` or that starts with ``**/`` goes to
+        every mount as written, and also applies to a mount it names exactly,
+        like ``!cache`` or ``**/logs/**``. Leaves out a mount whose directory an
+        exclude names, or that no include reaches, and raises for any other glob
+        with a ``/``."""
+        routed: dict[str, List[str]] = {name: [] for name in self._mounts}
+        excluded: set[str] = set()
+        for glob in globs:
+            exclude = glob.startswith("!")
+            body = glob[1:] if exclude else glob
+            dir_only = body.endswith("/")
+            if dir_only:
+                body = body[:-1]
+            anchored = body.startswith("/")
+            if anchored:
+                body = body[1:]
+            # A glob with no `/` or that starts with `**/` matches inside every
+            # mount. At the root it also matches a mount it names exactly: the
+            # mount's directory, or after a leading `**/`, paths under it.
+            everywhere = not anchored and ("/" not in body or body.startswith("**/"))
+            if everywhere:
+                for mount_globs in routed.values():
+                    mount_globs.append(glob)
+            path = body[3:] if everywhere and body.startswith("**/") else body
+            name, _, rest = path.partition("/")
+            if name not in routed:
+                if everywhere:
+                    continue
+                raise ValueError(
+                    "At the workspace root, a glob with a '/' must start with a mount name ("
+                    + ", ".join(f"{n}/" for n in self._mounts)
+                    + f") or '**/'; got {glob!r}. To search below one mount, set directory to it."
+                )
+            if not rest:
+                # The glob names the mount's own directory, so the last one
+                # decides whether the mount is searched at all.
+                if exclude:
+                    excluded.add(name)
+                else:
+                    excluded.discard(name)
+                continue
+            # The control plane reads a glob without a `/` as a name at any depth.
+            rest = rest if "/" in rest else f"/{rest}"
+            routed[name].append(f"{'!' if exclude else ''}{rest}{'/' if dir_only else ''}")
+        has_include = any(not glob.startswith("!") for glob in globs)
+        return {
+            name: mount_globs
+            for name, mount_globs in routed.items()
+            if name not in excluded and not (has_include and all(g.startswith("!") for g in mount_globs))
+        }
 
     def _disk_key(self, entry: _Mount, rel: str) -> str:
         rel = rel.lstrip("/")
@@ -537,17 +333,20 @@ class _Workspace:
         context_before: int = 0,
         context_after: int = 0,
     ) -> GrepResult:
+        """Grep the disks ``directory`` covers in parallel and merge their
+        results. At the workspace root, a glob with a ``/`` must start with a
+        mount name, like ``data/src/**``, which applies to that mount only, or
+        with ``**/``. A glob with no ``/``, like ``*.ts``, or one starting with
+        ``**/`` applies inside every mount, and also to a mount it names
+        exactly, so ``!cache`` skips the cache mount."""
         # At the root, glob paths start with a mount's name, which its disk's
-        # paths lack, so rebase the globs per mount and skip the mounts they
-        # rule out.
-        at_root = not to_segments(directory)
+        # paths lack, so route each glob to the mounts it can match.
+        root_globs = self._root_globs(globs) if globs and not to_segments(directory) else None
         covered = []
         for name, entry, rel in self._covered(directory):
-            mount_globs = globs
-            if at_root and globs:
-                mount_globs = _globs_for_mount(globs, name)
-                if mount_globs is None:
-                    continue
+            mount_globs = globs if root_globs is None else root_globs.get(name)
+            if root_globs is not None and mount_globs is None:
+                continue
             covered.append((name, entry, rel, mount_globs))
         # Fan out resiliently: a disk that errors contributes a "list_failed"
         # reason (surfaced as a partial-results caveat) instead of failing the grep.

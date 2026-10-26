@@ -46,236 +46,6 @@ function truncateGroups(groups: GrepGroup[], maxResults: number, after: number, 
   return groups;
 }
 
-/** Rebase grep globs written against the workspace root onto one mount. At the
- * root a path is `<mount>/<path>`, but the mount's disk matches globs against
- * `<path>` alone. Returns the globs that make the disk search exactly the files
- * `globs` select under `<mount>/`, or null when they select none there: the
- * last glob matching the mount's directory excludes it, or no include can match
- * under it. Mirrors the controlplane's ripgrep rules: `!` excludes, a trailing
- * `/` matches only directories, a leading `/` anchors, a glob without a `/`
- * matches a name at any depth, `*` and `?` stay within a path component while a
- * whole `**` component spans any number of them, and the last match wins.
- * When the control plane would reject a glob, every glob goes as written, so
- * each disk returns the 400 a single disk would. */
-function globsForMount(globs: string[], mount: string): string[] | null {
-  const out: string[] = [];
-  let hasInclude = false;
-  let includesUnder = false;
-  let mountExcluded = false;
-  for (const glob of globs) {
-    const exclude = glob.startsWith("!");
-    let body = exclude ? glob.slice(1) : glob;
-    const dirOnly = body.endsWith("/");
-    if (dirOnly) body = body.slice(0, -1);
-    const anchored = body.startsWith("/");
-    if (anchored) body = body.slice(1);
-    // Rebasing reads past the first component only on a mount it names, so
-    // check the whole body here: componentRegExp reads `/` as any character.
-    if (body === "" || componentRegExp(body) === undefined) return globs;
-    hasInclude ||= !exclude;
-    if (!anchored && !body.includes("/")) body = `**/${body}`;
-    const rebased = globUnderMount(body, mount);
-    if (rebased === undefined) {
-      // Send a glob this can't take apart, like one with a `/` in a class, as
-      // written.
-      out.push(glob);
-      includesUnder ||= !exclude;
-      continue;
-    }
-    if (globNamesMount(body, mount)) mountExcluded = exclude;
-    for (const rest of rebased) out.push(diskGlob(exclude, rest, dirOnly));
-    includesUnder ||= !exclude && !dirOnly && rebased.length > 0;
-  }
-  return mountExcluded || (hasInclude && !includesUnder) ? null : out;
-}
-
-/** The glob bodies that match `<path>` exactly when `body` matches
- * `<mount>/<path>`, or undefined when `body` can't be split into components. */
-function globUnderMount(body: string, mount: string): string[] | undefined {
-  if (body === "**") return ["**"];
-  const split = splitFirstComponent(body);
-  if (split === undefined) {
-    // A `/` inside braces: rebase the alternatives one at a time.
-    const alternatives = expandFirstBraces(body);
-    if (alternatives === undefined) return undefined;
-    const rebased: string[] = [];
-    for (const alternative of alternatives) {
-      const under = globUnderMount(alternative, mount);
-      if (under === undefined) return undefined;
-      rebased.push(...under);
-    }
-    return rebased;
-  }
-  const [first, rest] = split;
-  if (rest === undefined) return [];
-  if (rest === "") return undefined;
-  if (first === "**") {
-    const deeper = globUnderMount(rest, mount);
-    return deeper && [body, ...deeper];
-  }
-  const component = componentRegExp(first);
-  if (component === undefined) return undefined;
-  return component.test(mount) ? [rest] : [];
-}
-
-/** Whether glob `body` matches the mount's own directory, `<mount>`. */
-function globNamesMount(body: string, mount: string): boolean {
-  if (body === "**") return true;
-  const split = splitFirstComponent(body);
-  if (split === undefined) return expandFirstBraces(body)?.some((alternative) => globNamesMount(alternative, mount)) ?? false;
-  const [first, rest] = split;
-  if (rest === undefined) return componentRegExp(first)?.test(mount) ?? false;
-  return first === "**" && globNamesMount(rest, mount);
-}
-
-/** Write a rebased glob body as the glob the control plane reads back as it. */
-function diskGlob(exclude: boolean, body: string, dirOnly: boolean): string {
-  // The control plane reads a glob without a `/` as `**/` and the glob, and
-  // any other glob as matching the whole path, so only a body without a `/`
-  // needs anchoring. A basename glob comes back as the caller wrote it.
-  let glob = body;
-  if (body.startsWith("**/") && !body.slice(3).includes("/")) glob = body.slice(3);
-  else if (!body.includes("/")) glob = `/${body}`;
-  return `${exclude ? "!" : ""}${glob}${dirOnly ? "/" : ""}`;
-}
-
-/** Split off a glob's first path component, with `rest` undefined when there
- * is no `/`. Undefined when a `/` falls inside braces or a character class, or
- * either is unclosed. */
-function splitFirstComponent(body: string): [string, string | undefined] | undefined {
-  let inBraces = false;
-  for (let i = 0; i < body.length; i++) {
-    const c = body[i];
-    if (c === "\\") {
-      // An escaped `/` still matches the separator.
-      if (body[i + 1] === "/") return inBraces ? undefined : [body.slice(0, i), body.slice(i + 2)];
-      i++;
-    } else if (c === "[") {
-      const end = globClassEnd(body, i);
-      if (end < 0 || body.slice(i, end).includes("/")) return undefined;
-      i = end;
-    } else if (c === "{") {
-      inBraces = true;
-    } else if (c === "}") {
-      inBraces = false;
-    } else if (c === "/") {
-      return inBraces ? undefined : [body.slice(0, i), body.slice(i + 1)];
-    }
-  }
-  return inBraces ? undefined : [body, undefined];
-}
-
-/** The globs that together match what `body` does, one for each alternative of
- * its first braces, or undefined when it has none or an alternative could read
- * differently outside them. */
-function expandFirstBraces(body: string): string[] | undefined {
-  let open = -1;
-  let close = -1;
-  const alternatives: string[] = [];
-  for (let i = 0, start = 0; i < body.length && close < 0; i++) {
-    const c = body[i];
-    if (c === "\\") {
-      i++;
-    } else if (c === "[") {
-      i = globClassEnd(body, i);
-      if (i < 0) return undefined;
-    } else if (c === "{") {
-      open = i;
-      start = i + 1;
-    } else if (open >= 0 && (c === "," || c === "}")) {
-      alternatives.push(body.slice(start, i));
-      start = i + 1;
-      if (c === "}") close = i;
-    }
-  }
-  if (close < 0) return undefined;
-  const prefix = body.slice(0, open);
-  const suffix = body.slice(close + 1);
-  const expanded: string[] = [];
-  for (const alternative of alternatives) {
-    const glob = `${prefix}${alternative}${suffix}`;
-    // The control plane reads a `**` by the characters beside it, which
-    // splicing changes only at the braces' edges. A `**/` opening an
-    // alternative after the start or a `/` reads the same either way, as does
-    // a `/**` closing one at the end. Any other `*` at an edge could join
-    // another or read differently, so the glob is sent as written instead.
-    const left = alternative.startsWith("**/") && (prefix === "" || prefix.endsWith("/"));
-    const right = alternative.endsWith("/**") && suffix === "";
-    if (!left && starsMeet(glob, prefix.length)) return undefined;
-    if (!right && starsMeet(glob, prefix.length + alternative.length)) return undefined;
-    expanded.push(glob);
-  }
-  return expanded;
-}
-
-/** Whether `*`s meet at index `at` of `glob`: on both sides of it, or two or
- * more on one side, whose reading depends on the character on the other. */
-function starsMeet(glob: string, at: number): boolean {
-  const before = at - glob.slice(0, at).replace(/\*+$/, "").length;
-  const after = glob.length - at - glob.slice(at).replace(/^\*+/, "").length;
-  return (before > 0 && after > 0) || before > 1 || after > 1;
-}
-
-/** Index of the `]` closing the glob class at `start`, or -1. A `]` first in the class is literal. */
-function globClassEnd(glob: string, start: number): number {
-  let i = start + 1;
-  if (glob[i] === "!" || glob[i] === "^") i++;
-  for (let first = true; i < glob.length; i++, first = false) {
-    if (glob[i] === "]" && !first) return i;
-  }
-  return -1;
-}
-
-/** One path component's glob as an anchored regexp, or undefined if malformed. */
-function componentRegExp(glob: string): RegExp | undefined {
-  let source = "";
-  let inBraces = false;
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === "*") {
-      // Within a component, `**` is no different from `*`.
-      if (glob[i + 1] === "*") i++;
-      source += "[^/]*";
-    } else if (c === "?") {
-      source += "[^/]";
-    } else if (c === "[") {
-      const end = globClassEnd(glob, i);
-      if (end < 0) return undefined;
-      let members = glob.slice(i + 1, end);
-      const negated = members[0] === "!" || members[0] === "^";
-      if (negated) members = members.slice(1);
-      source += `[${negated ? "^" : ""}${members.replace(/[\\\]\[^]/g, "\\$&")}]`;
-      i = end;
-    } else if (c === "{") {
-      if (inBraces) return undefined;
-      inBraces = true;
-      source += "(?:";
-    } else if (c === "}" && inBraces) {
-      inBraces = false;
-      source += ")";
-    } else if (c === "," && inBraces) {
-      source += "|";
-    } else if (c === "\\") {
-      if (i + 1 === glob.length) return undefined;
-      source += escapeRegExp(glob[++i]);
-    } else {
-      source += escapeRegExp(c);
-    }
-  }
-  if (inBraces) return undefined;
-  try {
-    // `u` reads a character outside the BMP as one, as the control plane does.
-    return new RegExp(`^${source}$`, "u");
-  } catch {
-    // A class that doesn't compile, like a reversed range, is malformed too.
-    return undefined;
-  }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-}
-
 interface MountEntry {
   disk: Disk;
   readOnly: boolean;
@@ -403,6 +173,55 @@ export class Workspace implements FileSystem {
     return [{ name: segs[0], entry, rel: this.diskKey(entry, segs.slice(1).join("/")) }];
   }
 
+  /** Route grep globs written against the workspace root to the mounts they
+   * can match. A glob that starts with a mount's name goes to that mount without
+   * the name. One with no `/` or that starts with `**` + `/` goes to every mount
+   * as written, and also applies to a mount it names exactly, like `!cache` or
+   * `**` + `/logs/**`. Leaves out a mount whose directory an exclude names, or
+   * that no include reaches, and throws for any other glob with a `/`. */
+  private rootGlobs(globs: string[]): Map<string, string[]> {
+    const routed = new Map<string, string[]>([...this.mounts.keys()].map((name) => [name, []]));
+    const excluded = new Set<string>();
+    for (const glob of globs) {
+      const exclude = glob.startsWith("!");
+      let body = exclude ? glob.slice(1) : glob;
+      const dirOnly = body.endsWith("/");
+      if (dirOnly) body = body.slice(0, -1);
+      const anchored = body.startsWith("/");
+      if (anchored) body = body.slice(1);
+      // A glob with no `/` or that starts with `**/` matches inside every mount.
+      // At the root it also matches a mount it names exactly: the mount's
+      // directory, or after a leading `**/`, paths under it.
+      const everywhere = !anchored && (!body.includes("/") || body.startsWith("**/"));
+      if (everywhere) for (const mountGlobs of routed.values()) mountGlobs.push(glob);
+      const path = everywhere && body.startsWith("**/") ? body.slice(3) : body;
+      const slash = path.indexOf("/");
+      const name = slash < 0 ? path : path.slice(0, slash);
+      const rest = slash < 0 ? "" : path.slice(slash + 1);
+      const mountGlobs = routed.get(name);
+      if (!mountGlobs) {
+        if (everywhere) continue;
+        throw new Error(
+          `At the workspace root, a glob with a '/' must start with a mount name (${this.diskNames().map((n) => `${n}/`).join(", ")}) or '**/'; got '${glob}'. To search below one mount, set directory to it.`,
+        );
+      }
+      if (rest === "") {
+        // The glob names the mount's own directory, so the last one decides
+        // whether the mount is searched at all.
+        if (exclude) excluded.add(name);
+        else excluded.delete(name);
+        continue;
+      }
+      // The control plane reads a glob without a `/` as a name at any depth.
+      mountGlobs.push(`${exclude ? "!" : ""}${rest.includes("/") ? rest : `/${rest}`}${dirOnly ? "/" : ""}`);
+    }
+    const hasInclude = globs.some((glob) => !glob.startsWith("!"));
+    for (const [name, mountGlobs] of routed) {
+      if (excluded.has(name) || (hasInclude && mountGlobs.every((glob) => glob.startsWith("!")))) routed.delete(name);
+    }
+    return routed;
+  }
+
   /** Map a workspace-relative key to the disk's key, applying the mount's subdirectory. */
   private diskKey(entry: MountEntry, rel: string): string {
     const trimmed = rel.replace(/^\/+/, "");
@@ -491,15 +310,23 @@ export class Workspace implements FileSystem {
     return { objects, commonPrefixes, isTruncated, keyCount };
   }
 
+  /**
+   * Grep the disks `directory` covers in parallel and merge their results. At
+   * the workspace root, a glob with a `/` must start with a mount name, like
+   * `data/src/**`, which applies to that mount only, or with `**` + `/`. A glob
+   * with no `/`, like `*.ts`, or one starting with `**` + `/` applies inside
+   * every mount, and also to a mount it names exactly, so `!cache` skips the
+   * cache mount.
+   */
   async grep(opts: GrepOptions): Promise<GrepResult> {
     const directory = opts.directory ?? "";
-    const atRoot = toSegments(directory).length === 0;
     // At the root, glob paths start with a mount's name, which its disk's paths
-    // lack, so rebase the globs per mount and skip the mounts they rule out.
+    // lack, so route each glob to the mounts it can match.
+    const rootGlobs = toSegments(directory).length === 0 && opts.globs?.length ? this.rootGlobs(opts.globs) : undefined;
     const covered = this.covered(directory).flatMap((c) => {
-      if (!atRoot || !opts.globs?.length) return [{ ...c, globs: opts.globs }];
-      const globs = globsForMount(opts.globs, c.name);
-      return globs === null ? [] : [{ ...c, globs }];
+      if (rootGlobs === undefined) return [{ ...c, globs: opts.globs }];
+      const globs = rootGlobs.get(c.name);
+      return globs === undefined ? [] : [{ ...c, globs }];
     });
     // Fan out resiliently: a disk that errors contributes a "list_failed" reason
     // (surfaced as a partial-results caveat) instead of failing the whole grep.
