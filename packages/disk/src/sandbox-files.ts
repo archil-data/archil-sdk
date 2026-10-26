@@ -44,45 +44,17 @@ while IFS= read -r count; do
 done`;
 
 class ProcessOutputReader {
-  readonly onOutput = (output: SandboxProcessOutput): void => {
-    if (output.offset !== this._cursor) {
-      this._push(
-        new Error(
-          `Sandbox process output gap: expected offset ${this._cursor}, received ${output.offset}`,
-        ),
-      );
-      return;
-    }
-    this._cursor += output.data.byteLength;
-    if (output.stream === "stdout") this._push(output.data);
-    else {
-      this._stderr += this._stderrDecoder.decode(output.data, { stream: true });
-    }
-  };
-
   private _buffer: Uint8Array<ArrayBufferLike> = new Uint8Array();
   private _cursor = 0;
-  private readonly _chunks: Array<Uint8Array | Error> = [];
   private readonly _stderrDecoder = new TextDecoder();
   private _stderr = "";
-  private _waiting?: (value: Uint8Array | Error) => void;
-  private _exit?: Promise<SandboxProcessResult>;
+  private _process!: SandboxProcess;
+  private _output!: AsyncIterator<SandboxProcessOutput>;
 
   attach(process: SandboxProcess): void {
-    this._exit = process.wait();
-    void this._exit.then(
-      (result) => {
-        try {
-          assertSuccessful(result, this._stderrText());
-          this._push(new Error("Sandbox process exited before file transfer completed"));
-        } catch (error) {
-          this._push(toError(error));
-        }
-      },
-      (error) => this._push(toError(error)),
-    );
+    this._process = process;
+    this._output = process.output[Symbol.asyncIterator]();
   }
-
   async readLine(): Promise<Uint8Array> {
     while (true) {
       const newline = this._buffer.indexOf(10);
@@ -94,44 +66,30 @@ class ProcessOutputReader {
       this._buffer = concat(this._buffer, await this._nextChunk());
     }
   }
-
   async read(size: number): Promise<Uint8Array> {
-    while (this._buffer.byteLength < size) {
-      this._buffer = concat(this._buffer, await this._nextChunk());
-    }
+    while (this._buffer.length < size) this._buffer = concat(this._buffer, await this._nextChunk());
     const data = this._buffer.slice(0, size);
     this._buffer = this._buffer.slice(size);
     return data;
   }
-
   async wait(): Promise<void> {
-    if (!this._exit) throw new Error("File transfer process has not started");
-    assertSuccessful(await this._exit, this._stderrText());
+    while (!(await this._output.next()).done) { /* Drain trailing diagnostics. */ }
+    assertSuccessful(await this._process.wait(), this._stderr + this._stderrDecoder.decode());
   }
-
-  private _stderrText(): string {
-    this._stderr += this._stderrDecoder.decode();
-    return this._stderr;
-  }
-
-  private _push(value: Uint8Array | Error): void {
-    const waiting = this._waiting;
-    if (waiting) {
-      this._waiting = undefined;
-      waiting(value);
-    } else {
-      this._chunks.push(value);
-    }
-  }
-
   private async _nextChunk(): Promise<Uint8Array> {
-    const value =
-      this._chunks.shift() ??
-      (await new Promise<Uint8Array | Error>((resolve) => {
-        this._waiting = resolve;
-      }));
-    if (value instanceof Error) throw value;
-    return value;
+    while (true) {
+      const next = await this._output.next();
+      if (next.done) {
+        assertSuccessful(await this._process.wait(), this._stderr + this._stderrDecoder.decode());
+        throw new Error("Sandbox process exited before file transfer completed");
+      }
+      const output = next.value;
+      if (output.offset !== this._cursor) throw new Error(
+        `Sandbox process output gap: expected offset ${this._cursor}, received ${output.offset}`);
+      this._cursor += output.data.length;
+      if (output.stream === "stdout") return output.data;
+      this._stderr += this._stderrDecoder.decode(output.data, { stream: true });
+    }
   }
 }
 
@@ -191,7 +149,6 @@ export class SandboxFiles {
           ARCHIL_FILE_PATH: path,
           ARCHIL_FILE_TEMP: `/tmp/.archil-download-${transferId()}`,
         },
-        onOutput: reader.onOutput,
         collectOutput: false,
       });
       reader.attach(process);

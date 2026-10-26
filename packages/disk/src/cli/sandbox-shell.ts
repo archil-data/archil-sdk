@@ -16,8 +16,8 @@ interface ShellOutput {
   columns?: number;
   rows?: number;
   write(data: string | Uint8Array): unknown;
-  on(event: "resize", listener: () => void): unknown;
-  off(event: "resize", listener: () => void): unknown;
+  on(event: "resize" | "drain", listener: () => void): unknown;
+  off(event: "resize" | "drain", listener: () => void): unknown;
 }
 
 interface ShellErrorOutput {
@@ -122,13 +122,6 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     remote = await options.sandbox.run("/bin/sh -l", {
       terminal: { cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 },
       collectOutput: false,
-      onOutput: ({ data }) => {
-        try {
-          stdout.write(data);
-        } catch (error) {
-          fail(error);
-        }
-      },
     });
     stdin.setRawMode(true);
     terminalConfigured = true;
@@ -139,7 +132,17 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     stderr.write(`Archil shell process ${remote.id}; Ctrl+] exits\n`);
     stdin.on("data", onInput);
     stdin.resume();
-    result = await Promise.race([remote.wait(), termination, failure]);
+    const streaming = (async () => {
+      for await (const { data } of remote!.output) {
+        if (stdout.write(data) === false) await new Promise<void>((resolve) => {
+          const drained = () => { stdout.off("drain", drained); resolve(); };
+          stdout.on("drain", drained);
+        });
+      }
+    })();
+    result = await Promise.race([
+      Promise.all([remote.wait(), streaming]).then(([result]) => result), termination, failure,
+    ]);
     failureSettled = true;
     return result;
   } finally {
@@ -150,5 +153,6 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     stdin.pause();
     if (remote && !result && !terminationRequested) await remote.kill().catch(() => {});
     if (remote) await remote.disconnect().catch(() => {});
+    await options.sandbox.processes.disconnect();
   }
 }
