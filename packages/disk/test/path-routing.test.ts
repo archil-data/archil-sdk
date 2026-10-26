@@ -5,6 +5,7 @@
 
 import { test } from "vitest";
 import assert from "node:assert/strict";
+import { ArchilApiError } from "../src/errors.js";
 import { toSegments } from "../src/paths.js";
 import { Workspace } from "../src/workspace.js";
 
@@ -189,6 +190,24 @@ test("workspace: a failing disk doesn't sink the whole fan-out", async () => {
   const l = await w.listObjects(undefined, { recursive: true });
   assert.deepEqual(l.objects.map((o) => o.key), ["ok/logs/x.txt"]);
   assert.equal(l.isTruncated, true);
+});
+
+test("workspace: grep reports a bad request instead of a partial result", async () => {
+  const rejecting = (name: string, status: number, message: string) => ({
+    name,
+    grep: () => Promise.reject(new ArchilApiError(message, status, status === 400 ? "bad_request" : undefined)),
+  });
+  // The control plane rejects a bad request on every disk alike.
+  const unknownType = 'unknown file type "pyy"';
+  const bad = ws({ data: rejecting("data", 400, unknownType), cache: rejecting("cache", 400, unknownType) });
+  await assert.rejects(bad.grep({ pattern: "x", directory: "", types: ["pyy"] }), {
+    name: "ArchilApiError",
+    status: 400,
+    message: unknownType,
+  });
+  // Any other failure is one disk's, so the rest still come back.
+  const down = ws({ ok: fakeDisk("ok"), bad: rejecting("bad", 503, "No runtime capacity available, please retry shortly") });
+  assert.equal((await down.grep({ pattern: "x", directory: "" })).stoppedReason, "list_failed");
 });
 
 test("workspace: grep flags max_results when merged matches exceed the cap", async () => {

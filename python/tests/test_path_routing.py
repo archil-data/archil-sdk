@@ -17,6 +17,7 @@ from archil._archil import ExecMountSpec
 from archil._models import GrepGroup, GrepGroupLine, GrepMatch, GrepResult, ListObjectsResult, S3Object
 from archil._paths import to_segments
 from archil._workspace import _Workspace
+from archil.errors import ArchilApiError
 
 
 class _FakeDisk:
@@ -197,6 +198,26 @@ def test_workspace_failing_disk_does_not_sink_fan_out():
     listing = asyncio.run(ws.list_objects(recursive=True))
     assert [o.key for o in listing.objects] == ["ok/logs/x.txt"]
     assert listing.is_truncated is True
+
+
+class _RejectingDisk:
+    def __init__(self, status: int, message: str) -> None:
+        self.error = ArchilApiError(message, status, "bad_request" if status == 400 else None)
+
+    async def grep(self, *, directory, **_):
+        raise self.error
+
+
+def test_workspace_grep_reports_a_bad_request_instead_of_a_partial_result():
+    # The control plane rejects a bad request on every disk alike.
+    unknown_type = 'unknown file type "pyy"'
+    bad = _ws(data=_RejectingDisk(400, unknown_type), cache=_RejectingDisk(400, unknown_type))
+    with pytest.raises(ArchilApiError, match=unknown_type) as exc:
+        asyncio.run(bad.grep(directory="", pattern="x", types=["pyy"]))
+    assert exc.value.status == 400
+    # Any other failure is one disk's, so the rest still come back.
+    down = _ws(ok=_FakeDisk("ok"), bad=_RejectingDisk(503, "No runtime capacity available, please retry shortly"))
+    assert asyncio.run(down.grep(directory="", pattern="x")).stopped_reason == "list_failed"
 
 
 class _MatchingDisk:

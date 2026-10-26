@@ -33,6 +33,7 @@ from ._models import (
 )
 from ._paths import to_segments
 from ._synchronizer import translate_in, translate_out
+from .errors import ArchilApiError
 
 # Imported at runtime (not under TYPE_CHECKING) so the synchronicity stub
 # generator can resolve agent_tools()'s return type. agent_tools does not import
@@ -494,6 +495,11 @@ class _Workspace:
             ),
             return_exceptions=True,
         )
+        # Except a 400: the control plane rejects a bad request before it looks
+        # at the disk, so every disk fails alike and the error belongs to the caller.
+        for r in results:
+            if isinstance(r, ArchilApiError) and r.status == 400:
+                raise r
         matches: List[GrepMatch] = []
         groups: List[GrepGroup] = []
         files_scanned = containers_dispatched = duration_ms = listing_ms = grep_ms = 0

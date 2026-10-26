@@ -12,6 +12,7 @@ import type {
   S3Object,
 } from "./disk.js";
 import type { ExecMount, ExecMountSpec, ExecOptions } from "./archil.js";
+import { ArchilApiError } from "./errors.js";
 import type { FileSystem } from "./filesystem.js";
 import { toSegments } from "./paths.js";
 
@@ -434,6 +435,13 @@ export class Workspace implements FileSystem {
     const results = await Promise.allSettled(
       covered.map(({ entry, rel, globs }) => entry.disk.grep({ ...opts, directory: rel, globs })),
     );
+    // Except a 400: the control plane rejects a bad request before it looks at
+    // the disk, so every disk fails alike and the error belongs to the caller.
+    for (const settled of results) {
+      if (settled.status === "rejected" && settled.reason instanceof ArchilApiError && settled.reason.status === 400) {
+        throw settled.reason;
+      }
+    }
     const matches: GrepMatch[] = [];
     const groups: GrepGroup[] = [];
     let filesScanned = 0;
