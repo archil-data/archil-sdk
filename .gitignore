@@ -2,3 +2,5 @@ dist/
 node_modules/
 .ruff_cache/
 python/uv.lock
+# Bundles built by packages/disk/test/user-agent.test.ts
+.user-agent-*/

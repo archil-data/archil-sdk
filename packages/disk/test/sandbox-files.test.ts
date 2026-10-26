@@ -7,7 +7,7 @@ import {
 } from "../src/sandbox-files.js";
 import type {
   SandboxProcess,
-  SandboxProcessOutputHandler,
+  SandboxProcessOutput,
   SandboxProcessResult,
   SandboxProcessStartOptions,
 } from "../src/sandbox-process.js";
@@ -28,13 +28,14 @@ class FakeProcess {
 
   private readonly _command: string;
   private readonly _content: Uint8Array;
-  private readonly _onOutput?: SandboxProcessOutputHandler;
+  private _output!: ReadableStreamDefaultController<SandboxProcessOutput>;
+  readonly output = new ReadableStream<SandboxProcessOutput>({ start: controller => { this._output = controller; } });
   private readonly _gap: boolean;
   private _cursor = 0;
   private _position = 0;
   private _resolve!: (result: SandboxProcessResult) => void;
   private readonly _result = new Promise<SandboxProcessResult>((resolve) => {
-    this._resolve = resolve;
+    this._resolve = result => { this._output.close(); resolve(result); };
   });
 
   constructor(
@@ -47,7 +48,6 @@ class FakeProcess {
     this.env = options.env ?? {};
     this.collectOutput = options.collectOutput ?? true;
     this._content = content;
-    this._onOutput = options.onOutput;
     this._gap = gap;
   }
 
@@ -58,7 +58,7 @@ class FakeProcess {
     const count = Number(data);
     const chunk = this._content.slice(this._position, this._position + count);
     const size = new TextEncoder().encode(`${chunk.byteLength}\n`);
-    this._onOutput?.({
+    this._output.enqueue({
       stream: "stdout",
       offset: this._gap ? this._cursor + 1 : this._cursor,
       data: size,
@@ -67,7 +67,7 @@ class FakeProcess {
     const midpoint = Math.max(1, Math.floor(chunk.byteLength / 2));
     for (const part of [chunk.slice(0, midpoint), chunk.slice(midpoint)]) {
       if (part.byteLength === 0) continue;
-      this._onOutput?.({ stream: "stdout", offset: this._cursor, data: part });
+      this._output.enqueue({ stream: "stdout", offset: this._cursor, data: part });
       this._cursor += part.byteLength;
     }
     this._position += chunk.byteLength;
