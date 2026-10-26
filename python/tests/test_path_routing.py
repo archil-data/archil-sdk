@@ -358,9 +358,26 @@ def test_workspace_grep_rebases_root_globs_onto_each_mount():
         "cache": ["!l*", "logs"],
         "logs": ["!l*", "logs"],
     }
-    # Globs it can't take apart go to every mount as written.
-    unsplittable = ["{data/src,cache}/**", "[", "", "[z-a]*.py"]
+    # Braces holding a `/` are rebased one alternative at a time.
+    assert globs_sent("", ["{data/src,cache}/**"]) == {"data": ["src/**"], "cache": ["/**"]}
+    assert globs_sent("", ["{**/*.ts,data/src/**}"]) == {
+        "data": ["*.ts", "src/**"],
+        "cache": ["*.ts"],
+        "logs": ["*.ts"],
+    }
+    # Globs it can't take apart go to every mount as written: braces with a `*`
+    # beside them that could read differently once spliced, and a class with a `/`.
+    unsplittable = ["{data/**,cache}/x", "d[/]x/**"]
     assert globs_sent("", unsplittable) == {"data": unsplittable, "cache": unsplittable, "logs": unsplittable}
+    # A glob the control plane rejects sends them all as written, even one under
+    # no mount, so every disk returns the 400.
+    for malformed in ("[", "", "[z-a]*.py", "other/["):
+        globs = ["data/**", malformed]
+        assert globs_sent("", globs) == {"data": globs, "cache": globs, "logs": globs}, malformed
+    # `?` and classes match one character, even one outside the BMP.
+    folder = _FakeDisk("📁")
+    asyncio.run(_ws(**{"📁": folder}).grep(directory="", pattern="x", globs=["?/a.log", "??/b.log", "![😀-😎]*"]))
+    assert folder.calls["grep_globs"] == ["/a.log", "![😀-😎]*"]
     # Below the root, globs are already relative to the disk's directory.
     assert globs_sent("data/src", ["lib/**"]) == {"data": ["lib/**"]}
 

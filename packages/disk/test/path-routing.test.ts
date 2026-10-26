@@ -436,9 +436,27 @@ test("workspace: grep rebases root globs onto each mount", async () => {
     cache: ["!l*", "logs"],
     logs: ["!l*", "logs"],
   });
-  // Globs it can't take apart go to every mount as written.
-  const unsplittable = ["{data/src,cache}/**", "[", "", "[z-a]*.py"];
+  // Braces holding a `/` are rebased one alternative at a time.
+  assert.deepEqual(await globsSent("", ["{data/src,cache}/**"]), { data: ["src/**"], cache: ["/**"] });
+  assert.deepEqual(await globsSent("", ["{**/*.ts,data/src/**}"]), {
+    data: ["*.ts", "src/**"],
+    cache: ["*.ts"],
+    logs: ["*.ts"],
+  });
+  // Globs it can't take apart go to every mount as written: braces with a `*`
+  // beside them that could read differently once spliced, and a class with a `/`.
+  const unsplittable = ["{data/**,cache}/x", "d[/]x/**"];
   assert.deepEqual(await globsSent("", unsplittable), { data: unsplittable, cache: unsplittable, logs: unsplittable });
+  // A glob the control plane rejects sends them all as written, even one under
+  // no mount, so every disk returns the 400.
+  for (const malformed of ["[", "", "[z-a]*.py", "other/["]) {
+    const globs = ["data/**", malformed];
+    assert.deepEqual(await globsSent("", globs), { data: globs, cache: globs, logs: globs }, malformed);
+  }
+  // `?` and classes match one character, even one outside the BMP.
+  sent.clear();
+  await ws({ "📁": mk("📁") }).grep({ pattern: "x", directory: "", globs: ["?/a.log", "??/b.log", "![😀-😎]*"] });
+  assert.deepEqual(Object.fromEntries(sent), { "📁": ["/a.log", "![😀-😎]*"] });
   // Below the root, globs are already relative to the disk's directory.
   assert.deepEqual(await globsSent("data/src", ["lib/**"]), { data: ["lib/**"] });
 });

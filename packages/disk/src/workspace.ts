@@ -54,7 +54,9 @@ function truncateGroups(groups: GrepGroup[], maxResults: number, after: number, 
  * under it. Mirrors the controlplane's ripgrep rules: `!` excludes, a trailing
  * `/` matches only directories, a leading `/` anchors, a glob without a `/`
  * matches a name at any depth, `*` and `?` stay within a path component while a
- * whole `**` component spans any number of them, and the last match wins. */
+ * whole `**` component spans any number of them, and the last match wins.
+ * When the control plane would reject a glob, every glob goes as written, so
+ * each disk returns the 400 a single disk would. */
 function globsForMount(globs: string[], mount: string): string[] | null {
   const out: string[] = [];
   let hasInclude = false;
@@ -67,15 +69,15 @@ function globsForMount(globs: string[], mount: string): string[] | null {
     if (dirOnly) body = body.slice(0, -1);
     const anchored = body.startsWith("/");
     if (anchored) body = body.slice(1);
+    // Rebasing reads past the first component only on a mount it names, so
+    // check the whole body here: componentRegExp reads `/` as any character.
+    if (body === "" || componentRegExp(body) === undefined) return globs;
     hasInclude ||= !exclude;
-    let rebased: string[] | undefined;
-    if (body !== "") {
-      if (!anchored && !body.includes("/")) body = `**/${body}`;
-      rebased = globUnderMount(body, mount);
-    }
+    if (!anchored && !body.includes("/")) body = `**/${body}`;
+    const rebased = globUnderMount(body, mount);
     if (rebased === undefined) {
-      // Send a glob this can't take apart as written, so the control plane
-      // still matches or rejects it.
+      // Send a glob this can't take apart, like one with a `/` in a class, as
+      // written.
       out.push(glob);
       includesUnder ||= !exclude;
       continue;
@@ -92,7 +94,18 @@ function globsForMount(globs: string[], mount: string): string[] | null {
 function globUnderMount(body: string, mount: string): string[] | undefined {
   if (body === "**") return ["**"];
   const split = splitFirstComponent(body);
-  if (split === undefined) return undefined;
+  if (split === undefined) {
+    // A `/` inside braces: rebase the alternatives one at a time.
+    const alternatives = expandFirstBraces(body);
+    if (alternatives === undefined) return undefined;
+    const rebased: string[] = [];
+    for (const alternative of alternatives) {
+      const under = globUnderMount(alternative, mount);
+      if (under === undefined) return undefined;
+      rebased.push(...under);
+    }
+    return rebased;
+  }
   const [first, rest] = split;
   if (rest === undefined) return [];
   if (rest === "") return undefined;
@@ -109,7 +122,7 @@ function globUnderMount(body: string, mount: string): string[] | undefined {
 function globNamesMount(body: string, mount: string): boolean {
   if (body === "**") return true;
   const split = splitFirstComponent(body);
-  if (split === undefined) return false;
+  if (split === undefined) return expandFirstBraces(body)?.some((alternative) => globNamesMount(alternative, mount)) ?? false;
   const [first, rest] = split;
   if (rest === undefined) return componentRegExp(first)?.test(mount) ?? false;
   return first === "**" && globNamesMount(rest, mount);
@@ -150,6 +163,57 @@ function splitFirstComponent(body: string): [string, string | undefined] | undef
     }
   }
   return inBraces ? undefined : [body, undefined];
+}
+
+/** The globs that together match what `body` does, one for each alternative of
+ * its first braces, or undefined when it has none or an alternative could read
+ * differently outside them. */
+function expandFirstBraces(body: string): string[] | undefined {
+  let open = -1;
+  let close = -1;
+  const alternatives: string[] = [];
+  for (let i = 0, start = 0; i < body.length && close < 0; i++) {
+    const c = body[i];
+    if (c === "\\") {
+      i++;
+    } else if (c === "[") {
+      i = globClassEnd(body, i);
+      if (i < 0) return undefined;
+    } else if (c === "{") {
+      open = i;
+      start = i + 1;
+    } else if (open >= 0 && (c === "," || c === "}")) {
+      alternatives.push(body.slice(start, i));
+      start = i + 1;
+      if (c === "}") close = i;
+    }
+  }
+  if (close < 0) return undefined;
+  const prefix = body.slice(0, open);
+  const suffix = body.slice(close + 1);
+  const expanded: string[] = [];
+  for (const alternative of alternatives) {
+    const glob = `${prefix}${alternative}${suffix}`;
+    // The control plane reads a `**` by the characters beside it, which
+    // splicing changes only at the braces' edges. A `**/` opening an
+    // alternative after the start or a `/` reads the same either way, as does
+    // a `/**` closing one at the end. Any other `*` at an edge could join
+    // another or read differently, so the glob is sent as written instead.
+    const left = alternative.startsWith("**/") && (prefix === "" || prefix.endsWith("/"));
+    const right = alternative.endsWith("/**") && suffix === "";
+    if (!left && starsMeet(glob, prefix.length)) return undefined;
+    if (!right && starsMeet(glob, prefix.length + alternative.length)) return undefined;
+    expanded.push(glob);
+  }
+  return expanded;
+}
+
+/** Whether `*`s meet at index `at` of `glob`: on both sides of it, or two or
+ * more on one side, whose reading depends on the character on the other. */
+function starsMeet(glob: string, at: number): boolean {
+  const before = at - glob.slice(0, at).replace(/\*+$/, "").length;
+  const after = glob.length - at - glob.slice(at).replace(/^\*+/, "").length;
+  return (before > 0 && after > 0) || before > 1 || after > 1;
 }
 
 /** Index of the `]` closing the glob class at `start`, or -1. A `]` first in the class is literal. */
@@ -200,7 +264,8 @@ function componentRegExp(glob: string): RegExp | undefined {
   }
   if (inBraces) return undefined;
   try {
-    return new RegExp(`^${source}$`);
+    // `u` reads a character outside the BMP as one, as the control plane does.
+    return new RegExp(`^${source}$`, "u");
   } catch {
     // A class that doesn't compile, like a reversed range, is malformed too.
     return undefined;

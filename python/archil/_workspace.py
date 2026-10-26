@@ -74,7 +74,9 @@ def _globs_for_mount(globs: List[str], mount: str) -> Optional[List[str]]:
     rules: ``!`` excludes, a trailing ``/`` matches only directories, a leading
     ``/`` anchors, a glob without a ``/`` matches a name at any depth, ``*`` and
     ``?`` stay within a path component while a whole ``**`` component spans
-    any number of them, and the last match wins."""
+    any number of them, and the last match wins. When the control plane would
+    reject a glob, every glob goes as written, so each disk returns the 400 a
+    single disk would."""
     out: List[str] = []
     has_include = includes_under = mount_excluded = False
     for glob in globs:
@@ -86,15 +88,17 @@ def _globs_for_mount(globs: List[str], mount: str) -> Optional[List[str]]:
         anchored = body.startswith("/")
         if anchored:
             body = body[1:]
+        # Rebasing reads past the first component only on a mount it names, so
+        # check the whole body here: _component_regex reads `/` as any character.
+        if not body or _component_regex(body) is None:
+            return globs
         has_include = has_include or not exclude
-        rebased: Optional[List[str]] = None
-        if body:
-            if not anchored and "/" not in body:
-                body = f"**/{body}"
-            rebased = _glob_under_mount(body, mount)
+        if not anchored and "/" not in body:
+            body = f"**/{body}"
+        rebased = _glob_under_mount(body, mount)
         if rebased is None:
-            # Send a glob this can't take apart as written, so the control
-            # plane still matches or rejects it.
+            # Send a glob this can't take apart, like one with a `/` in a class,
+            # as written.
             out.append(glob)
             includes_under = includes_under or not exclude
             continue
@@ -112,7 +116,17 @@ def _glob_under_mount(body: str, mount: str) -> Optional[List[str]]:
         return ["**"]
     split = _split_first_component(body)
     if split is None:
-        return None
+        # A `/` inside braces: rebase the alternatives one at a time.
+        alternatives = _expand_first_braces(body)
+        if alternatives is None:
+            return None
+        rebased: List[str] = []
+        for alternative in alternatives:
+            under = _glob_under_mount(alternative, mount)
+            if under is None:
+                return None
+            rebased.extend(under)
+        return rebased
     first, rest = split
     if rest is None:
         return []
@@ -133,7 +147,8 @@ def _glob_names_mount(body: str, mount: str) -> bool:
         return True
     split = _split_first_component(body)
     if split is None:
-        return False
+        alternatives = _expand_first_braces(body)
+        return alternatives is not None and any(_glob_names_mount(a, mount) for a in alternatives)
     first, rest = split
     if rest is None:
         component = _component_regex(first)
@@ -180,6 +195,62 @@ def _split_first_component(body: str) -> Optional[Tuple[str, Optional[str]]]:
             return None if in_braces else (body[:i], body[i + 1 :])
         i += 1
     return None if in_braces else (body, None)
+
+
+def _expand_first_braces(body: str) -> Optional[List[str]]:
+    """The globs that together match what ``body`` does, one for each
+    alternative of its first braces, or None when it has none or an
+    alternative could read differently outside them."""
+    open_ = close = -1
+    start = 0
+    alternatives: List[str] = []
+    i = 0
+    while i < len(body) and close < 0:
+        c = body[i]
+        if c == "\\":
+            i += 1
+        elif c == "[":
+            i = _glob_class_end(body, i)
+            if i < 0:
+                return None
+        elif c == "{":
+            open_ = i
+            start = i + 1
+        elif open_ >= 0 and c in ",}":
+            alternatives.append(body[start:i])
+            start = i + 1
+            if c == "}":
+                close = i
+        i += 1
+    if close < 0:
+        return None
+    prefix, suffix = body[:open_], body[close + 1 :]
+    expanded: List[str] = []
+    for alternative in alternatives:
+        glob = f"{prefix}{alternative}{suffix}"
+        # The control plane reads a `**` by the characters beside it, which
+        # splicing changes only at the braces' edges. A `**/` opening an
+        # alternative after the start or a `/` reads the same either way, as
+        # does a `/**` closing one at the end. Any other `*` at an edge could
+        # join another or read differently, so the glob is sent as written
+        # instead.
+        left = alternative.startswith("**/") and (not prefix or prefix.endswith("/"))
+        right = alternative.endswith("/**") and not suffix
+        if not left and _stars_meet(glob, len(prefix)):
+            return None
+        if not right and _stars_meet(glob, len(prefix) + len(alternative)):
+            return None
+        expanded.append(glob)
+    return expanded
+
+
+def _stars_meet(glob: str, at: int) -> bool:
+    """Whether ``*``s meet at index ``at`` of ``glob``: on both sides of it, or
+    two or more on one side, whose reading depends on the character on the
+    other."""
+    before = at - len(glob[:at].rstrip("*"))
+    after = len(glob) - at - len(glob[at:].lstrip("*"))
+    return (before > 0 and after > 0) or before > 1 or after > 1
 
 
 def _glob_class_end(glob: str, start: int) -> int:
