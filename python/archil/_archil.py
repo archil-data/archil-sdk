@@ -25,9 +25,9 @@ class ExecMountSpec:
     the disk's root, read-write), pass a ``Disk`` or disk-id string directly
     instead.
 
-    ``conditional`` mounts the disk in conditional mode, where mutating
-    operations are sent directly to the server without a delegation checkout.
-    This enables concurrent writes from multiple clients to the same disk."""
+    ``conditional`` mounts the disk in conditional mode, which lets this mount
+    write without a delegation checkout. This enables concurrent writes from
+    multiple clients to the same disk."""
 
     disk: object  # a Disk (wrapped or impl) or a disk-id string
     subdirectory: Optional[str] = None

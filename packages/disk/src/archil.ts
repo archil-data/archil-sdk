@@ -48,9 +48,9 @@ export interface ExecMountSpec {
    */
   readOnly?: boolean;
   /**
-   * When true, mount the disk in conditional mode, where mutating operations
-   * are sent directly to the server without a delegation checkout. This
-   * enables concurrent writes from multiple clients to the same disk.
+   * When true, mount the disk in conditional mode, which lets this mount
+   * write without a delegation checkout. This enables concurrent writes from
+   * multiple clients to the same disk.
    * Defaults to false.
    */
   conditional?: boolean;
