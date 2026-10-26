@@ -198,7 +198,13 @@ function componentRegExp(glob: string): RegExp | undefined {
       source += escapeRegExp(c);
     }
   }
-  return inBraces ? undefined : new RegExp(`^${source}$`);
+  if (inBraces) return undefined;
+  try {
+    return new RegExp(`^${source}$`);
+  } catch {
+    // A class that doesn't compile, like a reversed range, is malformed too.
+    return undefined;
+  }
 }
 
 function escapeRegExp(value: string): string {

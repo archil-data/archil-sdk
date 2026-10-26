@@ -359,7 +359,7 @@ def test_workspace_grep_rebases_root_globs_onto_each_mount():
         "logs": ["!l*", "logs"],
     }
     # Globs it can't take apart go to every mount as written.
-    unsplittable = ["{data/src,cache}/**", "[", ""]
+    unsplittable = ["{data/src,cache}/**", "[", "", "[z-a]*.py"]
     assert globs_sent("", unsplittable) == {"data": unsplittable, "cache": unsplittable, "logs": unsplittable}
     # Below the root, globs are already relative to the disk's directory.
     assert globs_sent("data/src", ["lib/**"]) == {"data": ["lib/**"]}

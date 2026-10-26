@@ -241,7 +241,13 @@ def _component_regex(glob: str) -> Optional[re.Pattern[str]]:
         else:
             source.append(re.escape(c))
         i += 1
-    return None if in_braces else re.compile("".join(source))
+    if in_braces:
+        return None
+    try:
+        return re.compile("".join(source))
+    except re.error:
+        # A class that doesn't compile, like a reversed range, is malformed too.
+        return None
 
 
 @dataclass

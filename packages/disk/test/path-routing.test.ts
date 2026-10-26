@@ -437,7 +437,7 @@ test("workspace: grep rebases root globs onto each mount", async () => {
     logs: ["!l*", "logs"],
   });
   // Globs it can't take apart go to every mount as written.
-  const unsplittable = ["{data/src,cache}/**", "[", ""];
+  const unsplittable = ["{data/src,cache}/**", "[", "", "[z-a]*.py"];
   assert.deepEqual(await globsSent("", unsplittable), { data: unsplittable, cache: unsplittable, logs: unsplittable });
   // Below the root, globs are already relative to the disk's directory.
   assert.deepEqual(await globsSent("data/src", ["lib/**"]), { data: ["lib/**"] });
