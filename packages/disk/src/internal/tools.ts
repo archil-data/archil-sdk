@@ -301,10 +301,10 @@ const SPECS = [
   defineSpec({
     name: "grep",
     description:
-      "Search file contents for an extended regular expression and return " +
-      "matching lines as path:line: text. Searches recursively by default.",
+      "Search file contents for a regular expression and return matching " +
+      "lines as path:line: text. Searches recursively by default.",
     schema: z.object({
-      pattern: z.string().describe("Extended regex (grep -E)."),
+      pattern: z.string().describe("Regex in ripgrep (Rust) syntax, without lookaround or backreferences."),
       path: z.string().optional().describe("Directory to search (optional)."),
       recursive: z.boolean().optional().describe("Search subdirectories (default true)."),
       maxResults: z.number().int().optional().describe("Cap on matches (default 200)."),

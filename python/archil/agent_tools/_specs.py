@@ -314,12 +314,15 @@ SPECS: list[ToolSpec] = [
     ToolSpec(
         name="grep",
         description=(
-            "Search file contents for an extended regular expression and return "
-            "matching lines as path:line: text. Searches recursively by default."
+            "Search file contents for a regular expression and return matching "
+            "lines as path:line: text. Searches recursively by default."
         ),
         parameters=_obj(
             {
-                "pattern": {"type": "string", "description": "Extended regex (grep -E)."},
+                "pattern": {
+                    "type": "string",
+                    "description": "Regex in ripgrep (Rust) syntax, without lookaround or backreferences.",
+                },
                 "path": {"type": "string", "description": "Directory to search (optional)."},
                 "recursive": _RECURSIVE,
                 "max_results": _MAX_RESULTS,
