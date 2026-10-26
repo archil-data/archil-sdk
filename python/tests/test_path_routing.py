@@ -266,6 +266,57 @@ def test_workspace_grep_forwards_options_and_merges_groups_within_cap():
     ]
 
 
+def test_workspace_grep_trims_merged_groups_at_the_cap():
+    a = _lines((1, False), (2, True), (3, False), (4, True), (5, False))
+    data = _GroupedDisk([GrepMatch("a.txt", 2, "x"), GrepMatch("a.txt", 4, "x")], [GrepGroup("a.txt", a)])
+    cache = _GroupedDisk(
+        [GrepMatch("b.txt", 2, "x"), GrepMatch("b.txt", 3, "x"), GrepMatch("b.txt", 9, "x")],
+        [
+            GrepGroup("b.txt", _lines((1, False), (2, True), (3, True), (4, False), (5, False))),
+            GrepGroup("b.txt", _lines((8, False), (9, True), (10, False))),
+        ],
+    )
+    ws = _ws(data=data, cache=cache)
+
+    def trimmed(context_before: int, context_after: int):
+        return asyncio.run(
+            ws.grep(
+                directory="", pattern="x", max_results=3,
+                context_before=context_before, context_after=context_after,
+            )
+        ).groups
+
+    demoted = GrepGroupLine(3, "x", False)
+    # Without multiline, b.txt:3 is a match of its own, so the cap lands on
+    # b.txt:2. b.txt:3 falls in its after-context and comes back as context, the
+    # group ends after context_after lines, and b.txt's later group is dropped.
+    assert trimmed(1, 2) == [
+        GrepGroup("data/a.txt", a),
+        GrepGroup("cache/b.txt", [*_lines((1, False), (2, True)), demoted, *_lines((4, False))]),
+    ]
+    # Without after-context, the group ends at the cap's match.
+    assert trimmed(1, 0) == [
+        GrepGroup("data/a.txt", a),
+        GrepGroup("cache/b.txt", _lines((1, False), (2, True))),
+    ]
+    # After-context longer than the group keeps the rest of it, and no more.
+    assert trimmed(1, 10) == [
+        GrepGroup("data/a.txt", a),
+        GrepGroup("cache/b.txt", [*_lines((1, False), (2, True)), demoted, *_lines((4, False), (5, False))]),
+    ]
+
+    # With multiline, a cap landing on a run that ends its group keeps the
+    # whole run, even without after-context.
+    run = _ws(
+        data=_GroupedDisk(
+            [GrepMatch("a.txt", 1, "x\nx", end_line=2), GrepMatch("a.txt", 5, "x")],
+            [GrepGroup("a.txt", _lines((1, True), (2, True))), GrepGroup("a.txt", _lines((4, False), (5, True)))],
+        )
+    )
+    r = asyncio.run(run.grep(directory="", pattern="x", max_results=1, multiline=True, context_before=1))
+    assert r.groups == [GrepGroup("data/a.txt", _lines((1, True), (2, True)))]
+
+
 def test_workspace_grep_rebases_root_globs_onto_each_mount():
     disks = {name: _FakeDisk(name) for name in ("data", "cache", "logs")}
     ws = _ws(**disks)

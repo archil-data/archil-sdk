@@ -311,6 +311,75 @@ test("workspace: grep forwards options and merges context groups within the cap"
   ]);
 });
 
+test("workspace: grep trims merged context groups at the cap", async () => {
+  const hit = (line: number) => ({ line, text: "x", match: true });
+  const ctx = (line: number) => ({ line, text: "-", match: false });
+  const mk = (name: string, matches: object[], groups: object[]) => ({
+    name,
+    grep: async () => ({
+      matches,
+      groups,
+      stoppedReason: "completed",
+      filesScanned: 1,
+      containersDispatched: 0,
+      computeSecondsUsed: 0,
+      durationMs: 0,
+      listingMs: 0,
+      grepMs: 0,
+    }),
+  });
+  const a = [ctx(1), hit(2), ctx(3), hit(4), ctx(5)];
+  const w = ws({
+    data: mk("data", [{ file: "a.txt", line: 2, text: "x" }, { file: "a.txt", line: 4, text: "x" }], [
+      { file: "a.txt", lines: a },
+    ]),
+    cache: mk(
+      "cache",
+      [
+        { file: "b.txt", line: 2, text: "x" },
+        { file: "b.txt", line: 3, text: "x" },
+        { file: "b.txt", line: 9, text: "x" },
+      ],
+      [
+        { file: "b.txt", lines: [ctx(1), hit(2), hit(3), ctx(4), ctx(5)] },
+        { file: "b.txt", lines: [ctx(8), hit(9), ctx(10)] },
+      ],
+    ),
+  });
+  const trimmed = async (contextBefore: number, contextAfter: number) =>
+    (await w.grep({ pattern: "x", directory: "", maxResults: 3, contextBefore, contextAfter })).groups;
+  const demoted = { ...hit(3), match: false };
+
+  // Without multiline, b.txt:3 is a match of its own, so the cap lands on
+  // b.txt:2. b.txt:3 falls in its after-context and comes back as context, the
+  // group ends after contextAfter lines, and b.txt's later group is dropped.
+  assert.deepEqual(await trimmed(1, 2), [
+    { file: "data/a.txt", lines: a },
+    { file: "cache/b.txt", lines: [ctx(1), hit(2), demoted, ctx(4)] },
+  ]);
+  // Without after-context, the group ends at the cap's match.
+  assert.deepEqual(await trimmed(1, 0), [
+    { file: "data/a.txt", lines: a },
+    { file: "cache/b.txt", lines: [ctx(1), hit(2)] },
+  ]);
+  // After-context longer than the group keeps the rest of it, and no more.
+  assert.deepEqual(await trimmed(1, 10), [
+    { file: "data/a.txt", lines: a },
+    { file: "cache/b.txt", lines: [ctx(1), hit(2), demoted, ctx(4), ctx(5)] },
+  ]);
+
+  // With multiline, a cap landing on a run that ends its group keeps the whole
+  // run, even without after-context.
+  const run = ws({
+    data: mk("data", [{ file: "a.txt", line: 1, endLine: 2, text: "x\nx" }, { file: "a.txt", line: 5, text: "x" }], [
+      { file: "a.txt", lines: [hit(1), hit(2)] },
+      { file: "a.txt", lines: [ctx(4), hit(5)] },
+    ]),
+  });
+  const r = await run.grep({ pattern: "x", directory: "", maxResults: 1, multiline: true, contextBefore: 1 });
+  assert.deepEqual(r.groups, [{ file: "data/a.txt", lines: [hit(1), hit(2)] }]);
+});
+
 test("workspace: grep omits groups without context", async () => {
   const w = ws({ data: fakeDisk("data") });
   const r = await w.grep({ pattern: "x", directory: "" });
