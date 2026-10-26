@@ -1,14 +1,12 @@
+import { ProcessOutputBuffer } from "./process-output-buffer.js";
+import { ProcessConnection, type ProcessEndpoint } from "./process-connection.js";
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty, unwrapPage } from "./client.js";
 import {
   SandboxProcess,
   SandboxProcesses,
-  CONNECT_SUBPROTOCOL,
-  TOKEN_SUBPROTOCOL_PREFIX,
-  openProcessSocket,
   type ProcessControlRequest,
-  type ProcessEndpoint,
   type SandboxProcessConnectOptions,
   type SandboxProcessResult,
   type SandboxProcessStartOptions,
@@ -280,12 +278,15 @@ export class Sandbox {
 
   /** @internal */
   private readonly _client: ApiClient;
+  private readonly _processConnection: ProcessConnection;
+  private readonly _processOutput = new ProcessOutputBuffer();
 
   /** @internal */
   constructor(data: SandboxWire, client: ApiClient) {
     this._client = client;
     this._apply(data);
-    this.processes = new SandboxProcesses(this);
+    this._processConnection = new ProcessConnection(() => this._connectionEndpoint());
+    this.processes = new SandboxProcesses(this, () => this._processConnection.disconnect());
     this.files = new SandboxFiles(this);
   }
 
@@ -345,9 +346,9 @@ export class Sandbox {
     const process = new SandboxProcess(
       "",
       0,
-      options.onOutput,
       options.collectOutput ?? true,
-      () => this._connectionEndpoint(),
+      this._processOutput,
+      () => this._processConnection.open(),
       (request) => this._control(request),
     );
     const terminal =
@@ -365,6 +366,7 @@ export class Sandbox {
       env: options.env ?? {},
       timeout_seconds: options.timeoutSeconds,
     });
+    if (options.onOutput) process._deliverTo(options.onOutput);
     return process;
   }
 
@@ -377,9 +379,9 @@ export class Sandbox {
     const process = new SandboxProcess(
       processId,
       offset,
-      options.onOutput,
       options.collectOutput ?? true,
-      () => this._connectionEndpoint(),
+      this._processOutput,
+      () => this._processConnection.open(),
       (request) => this._control(request),
     );
     await process._connect({
@@ -388,6 +390,7 @@ export class Sandbox {
       offset,
       ...(options.shared ? { shared: true as const } : {}),
     });
+    if (options.onOutput) process._deliverTo(options.onOutput);
     return process;
   }
 
@@ -404,21 +407,18 @@ export class Sandbox {
     // Prefer the token in a subprotocol, which keeps it out of request-line
     // logs; older control planes only return `url`.
     if (data.endpoint && data.token) {
-      return {
-        url: data.endpoint,
-        protocols: [CONNECT_SUBPROTOCOL, `${TOKEN_SUBPROTOCOL_PREFIX}${data.token}`],
-      };
+      return { url: data.endpoint, token: data.token };
     }
     return { url: data.url };
   }
 
   private async _control(request: ProcessControlRequest): Promise<void> {
-    const socket = await openProcessSocket(() => this._connectionEndpoint());
+    const socket = await this._processConnection.open();
     const expected = request.type === "kill" ? "killed" : "resized";
     await new Promise<void>((resolve, reject) => {
       socket.addEventListener("message", (message) => {
         try {
-          const event = JSON.parse(message.data as string) as
+          const event = message.data as
             | { type: "killed" | "resized" }
             | { type: "error"; error: string; message: string };
           if (event.type === "error") {
@@ -444,7 +444,7 @@ export class Sandbox {
           ),
         ),
       );
-      socket.send(JSON.stringify(request));
+      socket.sendRequest(request);
     });
   }
 
