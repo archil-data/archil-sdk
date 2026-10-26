@@ -47,8 +47,9 @@ class _FakeDisk:
             key_count=1,
         )
 
-    async def grep(self, *, directory, **_):
+    async def grep(self, *, directory, globs=None, **_):
         self.calls["grep_dir"] = directory
+        self.calls["grep_globs"] = globs
         return GrepResult(
             matches=[], stopped_reason="completed", files_scanned=0,
             containers_dispatched=0, compute_seconds_used=0.0,
@@ -263,6 +264,53 @@ def test_workspace_grep_forwards_options_and_merges_groups_within_cap():
         GrepGroup("data/a.txt", _lines((1, True), (2, False), (3, True), (4, True))),
         GrepGroup("cache/b.txt", [*_lines((5, True), (6, False)), GrepGroupLine(7, "x", False)]),
     ]
+
+
+def test_workspace_grep_rebases_root_globs_onto_each_mount():
+    disks = {name: _FakeDisk(name) for name in ("data", "cache", "logs")}
+    ws = _ws(**disks)
+
+    def globs_sent(directory: str, globs: list[str]) -> dict:
+        for d in disks.values():
+            d.calls.clear()
+        asyncio.run(ws.grep(directory=directory, pattern="x", globs=globs))
+        return {name: d.calls["grep_globs"] for name, d in disks.items() if "grep_globs" in d.calls}
+
+    # A path glob reaches only its mount, as a path under it, while a basename
+    # glob reaches every mount as written.
+    assert globs_sent("", ["data/src/**", "*.ts", "!cache/tmp/**"]) == {
+        "data": ["src/**", "*.ts"],
+        "cache": ["*.ts", "!tmp/**"],
+        "logs": ["*.ts"],
+    }
+    # Left without a `/`, these would match at any depth, so they're anchored.
+    assert globs_sent("", ["/data/*.csv", "data/*.json"]) == {"data": ["/*.csv", "/*.json"]}
+    # The first component may itself be a glob.
+    assert globs_sent("", ["*/src/**"]) == {"data": ["src/**"], "cache": ["src/**"], "logs": ["src/**"]}
+    assert globs_sent("", ["{data,logs}/src/**"]) == {"data": ["src/**"], "logs": ["src/**"]}
+    assert globs_sent("", ["[cd]a*/src/**"]) == {"data": ["src/**"], "cache": ["src/**"]}
+    # A leading ** can also start at the mount's own name.
+    assert globs_sent("", ["**/logs/*.txt"]) == {
+        "data": ["**/logs/*.txt"],
+        "cache": ["**/logs/*.txt"],
+        "logs": ["**/logs/*.txt", "/*.txt"],
+    }
+    # A mount no include glob can match under isn't searched, nor is one whose
+    # directory an exclude glob matches last.
+    assert globs_sent("", ["data/**"]) == {"data": ["/**"]}
+    for glob in ("!logs", "!logs/", "!/logs"):
+        assert "logs" not in globs_sent("", [glob]), glob
+    assert globs_sent("", ["!**"]) == {}
+    assert globs_sent("", ["!l*", "logs"]) == {
+        "data": ["!l*", "logs"],
+        "cache": ["!l*", "logs"],
+        "logs": ["!l*", "logs"],
+    }
+    # Globs it can't take apart go to every mount as written.
+    unsplittable = ["{data/src,cache}/**", "[", ""]
+    assert globs_sent("", unsplittable) == {"data": unsplittable, "cache": unsplittable, "logs": unsplittable}
+    # Below the root, globs are already relative to the disk's directory.
+    assert globs_sent("data/src", ["lib/**"]) == {"data": ["lib/**"]}
 
 
 # --- read-only -------------------------------------------------------------

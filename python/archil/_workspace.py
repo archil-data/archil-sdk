@@ -17,8 +17,9 @@ await them directly on the shared loop.
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass, replace
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from ._http import BodyType
 from ._models import (
@@ -60,6 +61,186 @@ def _truncate_groups(
                 ]
                 return [*groups[:i], replace(g, lines=kept)]
     return groups
+
+
+def _globs_for_mount(globs: List[str], mount: str) -> Optional[List[str]]:
+    """Rebase grep globs written against the workspace root onto one mount. At
+    the root a path is ``<mount>/<path>``, but the mount's disk matches globs
+    against ``<path>`` alone. Returns the globs that make the disk search
+    exactly the files ``globs`` select under ``<mount>/``, or None when they
+    select none there: the last glob matching the mount's directory excludes
+    it, or no include can match under it. Mirrors the controlplane's ripgrep
+    rules: ``!`` excludes, a trailing ``/`` matches only directories, a leading
+    ``/`` anchors, a glob without a ``/`` matches a name at any depth, ``*`` and
+    ``?`` stay within a path component while a whole ``**`` component spans
+    any number of them, and the last match wins."""
+    out: List[str] = []
+    has_include = includes_under = mount_excluded = False
+    for glob in globs:
+        exclude = glob.startswith("!")
+        body = glob[1:] if exclude else glob
+        dir_only = body.endswith("/")
+        if dir_only:
+            body = body[:-1]
+        anchored = body.startswith("/")
+        if anchored:
+            body = body[1:]
+        has_include = has_include or not exclude
+        rebased: Optional[List[str]] = None
+        if body:
+            if not anchored and "/" not in body:
+                body = f"**/{body}"
+            rebased = _glob_under_mount(body, mount)
+        if rebased is None:
+            # Send a glob this can't take apart as written, so the control
+            # plane still matches or rejects it.
+            out.append(glob)
+            includes_under = includes_under or not exclude
+            continue
+        if _glob_names_mount(body, mount):
+            mount_excluded = exclude
+        out.extend(_disk_glob(exclude, rest, dir_only) for rest in rebased)
+        includes_under = includes_under or (not exclude and not dir_only and bool(rebased))
+    return None if mount_excluded or (has_include and not includes_under) else out
+
+
+def _glob_under_mount(body: str, mount: str) -> Optional[List[str]]:
+    """The glob bodies that match ``<path>`` exactly when ``body`` matches
+    ``<mount>/<path>``, or None when ``body`` can't be split into components."""
+    if body == "**":
+        return ["**"]
+    split = _split_first_component(body)
+    if split is None:
+        return None
+    first, rest = split
+    if rest is None:
+        return []
+    if rest == "":
+        return None
+    if first == "**":
+        deeper = _glob_under_mount(rest, mount)
+        return None if deeper is None else [body, *deeper]
+    component = _component_regex(first)
+    if component is None:
+        return None
+    return [rest] if component.fullmatch(mount) else []
+
+
+def _glob_names_mount(body: str, mount: str) -> bool:
+    """Whether glob ``body`` matches the mount's own directory, ``<mount>``."""
+    if body == "**":
+        return True
+    split = _split_first_component(body)
+    if split is None:
+        return False
+    first, rest = split
+    if rest is None:
+        component = _component_regex(first)
+        return component is not None and component.fullmatch(mount) is not None
+    return first == "**" and _glob_names_mount(rest, mount)
+
+
+def _disk_glob(exclude: bool, body: str, dir_only: bool) -> str:
+    """Write a rebased glob body as the glob the control plane reads back as it."""
+    # The control plane reads a glob without a `/` as `**/` and the glob, and
+    # any other glob as matching the whole path, so only a body without a `/`
+    # needs anchoring. A basename glob comes back as the caller wrote it.
+    glob = body
+    if body.startswith("**/") and "/" not in body[3:]:
+        glob = body[3:]
+    elif "/" not in body:
+        glob = f"/{body}"
+    return f"{'!' if exclude else ''}{glob}{'/' if dir_only else ''}"
+
+
+def _split_first_component(body: str) -> Optional[Tuple[str, Optional[str]]]:
+    """Split off a glob's first path component, with the rest None when there
+    is no ``/``. None when a ``/`` falls inside braces or a character class, or
+    either is unclosed."""
+    in_braces = False
+    i = 0
+    while i < len(body):
+        c = body[i]
+        if c == "\\":
+            # An escaped `/` still matches the separator.
+            if body[i + 1 : i + 2] == "/":
+                return None if in_braces else (body[:i], body[i + 2 :])
+            i += 1
+        elif c == "[":
+            end = _glob_class_end(body, i)
+            if end < 0 or "/" in body[i:end]:
+                return None
+            i = end
+        elif c == "{":
+            in_braces = True
+        elif c == "}":
+            in_braces = False
+        elif c == "/":
+            return None if in_braces else (body[:i], body[i + 1 :])
+        i += 1
+    return None if in_braces else (body, None)
+
+
+def _glob_class_end(glob: str, start: int) -> int:
+    """Index of the ``]`` closing the glob class at ``start``, or -1. A ``]``
+    first in the class is literal."""
+    i = start + 1
+    if glob[i : i + 1] in ("!", "^"):
+        i += 1
+    first = True
+    while i < len(glob):
+        if glob[i] == "]" and not first:
+            return i
+        first = False
+        i += 1
+    return -1
+
+
+def _component_regex(glob: str) -> Optional[re.Pattern[str]]:
+    """One path component's glob as a regexp to fullmatch, or None if
+    malformed."""
+    source: List[str] = []
+    in_braces = False
+    i = 0
+    while i < len(glob):
+        c = glob[i]
+        if c == "*":
+            # Within a component, `**` is no different from `*`.
+            if glob[i + 1 : i + 2] == "*":
+                i += 1
+            source.append("[^/]*")
+        elif c == "?":
+            source.append("[^/]")
+        elif c == "[":
+            end = _glob_class_end(glob, i)
+            if end < 0:
+                return None
+            members = glob[i + 1 : end]
+            negated = members[:1] in ("!", "^")
+            if negated:
+                members = members[1:]
+            members = re.sub(r"[\\\]\[^&~|]", r"\\\g<0>", members)
+            source.append(f"[{'^' if negated else ''}{members}]")
+            i = end
+        elif c == "{":
+            if in_braces:
+                return None
+            in_braces = True
+            source.append("(?:")
+        elif c == "}" and in_braces:
+            in_braces = False
+            source.append(")")
+        elif c == "," and in_braces:
+            source.append("|")
+        elif c == "\\":
+            if i + 1 == len(glob):
+                return None
+            i += 1
+            source.append(re.escape(glob[i]))
+        else:
+            source.append(re.escape(c))
+        i += 1
+    return None if in_braces else re.compile("".join(source))
 
 
 @dataclass
@@ -278,7 +459,18 @@ class _Workspace:
         context_before: int = 0,
         context_after: int = 0,
     ) -> GrepResult:
-        covered = self._covered(directory)
+        # At the root, glob paths start with a mount's name, which its disk's
+        # paths lack, so rebase the globs per mount and skip the mounts they
+        # rule out.
+        at_root = not to_segments(directory)
+        covered = []
+        for name, entry, rel in self._covered(directory):
+            mount_globs = globs
+            if at_root and globs:
+                mount_globs = _globs_for_mount(globs, name)
+                if mount_globs is None:
+                    continue
+            covered.append((name, entry, rel, mount_globs))
         # Fan out resiliently: a disk that errors contributes a "list_failed"
         # reason (surfaced as a partial-results caveat) instead of failing the grep.
         results = await asyncio.gather(
@@ -292,13 +484,13 @@ class _Workspace:
                     max_results=max_results,
                     ignore_case=ignore_case,
                     multiline=multiline,
-                    globs=globs,
+                    globs=mount_globs,
                     types=types,
                     types_not=types_not,
                     context_before=context_before,
                     context_after=context_after,
                 )
-                for _, entry, rel in covered
+                for _, entry, rel, mount_globs in covered
             ),
             return_exceptions=True,
         )
@@ -307,7 +499,7 @@ class _Workspace:
         files_scanned = containers_dispatched = duration_ms = listing_ms = grep_ms = 0
         compute_seconds_used = 0.0
         reasons: set[str] = set()
-        for (name, entry, _), r in zip(covered, results):
+        for (name, entry, _, _), r in zip(covered, results):
             if isinstance(r, BaseException):
                 reasons.add("list_failed")
                 continue

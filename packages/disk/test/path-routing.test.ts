@@ -317,6 +317,60 @@ test("workspace: grep omits groups without context", async () => {
   assert.equal(r.groups, undefined);
 });
 
+test("workspace: grep rebases root globs onto each mount", async () => {
+  const sent = new Map<string, string[] | undefined>();
+  const mk = (name: string) => ({
+    name,
+    grep: async (opts: { globs?: string[] }) => {
+      sent.set(name, opts.globs);
+      return { matches: [], stoppedReason: "completed", filesScanned: 0 };
+    },
+  });
+  const w = ws({ data: mk("data"), cache: mk("cache"), logs: mk("logs") });
+  const globsSent = async (directory: string, globs: string[]) => {
+    sent.clear();
+    await w.grep({ pattern: "x", directory, globs });
+    return Object.fromEntries(sent);
+  };
+
+  // A path glob reaches only its mount, as a path under it, while a basename
+  // glob reaches every mount as written.
+  assert.deepEqual(await globsSent("", ["data/src/**", "*.ts", "!cache/tmp/**"]), {
+    data: ["src/**", "*.ts"],
+    cache: ["*.ts", "!tmp/**"],
+    logs: ["*.ts"],
+  });
+  // Left without a `/`, these would match at any depth, so they're anchored.
+  assert.deepEqual(await globsSent("", ["/data/*.csv", "data/*.json"]), { data: ["/*.csv", "/*.json"] });
+  // The first component may itself be a glob.
+  assert.deepEqual(await globsSent("", ["*/src/**"]), { data: ["src/**"], cache: ["src/**"], logs: ["src/**"] });
+  assert.deepEqual(await globsSent("", ["{data,logs}/src/**"]), { data: ["src/**"], logs: ["src/**"] });
+  assert.deepEqual(await globsSent("", ["[cd]a*/src/**"]), { data: ["src/**"], cache: ["src/**"] });
+  // A leading ** can also start at the mount's own name.
+  assert.deepEqual(await globsSent("", ["**/logs/*.txt"]), {
+    data: ["**/logs/*.txt"],
+    cache: ["**/logs/*.txt"],
+    logs: ["**/logs/*.txt", "/*.txt"],
+  });
+  // A mount no include glob can match under isn't searched, nor is one whose
+  // directory an exclude glob matches last.
+  assert.deepEqual(await globsSent("", ["data/**"]), { data: ["/**"] });
+  for (const glob of ["!logs", "!logs/", "!/logs"]) {
+    assert.equal("logs" in (await globsSent("", [glob])), false, glob);
+  }
+  assert.deepEqual(await globsSent("", ["!**"]), {});
+  assert.deepEqual(await globsSent("", ["!l*", "logs"]), {
+    data: ["!l*", "logs"],
+    cache: ["!l*", "logs"],
+    logs: ["!l*", "logs"],
+  });
+  // Globs it can't take apart go to every mount as written.
+  const unsplittable = ["{data/src,cache}/**", "[", ""];
+  assert.deepEqual(await globsSent("", unsplittable), { data: unsplittable, cache: unsplittable, logs: unsplittable });
+  // Below the root, globs are already relative to the disk's directory.
+  assert.deepEqual(await globsSent("data/src", ["lib/**"]), { data: ["lib/**"] });
+});
+
 test("workspace: read-only mounts refuse writes and deletes", async () => {
   const data = fakeDisk("data");
   const w = ws({ data: { disk: data, readOnly: true } });

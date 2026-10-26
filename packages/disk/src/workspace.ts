@@ -45,6 +45,165 @@ function truncateGroups(groups: GrepGroup[], maxResults: number, after: number, 
   return groups;
 }
 
+/** Rebase grep globs written against the workspace root onto one mount. At the
+ * root a path is `<mount>/<path>`, but the mount's disk matches globs against
+ * `<path>` alone. Returns the globs that make the disk search exactly the files
+ * `globs` select under `<mount>/`, or null when they select none there: the
+ * last glob matching the mount's directory excludes it, or no include can match
+ * under it. Mirrors the controlplane's ripgrep rules: `!` excludes, a trailing
+ * `/` matches only directories, a leading `/` anchors, a glob without a `/`
+ * matches a name at any depth, `*` and `?` stay within a path component while a
+ * whole `**` component spans any number of them, and the last match wins. */
+function globsForMount(globs: string[], mount: string): string[] | null {
+  const out: string[] = [];
+  let hasInclude = false;
+  let includesUnder = false;
+  let mountExcluded = false;
+  for (const glob of globs) {
+    const exclude = glob.startsWith("!");
+    let body = exclude ? glob.slice(1) : glob;
+    const dirOnly = body.endsWith("/");
+    if (dirOnly) body = body.slice(0, -1);
+    const anchored = body.startsWith("/");
+    if (anchored) body = body.slice(1);
+    hasInclude ||= !exclude;
+    let rebased: string[] | undefined;
+    if (body !== "") {
+      if (!anchored && !body.includes("/")) body = `**/${body}`;
+      rebased = globUnderMount(body, mount);
+    }
+    if (rebased === undefined) {
+      // Send a glob this can't take apart as written, so the control plane
+      // still matches or rejects it.
+      out.push(glob);
+      includesUnder ||= !exclude;
+      continue;
+    }
+    if (globNamesMount(body, mount)) mountExcluded = exclude;
+    for (const rest of rebased) out.push(diskGlob(exclude, rest, dirOnly));
+    includesUnder ||= !exclude && !dirOnly && rebased.length > 0;
+  }
+  return mountExcluded || (hasInclude && !includesUnder) ? null : out;
+}
+
+/** The glob bodies that match `<path>` exactly when `body` matches
+ * `<mount>/<path>`, or undefined when `body` can't be split into components. */
+function globUnderMount(body: string, mount: string): string[] | undefined {
+  if (body === "**") return ["**"];
+  const split = splitFirstComponent(body);
+  if (split === undefined) return undefined;
+  const [first, rest] = split;
+  if (rest === undefined) return [];
+  if (rest === "") return undefined;
+  if (first === "**") {
+    const deeper = globUnderMount(rest, mount);
+    return deeper && [body, ...deeper];
+  }
+  const component = componentRegExp(first);
+  if (component === undefined) return undefined;
+  return component.test(mount) ? [rest] : [];
+}
+
+/** Whether glob `body` matches the mount's own directory, `<mount>`. */
+function globNamesMount(body: string, mount: string): boolean {
+  if (body === "**") return true;
+  const split = splitFirstComponent(body);
+  if (split === undefined) return false;
+  const [first, rest] = split;
+  if (rest === undefined) return componentRegExp(first)?.test(mount) ?? false;
+  return first === "**" && globNamesMount(rest, mount);
+}
+
+/** Write a rebased glob body as the glob the control plane reads back as it. */
+function diskGlob(exclude: boolean, body: string, dirOnly: boolean): string {
+  // The control plane reads a glob without a `/` as `**/` and the glob, and
+  // any other glob as matching the whole path, so only a body without a `/`
+  // needs anchoring. A basename glob comes back as the caller wrote it.
+  let glob = body;
+  if (body.startsWith("**/") && !body.slice(3).includes("/")) glob = body.slice(3);
+  else if (!body.includes("/")) glob = `/${body}`;
+  return `${exclude ? "!" : ""}${glob}${dirOnly ? "/" : ""}`;
+}
+
+/** Split off a glob's first path component, with `rest` undefined when there
+ * is no `/`. Undefined when a `/` falls inside braces or a character class, or
+ * either is unclosed. */
+function splitFirstComponent(body: string): [string, string | undefined] | undefined {
+  let inBraces = false;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === "\\") {
+      // An escaped `/` still matches the separator.
+      if (body[i + 1] === "/") return inBraces ? undefined : [body.slice(0, i), body.slice(i + 2)];
+      i++;
+    } else if (c === "[") {
+      const end = globClassEnd(body, i);
+      if (end < 0 || body.slice(i, end).includes("/")) return undefined;
+      i = end;
+    } else if (c === "{") {
+      inBraces = true;
+    } else if (c === "}") {
+      inBraces = false;
+    } else if (c === "/") {
+      return inBraces ? undefined : [body.slice(0, i), body.slice(i + 1)];
+    }
+  }
+  return inBraces ? undefined : [body, undefined];
+}
+
+/** Index of the `]` closing the glob class at `start`, or -1. A `]` first in the class is literal. */
+function globClassEnd(glob: string, start: number): number {
+  let i = start + 1;
+  if (glob[i] === "!" || glob[i] === "^") i++;
+  for (let first = true; i < glob.length; i++, first = false) {
+    if (glob[i] === "]" && !first) return i;
+  }
+  return -1;
+}
+
+/** One path component's glob as an anchored regexp, or undefined if malformed. */
+function componentRegExp(glob: string): RegExp | undefined {
+  let source = "";
+  let inBraces = false;
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      // Within a component, `**` is no different from `*`.
+      if (glob[i + 1] === "*") i++;
+      source += "[^/]*";
+    } else if (c === "?") {
+      source += "[^/]";
+    } else if (c === "[") {
+      const end = globClassEnd(glob, i);
+      if (end < 0) return undefined;
+      let members = glob.slice(i + 1, end);
+      const negated = members[0] === "!" || members[0] === "^";
+      if (negated) members = members.slice(1);
+      source += `[${negated ? "^" : ""}${members.replace(/[\\\]\[^]/g, "\\$&")}]`;
+      i = end;
+    } else if (c === "{") {
+      if (inBraces) return undefined;
+      inBraces = true;
+      source += "(?:";
+    } else if (c === "}" && inBraces) {
+      inBraces = false;
+      source += ")";
+    } else if (c === "," && inBraces) {
+      source += "|";
+    } else if (c === "\\") {
+      if (i + 1 === glob.length) return undefined;
+      source += escapeRegExp(glob[++i]);
+    } else {
+      source += escapeRegExp(c);
+    }
+  }
+  return inBraces ? undefined : new RegExp(`^${source}$`);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+}
+
 interface MountEntry {
   disk: Disk;
   readOnly: boolean;
@@ -261,11 +420,19 @@ export class Workspace implements FileSystem {
   }
 
   async grep(opts: GrepOptions): Promise<GrepResult> {
-    const covered = this.covered(opts.directory ?? "");
+    const directory = opts.directory ?? "";
+    const atRoot = toSegments(directory).length === 0;
+    // At the root, glob paths start with a mount's name, which its disk's paths
+    // lack, so rebase the globs per mount and skip the mounts they rule out.
+    const covered = this.covered(directory).flatMap((c) => {
+      if (!atRoot || !opts.globs?.length) return [{ ...c, globs: opts.globs }];
+      const globs = globsForMount(opts.globs, c.name);
+      return globs === null ? [] : [{ ...c, globs }];
+    });
     // Fan out resiliently: a disk that errors contributes a "list_failed" reason
     // (surfaced as a partial-results caveat) instead of failing the whole grep.
     const results = await Promise.allSettled(
-      covered.map(({ entry, rel }) => entry.disk.grep({ ...opts, directory: rel })),
+      covered.map(({ entry, rel, globs }) => entry.disk.grep({ ...opts, directory: rel, globs })),
     );
     const matches: GrepMatch[] = [];
     const groups: GrepGroup[] = [];
