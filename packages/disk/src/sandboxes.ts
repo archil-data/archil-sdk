@@ -39,7 +39,7 @@ export interface CreateSandboxRequest {
   imageId?: string;
   env?: Record<string, string>;
   maxTtlSeconds?: number;
-  /** Seconds without a direct process connection before pausing. Omitted or zero disables idle expiry. */
+  /** Seconds without a direct process connection before pausing. Defaults to 1800 (30 minutes); zero disables idle expiry. */
   idleTtlSeconds?: number;
   /**
    * What happens when either TTL runs out: `"pause"` (the default) keeps memory
