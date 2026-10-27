@@ -5,6 +5,7 @@
 
 import { test } from "vitest";
 import assert from "node:assert/strict";
+import { ArchilApiError } from "../src/errors.js";
 import { toSegments } from "../src/paths.js";
 import { Workspace } from "../src/workspace.js";
 
@@ -191,6 +192,24 @@ test("workspace: a failing disk doesn't sink the whole fan-out", async () => {
   assert.equal(l.isTruncated, true);
 });
 
+test("workspace: grep reports a bad request instead of a partial result", async () => {
+  const rejecting = (name: string, status: number, message: string) => ({
+    name,
+    grep: () => Promise.reject(new ArchilApiError(message, status, status === 400 ? "bad_request" : undefined)),
+  });
+  // The control plane rejects a bad request on every disk alike.
+  const unknownType = 'unknown file type "pyy"';
+  const bad = ws({ data: rejecting("data", 400, unknownType), cache: rejecting("cache", 400, unknownType) });
+  await assert.rejects(bad.grep({ pattern: "x", directory: "", types: ["pyy"] }), {
+    name: "ArchilApiError",
+    status: 400,
+    message: unknownType,
+  });
+  // Any other failure is one disk's, so the rest still come back.
+  const down = ws({ ok: fakeDisk("ok"), bad: rejecting("bad", 503, "No runtime capacity available, please retry shortly") });
+  assert.equal((await down.grep({ pattern: "x", directory: "" })).stoppedReason, "list_failed");
+});
+
 test("workspace: grep flags max_results when merged matches exceed the cap", async () => {
   const mk = (name: string) => ({
     name,
@@ -213,6 +232,216 @@ test("workspace: grep flags max_results when merged matches exceed the cap", asy
   const r = await w.grep({ pattern: "x", directory: "", maxResults: 3 });
   assert.equal(r.matches.length, 3);
   assert.equal(r.stoppedReason, "max_results");
+});
+
+test("workspace: grep forwards options and merges context groups within the cap", async () => {
+  const seen: Array<Record<string, unknown>> = [];
+  const mk = (name: string, matches: object[], groups: object[]) => ({
+    name,
+    grep: async (opts: Record<string, unknown>) => {
+      seen.push(opts);
+      return {
+        matches,
+        groups,
+        stoppedReason: "completed",
+        filesScanned: 1,
+        containersDispatched: 0,
+        computeSecondsUsed: 0,
+        durationMs: 0,
+        listingMs: 0,
+        grepMs: 0,
+      };
+    },
+  });
+  const data = mk(
+    "data",
+    [
+      { file: "a.txt", line: 1, text: "x" },
+      { file: "a.txt", line: 3, endLine: 4, text: "x\ny" },
+    ],
+    [
+      {
+        file: "a.txt",
+        lines: [
+          { line: 1, text: "x", match: true },
+          { line: 2, text: "-", match: false },
+          { line: 3, text: "x", match: true },
+          { line: 4, text: "y", match: true },
+        ],
+      },
+    ],
+  );
+  const cache = mk(
+    "cache",
+    [
+      { file: "b.txt", line: 5, text: "x" },
+      { file: "b.txt", line: 7, text: "x" },
+    ],
+    [
+      {
+        file: "b.txt",
+        lines: [
+          { line: 5, text: "x", match: true },
+          { line: 6, text: "-", match: false },
+          { line: 7, text: "x", match: true },
+          { line: 8, text: "-", match: false },
+        ],
+      },
+    ],
+  );
+  const w = ws({ data, cache });
+  const r = await w.grep({
+    pattern: "x",
+    directory: "",
+    maxResults: 3,
+    multiline: true,
+    ignoreCase: true,
+    globs: ["*.txt"],
+    contextAfter: 2,
+  });
+  assert.deepEqual(
+    seen.map((o) => [o.multiline, o.ignoreCase, o.globs, o.contextAfter]),
+    [
+      [true, true, ["*.txt"], 2],
+      [true, true, ["*.txt"], 2],
+    ],
+  );
+  assert.deepEqual(r.matches[1], { file: "data/a.txt", line: 3, endLine: 4, text: "x\ny" });
+  // The multiline run on lines 3-4 counts once, so the cap lands on b.txt:5.
+  // b.txt:7 falls in its after-context and comes back as context.
+  assert.deepEqual(r.groups, [
+    {
+      file: "data/a.txt",
+      lines: [
+        { line: 1, text: "x", match: true },
+        { line: 2, text: "-", match: false },
+        { line: 3, text: "x", match: true },
+        { line: 4, text: "y", match: true },
+      ],
+    },
+    {
+      file: "cache/b.txt",
+      lines: [
+        { line: 5, text: "x", match: true },
+        { line: 6, text: "-", match: false },
+        { line: 7, text: "x", match: false },
+      ],
+    },
+  ]);
+});
+
+test("workspace: grep trims merged context groups at the cap", async () => {
+  const hit = (line: number) => ({ line, text: "x", match: true });
+  const ctx = (line: number) => ({ line, text: "-", match: false });
+  const mk = (name: string, matches: object[], groups: object[]) => ({
+    name,
+    grep: async () => ({
+      matches,
+      groups,
+      stoppedReason: "completed",
+      filesScanned: 1,
+      containersDispatched: 0,
+      computeSecondsUsed: 0,
+      durationMs: 0,
+      listingMs: 0,
+      grepMs: 0,
+    }),
+  });
+  const a = [ctx(1), hit(2), ctx(3), hit(4), ctx(5)];
+  const w = ws({
+    data: mk("data", [{ file: "a.txt", line: 2, text: "x" }, { file: "a.txt", line: 4, text: "x" }], [
+      { file: "a.txt", lines: a },
+    ]),
+    cache: mk(
+      "cache",
+      [
+        { file: "b.txt", line: 2, text: "x" },
+        { file: "b.txt", line: 3, text: "x" },
+        { file: "b.txt", line: 9, text: "x" },
+      ],
+      [
+        { file: "b.txt", lines: [ctx(1), hit(2), hit(3), ctx(4), ctx(5)] },
+        { file: "b.txt", lines: [ctx(8), hit(9), ctx(10)] },
+      ],
+    ),
+  });
+  // Without multiline, b.txt:3 is a match of its own, so the cap lands on
+  // b.txt:2. b.txt:3 falls in its after-context and comes back as context, the
+  // group ends after contextAfter lines, and b.txt's later group is dropped.
+  const trimmed = await w.grep({ pattern: "x", directory: "", maxResults: 3, contextBefore: 1, contextAfter: 2 });
+  assert.deepEqual(trimmed.groups, [
+    { file: "data/a.txt", lines: a },
+    { file: "cache/b.txt", lines: [ctx(1), hit(2), { ...hit(3), match: false }, ctx(4)] },
+  ]);
+
+  // With multiline, a cap landing on a run that ends its group keeps the whole
+  // run, even without after-context.
+  const run = ws({
+    data: mk("data", [{ file: "a.txt", line: 1, endLine: 2, text: "x\nx" }, { file: "a.txt", line: 5, text: "x" }], [
+      { file: "a.txt", lines: [hit(1), hit(2)] },
+      { file: "a.txt", lines: [ctx(4), hit(5)] },
+    ]),
+  });
+  const r = await run.grep({ pattern: "x", directory: "", maxResults: 1, multiline: true, contextBefore: 1 });
+  assert.deepEqual(r.groups, [{ file: "data/a.txt", lines: [hit(1), hit(2)] }]);
+});
+
+test("workspace: grep omits groups without context", async () => {
+  const w = ws({ data: fakeDisk("data") });
+  const r = await w.grep({ pattern: "x", directory: "" });
+  assert.equal(r.groups, undefined);
+});
+
+test("workspace: grep routes root globs by mount name", async () => {
+  const sent = new Map<string, string[] | undefined>();
+  const mk = (name: string) => ({
+    name,
+    grep: async (opts: { globs?: string[] }) => {
+      sent.set(name, opts.globs);
+      return { matches: [], stoppedReason: "completed", filesScanned: 0 };
+    },
+  });
+  const w = ws({ data: mk("data"), cache: mk("cache"), logs: mk("logs") });
+  const globsSent = async (directory: string, globs: string[]) => {
+    sent.clear();
+    await w.grep({ pattern: "x", directory, globs });
+    return Object.fromEntries(sent);
+  };
+
+  // A glob starting with a mount name reaches only that mount, without the
+  // name, while one with no `/` or starting with `**/` reaches every mount.
+  assert.deepEqual(await globsSent("", ["data/src/**", "*.ts", "!cache/tmp/**", "!**/node_modules/**"]), {
+    data: ["src/**", "*.ts", "!**/node_modules/**"],
+    cache: ["*.ts", "!tmp/**", "!**/node_modules/**"],
+    logs: ["*.ts", "!**/node_modules/**"],
+  });
+  // Left without a `/`, these would match at any depth, so they're anchored. A
+  // mount no include reaches isn't searched.
+  assert.deepEqual(await globsSent("", ["/data/*.csv", "data/*.json", "data/**"]), { data: ["/*.csv", "/*.json", "/**"] });
+  // An exclude naming a mount exactly skips it, and one with no `/` of its own
+  // still applies inside the other mounts. A wildcard applies only inside them.
+  assert.deepEqual(await globsSent("", ["!/logs"]), { data: [], cache: [] });
+  assert.deepEqual(await globsSent("", ["!logs", "!cache/"]), { data: ["!logs", "!cache/"] });
+  assert.deepEqual(await globsSent("", ["!l*"]), { data: ["!l*"], cache: ["!l*"], logs: ["!l*"] });
+  // After a leading `**/`, a mount name also reaches the paths under that mount.
+  assert.deepEqual(await globsSent("", ["**/logs/**", "!**/cache"]), {
+    data: ["**/logs/**", "!**/cache"],
+    logs: ["**/logs/**", "/**", "!**/cache"],
+  });
+  // A leading `/` doesn't narrow a leading `**`.
+  assert.deepEqual(await globsSent("", ["/**/logs/**", "!/**/cache"]), {
+    data: ["/**/logs/**", "!/**/cache"],
+    logs: ["/**/logs/**", "/**", "!/**/cache"],
+  });
+  assert.deepEqual(await globsSent("", ["/**"]), { data: ["/**"], cache: ["/**"], logs: ["/**"] });
+  // The control plane still checks the glob after the mount name.
+  assert.deepEqual(await globsSent("", ["data/[", "["]), { data: ["/[", "["], cache: ["["], logs: ["["] });
+  // Any other glob with a `/` is refused.
+  for (const glob of ["*/src/**", "{data,cache}/**", "dta/**", "/*.csv"]) {
+    await assert.rejects(w.grep({ pattern: "x", directory: "", globs: [glob] }), /must start with a mount name/, glob);
+  }
+  // Below the root, globs are already relative to the disk's directory.
+  assert.deepEqual(await globsSent("data/src", ["lib/**"]), { data: ["lib/**"] });
 });
 
 test("workspace: read-only mounts refuse writes and deletes", async () => {

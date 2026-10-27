@@ -17,18 +17,50 @@ await them directly on the shared loop.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Optional
 
 from ._http import BodyType
-from ._models import ExecResult, GrepMatch, GrepResult, ListObjectsResult, PutObjectResult, S3Object
+from ._models import (
+    ExecResult,
+    GrepGroup,
+    GrepMatch,
+    GrepResult,
+    ListObjectsResult,
+    PutObjectResult,
+    S3Object,
+)
 from ._paths import to_segments
 from ._synchronizer import translate_in, translate_out
+from .errors import ArchilApiError
 
 # Imported at runtime (not under TYPE_CHECKING) so the synchronicity stub
 # generator can resolve agent_tools()'s return type. agent_tools does not import
 # _workspace, so this does not create an import cycle.
 from .agent_tools import AgentToolset
+
+
+def _truncate_groups(
+    groups: List[GrepGroup], max_results: int, after: int, multiline: bool
+) -> List[GrepGroup]:
+    """Keep groups up to the one holding the ``max_results``-th match, and end
+    that group after up to ``after`` more lines, which become context so the
+    groups hold exactly the kept matches. With multiline, a run of matching
+    lines is one match. Mirrors the controlplane's truncation of a single
+    disk's groups."""
+    seen = 0
+    for i, g in enumerate(groups):
+        lines = g.lines
+        for j, line in enumerate(lines):
+            if line.match and not (multiline and j > 0 and lines[j - 1].match):
+                seen += 1
+            if seen == max_results and not (multiline and j + 1 < len(lines) and lines[j + 1].match):
+                kept = [
+                    replace(ln, match=False) if k > j else ln
+                    for k, ln in enumerate(lines[: j + 1 + after])
+                ]
+                return [*groups[:i], replace(g, lines=kept)]
+    return groups
 
 
 @dataclass
@@ -128,6 +160,62 @@ class _Workspace:
         if entry is None:
             raise self._unknown_disk(segs[0])
         return [(segs[0], entry, self._disk_key(entry, "/".join(segs[1:])))]
+
+    def _root_globs(self, globs: List[str]) -> dict[str, List[str]]:
+        """Route grep globs written against the workspace root to the mounts they
+        can match. A glob that starts with a mount's name goes to that mount
+        without the name. One with no ``/``, or that starts with ``**/`` with or
+        without a leading ``/``, goes to every mount as written, and also applies
+        to a mount it names exactly, like ``!cache`` or ``**/logs/**``. Mount
+        names are matched literally, so ``!l*`` doesn't skip a ``logs`` mount.
+        Leaves out a mount whose directory an exclude names, or that no include
+        reaches, and raises for any other glob with a ``/``."""
+        routed: dict[str, List[str]] = {name: [] for name in self._mounts}
+        excluded: set[str] = set()
+        for glob in globs:
+            exclude = glob.startswith("!")
+            body = glob[1:] if exclude else glob
+            dir_only = body.endswith("/")
+            if dir_only:
+                body = body[:-1]
+            anchored = body.startswith("/")
+            if anchored:
+                body = body[1:]
+            # A glob with no `/` or that starts with `**/` matches inside every
+            # mount, and a leading `/` doesn't narrow a leading `**`. At the root
+            # it also matches a mount it names exactly: the mount's directory, or
+            # after a leading `**/`, paths under it.
+            everywhere = (not anchored and "/" not in body) or body == "**" or body.startswith("**/")
+            if everywhere:
+                for mount_globs in routed.values():
+                    mount_globs.append(glob)
+            path = body[3:] if everywhere and body.startswith("**/") else body
+            name, _, rest = path.partition("/")
+            if name not in routed:
+                if everywhere:
+                    continue
+                raise ValueError(
+                    "At the workspace root, a glob with a '/' must start with a mount name ("
+                    + ", ".join(f"{n}/" for n in self._mounts)
+                    + f") or '**/'; got {glob!r}. To search below one mount, set directory to it."
+                )
+            if not rest:
+                # The glob names the mount's own directory, so the last one
+                # decides whether the mount is searched at all.
+                if exclude:
+                    excluded.add(name)
+                else:
+                    excluded.discard(name)
+                continue
+            # The control plane reads a glob without a `/` as a name at any depth.
+            rest = rest if "/" in rest else f"/{rest}"
+            routed[name].append(f"{'!' if exclude else ''}{rest}{'/' if dir_only else ''}")
+        has_include = any(not glob.startswith("!") for glob in globs)
+        return {
+            name: mount_globs
+            for name, mount_globs in routed.items()
+            if name not in excluded and not (has_include and all(g.startswith("!") for g in mount_globs))
+        }
 
     def _disk_key(self, entry: _Mount, rel: str) -> str:
         rel = rel.lstrip("/")
@@ -239,8 +327,31 @@ class _Workspace:
         max_duration_seconds: int = 30,
         concurrency: int = 50,
         max_results: int = 1000,
+        ignore_case: bool = False,
+        multiline: bool = False,
+        globs: Optional[List[str]] = None,
+        types: Optional[List[str]] = None,
+        types_not: Optional[List[str]] = None,
+        context_before: int = 0,
+        context_after: int = 0,
     ) -> GrepResult:
-        covered = self._covered(directory)
+        """Grep the disks ``directory`` covers in parallel and merge their
+        results. At the workspace root, a glob with a ``/`` must start with a
+        mount name, like ``data/src/**``, which applies to that mount only, or
+        with ``**/``. A glob with no ``/``, like ``*.ts``, or one starting with
+        ``**/`` with or without a leading ``/``, applies inside every mount, and
+        also to a mount it names exactly, so ``!cache`` skips the cache mount.
+        Mount names are matched literally, not as patterns: ``!l*`` applies
+        inside every mount, but doesn't skip a mount named ``logs``."""
+        # At the root, glob paths start with a mount's name, which its disk's
+        # paths lack, so route each glob to the mounts it can match.
+        root_globs = self._root_globs(globs) if globs and not to_segments(directory) else None
+        covered = []
+        for name, entry, rel in self._covered(directory):
+            mount_globs = globs if root_globs is None else root_globs.get(name)
+            if root_globs is not None and mount_globs is None:
+                continue
+            covered.append((name, entry, rel, mount_globs))
         # Fan out resiliently: a disk that errors contributes a "list_failed"
         # reason (surfaced as a partial-results caveat) instead of failing the grep.
         results = await asyncio.gather(
@@ -252,16 +363,29 @@ class _Workspace:
                     max_duration_seconds=max_duration_seconds,
                     concurrency=concurrency,
                     max_results=max_results,
+                    ignore_case=ignore_case,
+                    multiline=multiline,
+                    globs=mount_globs,
+                    types=types,
+                    types_not=types_not,
+                    context_before=context_before,
+                    context_after=context_after,
                 )
-                for _, entry, rel in covered
+                for _, entry, rel, mount_globs in covered
             ),
             return_exceptions=True,
         )
+        # Except a 400: the control plane rejects a bad request before it looks
+        # at the disk, so every disk fails alike and the error belongs to the caller.
+        for r in results:
+            if isinstance(r, ArchilApiError) and r.status == 400:
+                raise r
         matches: List[GrepMatch] = []
+        groups: List[GrepGroup] = []
         files_scanned = containers_dispatched = duration_ms = listing_ms = grep_ms = 0
         compute_seconds_used = 0.0
         reasons: set[str] = set()
-        for (name, entry, _), r in zip(covered, results):
+        for (name, entry, _, _), r in zip(covered, results):
             if isinstance(r, BaseException):
                 reasons.add("list_failed")
                 continue
@@ -273,7 +397,9 @@ class _Workspace:
             grep_ms = max(grep_ms, r.grep_ms)
             reasons.add(r.stopped_reason)
             for m in r.matches:
-                matches.append(GrepMatch(self._abs(name, entry, m.file), m.line, m.text))
+                matches.append(replace(m, file=self._abs(name, entry, m.file)))
+            for g in r.groups or []:
+                groups.append(replace(g, file=self._abs(name, entry, g.file)))
         # Merging across disks can exceed the cap even when every disk completed,
         # so flag the truncation ourselves before slicing — otherwise the extra
         # matches are dropped with no signal.
@@ -286,6 +412,8 @@ class _Workspace:
             "completed" if reasons <= {"completed"}
             else next((r for r in priority if r in reasons), "completed")
         )
+        if len(matches) > max_results:
+            groups = _truncate_groups(groups, max_results, context_after, multiline)
         return GrepResult(
             matches=matches[:max_results],
             stopped_reason=stopped_reason,
@@ -295,6 +423,7 @@ class _Workspace:
             duration_ms=duration_ms,
             listing_ms=listing_ms,
             grep_ms=grep_ms,
+            groups=groups if context_before > 0 or context_after > 0 else None,
         )
 
     async def exec(self, command: str) -> ExecResult:

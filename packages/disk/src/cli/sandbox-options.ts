@@ -20,7 +20,7 @@ export function validateSandboxName(name: string | undefined): string | undefine
   return value;
 }
 
-function optionalInteger(value: string | undefined, label: string, min: number, max: number): number | undefined {
+export function optionalInteger(value: string | undefined, label: string, min: number, max: number): number | undefined {
   if (value === undefined) return undefined;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {

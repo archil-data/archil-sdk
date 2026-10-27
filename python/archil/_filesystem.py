@@ -14,7 +14,7 @@ this, so dropping or renaming a method on one without the other fails the suite.
 
 from __future__ import annotations
 
-from typing import Optional, Protocol, runtime_checkable
+from typing import List, Optional, Protocol, runtime_checkable
 
 from ._http import BodyType
 from ._models import ExecResult, GrepResult, ListObjectsResult, PutObjectResult
@@ -62,6 +62,13 @@ class FileSystem(Protocol):
         max_duration_seconds: int = 30,
         concurrency: int = 50,
         max_results: int = 1000,
+        ignore_case: bool = False,
+        multiline: bool = False,
+        globs: Optional[List[str]] = None,
+        types: Optional[List[str]] = None,
+        types_not: Optional[List[str]] = None,
+        context_before: int = 0,
+        context_after: int = 0,
     ) -> GrepResult:
         """Constant-time parallel grep."""
         ...

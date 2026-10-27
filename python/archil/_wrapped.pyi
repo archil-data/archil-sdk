@@ -704,17 +704,31 @@ class Disk:
     exec: __exec_spec
 
     class __grep_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
+        def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000, ignore_case: bool = False, multiline: bool = False, globs: typing.List[str] | None = None, types: typing.List[str] | None = None, types_not: typing.List[str] | None = None, context_before: int = 0, context_after: int = 0) -> archil._models.GrepResult:
             """Constant-time parallel grep across files on this disk. The returned
             ``stopped_reason`` says whether the search ran to completion or
             short-circuited on ``max_results`` / ``max_duration_seconds``.
+
+            ``pattern`` is a regular expression in ripgrep syntax. ``multiline``
+            lets a match span lines (``rg -U``); such a match sets ``end_line``.
+            ``globs`` follow ripgrep's ``-g`` rules relative to ``directory`` (a
+            leading ``!`` excludes), and ``types`` / ``types_not`` take ripgrep
+            file type names such as ``py``. Setting ``context_before`` or
+            ``context_after`` (0 to 10 lines) adds ``groups`` to the result.
             """
             ...
 
-        async def aio(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
+        async def aio(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000, ignore_case: bool = False, multiline: bool = False, globs: typing.List[str] | None = None, types: typing.List[str] | None = None, types_not: typing.List[str] | None = None, context_before: int = 0, context_after: int = 0) -> archil._models.GrepResult:
             """Constant-time parallel grep across files on this disk. The returned
             ``stopped_reason`` says whether the search ran to completion or
             short-circuited on ``max_results`` / ``max_duration_seconds``.
+
+            ``pattern`` is a regular expression in ripgrep syntax. ``multiline``
+            lets a match span lines (``rg -U``); such a match sets ``end_line``.
+            ``globs`` follow ripgrep's ``-g`` rules relative to ``directory`` (a
+            leading ``!`` excludes), and ``types`` / ``types_not`` take ripgrep
+            file type names such as ``py``. Setting ``context_before`` or
+            ``context_after`` (0 to 10 lines) adds ``groups`` to the result.
             """
             ...
 
@@ -1778,10 +1792,28 @@ class Workspace:
     _list_one: ___list_one_spec
 
     class __grep_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
+        def __call__(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000, ignore_case: bool = False, multiline: bool = False, globs: typing.List[str] | None = None, types: typing.List[str] | None = None, types_not: typing.List[str] | None = None, context_before: int = 0, context_after: int = 0) -> archil._models.GrepResult:
+            """Grep the disks ``directory`` covers in parallel and merge their
+            results. At the workspace root, a glob with a ``/`` must start with a
+            mount name, like ``data/src/**``, which applies to that mount only, or
+            with ``**/``. A glob with no ``/``, like ``*.ts``, or one starting with
+            ``**/`` with or without a leading ``/``, applies inside every mount, and
+            also to a mount it names exactly, so ``!cache`` skips the cache mount.
+            Mount names are matched literally, not as patterns: ``!l*`` applies
+            inside every mount, but doesn't skip a mount named ``logs``.
+            """
             ...
 
-        async def aio(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000) -> archil._models.GrepResult:
+        async def aio(self, /, *, directory: str, pattern: str, recursive: bool = False, max_duration_seconds: int = 30, concurrency: int = 50, max_results: int = 1000, ignore_case: bool = False, multiline: bool = False, globs: typing.List[str] | None = None, types: typing.List[str] | None = None, types_not: typing.List[str] | None = None, context_before: int = 0, context_after: int = 0) -> archil._models.GrepResult:
+            """Grep the disks ``directory`` covers in parallel and merge their
+            results. At the workspace root, a glob with a ``/`` must start with a
+            mount name, like ``data/src/**``, which applies to that mount only, or
+            with ``**/``. A glob with no ``/``, like ``*.ts``, or one starting with
+            ``**/`` with or without a leading ``/``, applies inside every mount, and
+            also to a mount it names exactly, so ``!cache`` skips the cache mount.
+            Mount names are matched literally, not as patterns: ``!l*`` applies
+            inside every mount, but doesn't skip a mount named ``logs``.
+            """
             ...
 
     grep: __grep_spec

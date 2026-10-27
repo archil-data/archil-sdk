@@ -14,9 +14,10 @@ import asyncio
 import pytest
 
 from archil._archil import ExecMountSpec
-from archil._models import GrepMatch, GrepResult, ListObjectsResult, S3Object
+from archil._models import GrepGroup, GrepGroupLine, GrepMatch, GrepResult, ListObjectsResult, S3Object
 from archil._paths import to_segments
 from archil._workspace import _Workspace
+from archil.errors import ArchilApiError
 
 
 class _FakeDisk:
@@ -47,8 +48,9 @@ class _FakeDisk:
             key_count=1,
         )
 
-    async def grep(self, *, directory, **_):
+    async def grep(self, *, directory, globs=None, **_):
         self.calls["grep_dir"] = directory
+        self.calls["grep_globs"] = globs
         return GrepResult(
             matches=[], stopped_reason="completed", files_scanned=0,
             containers_dispatched=0, compute_seconds_used=0.0,
@@ -198,6 +200,26 @@ def test_workspace_failing_disk_does_not_sink_fan_out():
     assert listing.is_truncated is True
 
 
+class _RejectingDisk:
+    def __init__(self, status: int, message: str) -> None:
+        self.error = ArchilApiError(message, status, "bad_request" if status == 400 else None)
+
+    async def grep(self, *, directory, **_):
+        raise self.error
+
+
+def test_workspace_grep_reports_a_bad_request_instead_of_a_partial_result():
+    # The control plane rejects a bad request on every disk alike.
+    unknown_type = 'unknown file type "pyy"'
+    bad = _ws(data=_RejectingDisk(400, unknown_type), cache=_RejectingDisk(400, unknown_type))
+    with pytest.raises(ArchilApiError, match=unknown_type) as exc:
+        asyncio.run(bad.grep(directory="", pattern="x", types=["pyy"]))
+    assert exc.value.status == 400
+    # Any other failure is one disk's, so the rest still come back.
+    down = _ws(ok=_FakeDisk("ok"), bad=_RejectingDisk(503, "No runtime capacity available, please retry shortly"))
+    assert asyncio.run(down.grep(directory="", pattern="x")).stopped_reason == "list_failed"
+
+
 class _MatchingDisk:
     async def grep(self, *, directory, **_):
         return GrepResult(
@@ -213,6 +235,136 @@ def test_workspace_grep_flags_max_results_across_disks():
     r = asyncio.run(ws.grep(directory="", pattern="x", max_results=3))
     assert len(r.matches) == 3
     assert r.stopped_reason == "max_results"
+    assert r.groups is None
+
+
+def _lines(*specs: tuple[int, bool]) -> list[GrepGroupLine]:
+    return [GrepGroupLine(n, "x" if m else "-", m) for n, m in specs]
+
+
+class _GroupedDisk:
+    def __init__(self, matches: list[GrepMatch], groups: list[GrepGroup]) -> None:
+        self.matches = matches
+        self.groups = groups
+        self.kwargs: dict = {}
+
+    async def grep(self, *, directory, **kwargs):
+        self.kwargs = kwargs
+        return GrepResult(
+            matches=self.matches, stopped_reason="completed", files_scanned=1,
+            containers_dispatched=0, compute_seconds_used=0.0, duration_ms=0,
+            listing_ms=0, grep_ms=0, groups=self.groups,
+        )
+
+
+def test_workspace_grep_forwards_options_and_merges_groups_within_cap():
+    data = _GroupedDisk(
+        [GrepMatch("a.txt", 1, "x"), GrepMatch("a.txt", 3, "x\nx", end_line=4)],
+        [GrepGroup("a.txt", _lines((1, True), (2, False), (3, True), (4, True)))],
+    )
+    cache = _GroupedDisk(
+        [GrepMatch("b.txt", 5, "x"), GrepMatch("b.txt", 7, "x")],
+        [GrepGroup("b.txt", _lines((5, True), (6, False), (7, True), (8, False)))],
+    )
+    ws = _ws(data=data, cache=cache)
+    r = asyncio.run(
+        ws.grep(
+            directory="", pattern="x", max_results=3, multiline=True,
+            ignore_case=True, globs=["*.txt"], context_after=2,
+        )
+    )
+    for disk in (data, cache):
+        assert disk.kwargs["multiline"] is True
+        assert disk.kwargs["ignore_case"] is True
+        assert disk.kwargs["globs"] == ["*.txt"]
+        assert disk.kwargs["context_after"] == 2
+    assert r.matches[1] == GrepMatch("data/a.txt", 3, "x\nx", end_line=4)
+    # The multiline run on lines 3-4 counts once, so the cap lands on b.txt:5.
+    # b.txt:7 falls in its after-context and comes back as context.
+    assert r.groups == [
+        GrepGroup("data/a.txt", _lines((1, True), (2, False), (3, True), (4, True))),
+        GrepGroup("cache/b.txt", [*_lines((5, True), (6, False)), GrepGroupLine(7, "x", False)]),
+    ]
+
+
+def test_workspace_grep_trims_merged_groups_at_the_cap():
+    a = _lines((1, False), (2, True), (3, False), (4, True), (5, False))
+    data = _GroupedDisk([GrepMatch("a.txt", 2, "x"), GrepMatch("a.txt", 4, "x")], [GrepGroup("a.txt", a)])
+    cache = _GroupedDisk(
+        [GrepMatch("b.txt", 2, "x"), GrepMatch("b.txt", 3, "x"), GrepMatch("b.txt", 9, "x")],
+        [
+            GrepGroup("b.txt", _lines((1, False), (2, True), (3, True), (4, False), (5, False))),
+            GrepGroup("b.txt", _lines((8, False), (9, True), (10, False))),
+        ],
+    )
+    ws = _ws(data=data, cache=cache)
+    # Without multiline, b.txt:3 is a match of its own, so the cap lands on
+    # b.txt:2. b.txt:3 falls in its after-context and comes back as context, the
+    # group ends after context_after lines, and b.txt's later group is dropped.
+    trimmed = asyncio.run(
+        ws.grep(directory="", pattern="x", max_results=3, context_before=1, context_after=2)
+    )
+    assert trimmed.groups == [
+        GrepGroup("data/a.txt", a),
+        GrepGroup("cache/b.txt", [*_lines((1, False), (2, True)), GrepGroupLine(3, "x", False), *_lines((4, False))]),
+    ]
+
+    # With multiline, a cap landing on a run that ends its group keeps the
+    # whole run, even without after-context.
+    run = _ws(
+        data=_GroupedDisk(
+            [GrepMatch("a.txt", 1, "x\nx", end_line=2), GrepMatch("a.txt", 5, "x")],
+            [GrepGroup("a.txt", _lines((1, True), (2, True))), GrepGroup("a.txt", _lines((4, False), (5, True)))],
+        )
+    )
+    r = asyncio.run(run.grep(directory="", pattern="x", max_results=1, multiline=True, context_before=1))
+    assert r.groups == [GrepGroup("data/a.txt", _lines((1, True), (2, True)))]
+
+
+def test_workspace_grep_routes_root_globs_by_mount_name():
+    disks = {name: _FakeDisk(name) for name in ("data", "cache", "logs")}
+    ws = _ws(**disks)
+
+    def globs_sent(directory: str, globs: list[str]) -> dict:
+        for d in disks.values():
+            d.calls.clear()
+        asyncio.run(ws.grep(directory=directory, pattern="x", globs=globs))
+        return {name: d.calls["grep_globs"] for name, d in disks.items() if "grep_globs" in d.calls}
+
+    # A glob starting with a mount name reaches only that mount, without the
+    # name, while one with no `/` or starting with `**/` reaches every mount.
+    assert globs_sent("", ["data/src/**", "*.ts", "!cache/tmp/**", "!**/node_modules/**"]) == {
+        "data": ["src/**", "*.ts", "!**/node_modules/**"],
+        "cache": ["*.ts", "!tmp/**", "!**/node_modules/**"],
+        "logs": ["*.ts", "!**/node_modules/**"],
+    }
+    # Left without a `/`, these would match at any depth, so they're anchored. A
+    # mount no include reaches isn't searched.
+    assert globs_sent("", ["/data/*.csv", "data/*.json", "data/**"]) == {"data": ["/*.csv", "/*.json", "/**"]}
+    # An exclude naming a mount exactly skips it, and one with no `/` of its own
+    # still applies inside the other mounts. A wildcard applies only inside them.
+    assert globs_sent("", ["!/logs"]) == {"data": [], "cache": []}
+    assert globs_sent("", ["!logs", "!cache/"]) == {"data": ["!logs", "!cache/"]}
+    assert globs_sent("", ["!l*"]) == {"data": ["!l*"], "cache": ["!l*"], "logs": ["!l*"]}
+    # After a leading `**/`, a mount name also reaches the paths under that mount.
+    assert globs_sent("", ["**/logs/**", "!**/cache"]) == {
+        "data": ["**/logs/**", "!**/cache"],
+        "logs": ["**/logs/**", "/**", "!**/cache"],
+    }
+    # A leading `/` doesn't narrow a leading `**`.
+    assert globs_sent("", ["/**/logs/**", "!/**/cache"]) == {
+        "data": ["/**/logs/**", "!/**/cache"],
+        "logs": ["/**/logs/**", "/**", "!/**/cache"],
+    }
+    assert globs_sent("", ["/**"]) == {"data": ["/**"], "cache": ["/**"], "logs": ["/**"]}
+    # The control plane still checks the glob after the mount name.
+    assert globs_sent("", ["data/[", "["]) == {"data": ["/[", "["], "cache": ["["], "logs": ["["]}
+    # Any other glob with a `/` is refused.
+    for glob in ("*/src/**", "{data,cache}/**", "dta/**", "/*.csv"):
+        with pytest.raises(ValueError, match="must start with a mount name"):
+            asyncio.run(ws.grep(directory="", pattern="x", globs=[glob]))
+    # Below the root, globs are already relative to the disk's directory.
+    assert globs_sent("data/src", ["lib/**"]) == {"data": ["lib/**"]}
 
 
 # --- read-only -------------------------------------------------------------

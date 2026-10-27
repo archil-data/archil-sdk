@@ -1,6 +1,7 @@
 import type {
   Disk,
   ExecResult,
+  GrepGroup,
   GrepMatch,
   GrepOptions,
   GrepResult,
@@ -11,6 +12,7 @@ import type {
   S3Object,
 } from "./disk.js";
 import type { ExecMount, ExecMountSpec, ExecOptions } from "./archil.js";
+import { ArchilApiError } from "./errors.js";
 import type { FileSystem } from "./filesystem.js";
 import { toSegments } from "./paths.js";
 
@@ -23,6 +25,25 @@ export interface WorkspaceExecCapable {
 
 function isExecMountSpec(m: ExecMount): m is ExecMountSpec {
   return typeof m === "object" && m !== null && "disk" in m;
+}
+
+/** Keep groups up to the one holding the `maxResults`-th match, and end that
+ * group after up to `after` more lines, which become context so the groups
+ * hold exactly the kept matches. With multiline, a run of matching lines is
+ * one match. Mirrors the controlplane's truncation of a single disk's groups. */
+function truncateGroups(groups: GrepGroup[], maxResults: number, after: number, multiline: boolean): GrepGroup[] {
+  let seen = 0;
+  for (let i = 0; i < groups.length; i++) {
+    const lines = groups[i].lines;
+    for (let j = 0; j < lines.length; j++) {
+      if (lines[j].match && !(multiline && j > 0 && lines[j - 1].match)) seen++;
+      if (seen === maxResults && !(multiline && j + 1 < lines.length && lines[j + 1].match)) {
+        const kept = lines.slice(0, Math.min(j + 1 + after, lines.length)).map((l, k) => (k > j ? { ...l, match: false } : l));
+        return [...groups.slice(0, i), { ...groups[i], lines: kept }];
+      }
+    }
+  }
+  return groups;
 }
 
 interface MountEntry {
@@ -152,6 +173,58 @@ export class Workspace implements FileSystem {
     return [{ name: segs[0], entry, rel: this.diskKey(entry, segs.slice(1).join("/")) }];
   }
 
+  /** Route grep globs written against the workspace root to the mounts they
+   * can match. A glob that starts with a mount's name goes to that mount without
+   * the name. One with no `/`, or that starts with `**` + `/` with or without a
+   * leading `/`, goes to every mount as written, and also applies to a mount it
+   * names exactly, like `!cache` or `**` + `/logs/**`. Mount names are matched
+   * literally, so `!l*` doesn't skip a `logs` mount. Leaves out a mount whose
+   * directory an exclude names, or that no include reaches, and throws for any
+   * other glob with a `/`. */
+  private rootGlobs(globs: string[]): Map<string, string[]> {
+    const routed = new Map<string, string[]>([...this.mounts.keys()].map((name) => [name, []]));
+    const excluded = new Set<string>();
+    for (const glob of globs) {
+      const exclude = glob.startsWith("!");
+      let body = exclude ? glob.slice(1) : glob;
+      const dirOnly = body.endsWith("/");
+      if (dirOnly) body = body.slice(0, -1);
+      const anchored = body.startsWith("/");
+      if (anchored) body = body.slice(1);
+      // A glob with no `/` or that starts with `**/` matches inside every mount,
+      // and a leading `/` doesn't narrow a leading `**`. At the root it also
+      // matches a mount it names exactly: the mount's directory, or after a
+      // leading `**/`, paths under it.
+      const everywhere = (!anchored && !body.includes("/")) || body === "**" || body.startsWith("**/");
+      if (everywhere) for (const mountGlobs of routed.values()) mountGlobs.push(glob);
+      const path = everywhere && body.startsWith("**/") ? body.slice(3) : body;
+      const slash = path.indexOf("/");
+      const name = slash < 0 ? path : path.slice(0, slash);
+      const rest = slash < 0 ? "" : path.slice(slash + 1);
+      const mountGlobs = routed.get(name);
+      if (!mountGlobs) {
+        if (everywhere) continue;
+        throw new Error(
+          `At the workspace root, a glob with a '/' must start with a mount name (${this.diskNames().map((n) => `${n}/`).join(", ")}) or '**/'; got '${glob}'. To search below one mount, set directory to it.`,
+        );
+      }
+      if (rest === "") {
+        // The glob names the mount's own directory, so the last one decides
+        // whether the mount is searched at all.
+        if (exclude) excluded.add(name);
+        else excluded.delete(name);
+        continue;
+      }
+      // The control plane reads a glob without a `/` as a name at any depth.
+      mountGlobs.push(`${exclude ? "!" : ""}${rest.includes("/") ? rest : `/${rest}`}${dirOnly ? "/" : ""}`);
+    }
+    const hasInclude = globs.some((glob) => !glob.startsWith("!"));
+    for (const [name, mountGlobs] of routed) {
+      if (excluded.has(name) || (hasInclude && mountGlobs.every((glob) => glob.startsWith("!")))) routed.delete(name);
+    }
+    return routed;
+  }
+
   /** Map a workspace-relative key to the disk's key, applying the mount's subdirectory. */
   private diskKey(entry: MountEntry, rel: string): string {
     const trimmed = rel.replace(/^\/+/, "");
@@ -240,14 +313,40 @@ export class Workspace implements FileSystem {
     return { objects, commonPrefixes, isTruncated, keyCount };
   }
 
+  /**
+   * Grep the disks `directory` covers in parallel and merge their results. At
+   * the workspace root, a glob with a `/` must start with a mount name, like
+   * `data/src/**`, which applies to that mount only, or with `**` + `/`. A glob
+   * with no `/`, like `*.ts`, or one starting with `**` + `/` with or without a
+   * leading `/`, applies inside every mount, and also to a mount it names
+   * exactly, so `!cache` skips the cache mount. Mount names are matched
+   * literally, not as patterns: `!l*` applies inside every mount, but doesn't
+   * skip a mount named `logs`.
+   */
   async grep(opts: GrepOptions): Promise<GrepResult> {
-    const covered = this.covered(opts.directory ?? "");
+    const directory = opts.directory ?? "";
+    // At the root, glob paths start with a mount's name, which its disk's paths
+    // lack, so route each glob to the mounts it can match.
+    const rootGlobs = toSegments(directory).length === 0 && opts.globs?.length ? this.rootGlobs(opts.globs) : undefined;
+    const covered = this.covered(directory).flatMap((c) => {
+      if (rootGlobs === undefined) return [{ ...c, globs: opts.globs }];
+      const globs = rootGlobs.get(c.name);
+      return globs === undefined ? [] : [{ ...c, globs }];
+    });
     // Fan out resiliently: a disk that errors contributes a "list_failed" reason
     // (surfaced as a partial-results caveat) instead of failing the whole grep.
     const results = await Promise.allSettled(
-      covered.map(({ entry, rel }) => entry.disk.grep({ ...opts, directory: rel })),
+      covered.map(({ entry, rel, globs }) => entry.disk.grep({ ...opts, directory: rel, globs })),
     );
+    // Except a 400: the control plane rejects a bad request before it looks at
+    // the disk, so every disk fails alike and the error belongs to the caller.
+    for (const settled of results) {
+      if (settled.status === "rejected" && settled.reason instanceof ArchilApiError && settled.reason.status === 400) {
+        throw settled.reason;
+      }
+    }
     const matches: GrepMatch[] = [];
+    const groups: GrepGroup[] = [];
     let filesScanned = 0;
     let containersDispatched = 0;
     let computeSecondsUsed = 0;
@@ -269,7 +368,8 @@ export class Workspace implements FileSystem {
       listingMs = Math.max(listingMs, r.listingMs ?? 0);
       grepMs = Math.max(grepMs, r.grepMs ?? 0);
       reasons.add(r.stoppedReason);
-      for (const m of r.matches) matches.push({ file: this.abs(name, entry, m.file), line: m.line, text: m.text });
+      for (const m of r.matches) matches.push({ ...m, file: this.abs(name, entry, m.file) });
+      for (const g of r.groups ?? []) groups.push({ ...g, file: this.abs(name, entry, g.file) });
     });
     // Merging across disks can exceed the cap even when every disk completed, so
     // flag the truncation ourselves before slicing — otherwise the extra matches
@@ -282,8 +382,15 @@ export class Workspace implements FileSystem {
     const stoppedReason = [...reasons].every((x) => x === "completed")
       ? "completed"
       : (priority.find((x) => reasons.has(x)) ?? "completed");
+    const withGroups = (opts.contextBefore ?? 0) > 0 || (opts.contextAfter ?? 0) > 0;
     return {
       matches: matches.slice(0, cap),
+      ...(withGroups && {
+        groups:
+          matches.length > cap
+            ? truncateGroups(groups, cap, opts.contextAfter ?? 0, opts.multiline ?? false)
+            : groups,
+      }),
       stoppedReason,
       filesScanned,
       containersDispatched,

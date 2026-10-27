@@ -194,8 +194,66 @@ def test_exec_and_grep(archil, router):
     )
     empty = d.grep(directory="logs", pattern="nope")
     assert empty.matches == []
+    assert empty.groups is None
     body = router.requests[-1].json
     assert body["maxDurationSeconds"] == 30 and body["concurrency"] == 50 and body["maxResults"] == 1000
+
+
+def test_grep_ripgrep_options(archil, router):
+    d = _disk(archil, router)
+    router.set(
+        lambda req: ok_envelope(
+            {
+                "matches": [{"file": "a.log", "line": 3, "endLine": 4, "text": "ERROR x\ncaused by"}],
+                "groups": [
+                    {
+                        "file": "a.log",
+                        "lines": [
+                            {"line": 2, "text": "start", "match": False},
+                            {"line": 3, "text": "ERROR x", "match": True},
+                            {"line": 4, "text": "caused by", "match": True},
+                        ],
+                    }
+                ],
+                "stoppedReason": "completed",
+                "filesScanned": 1,
+                "containersDispatched": 1,
+                "computeSecondsUsed": 0.5,
+                "durationMs": 10,
+                "listingMs": 2,
+                "grepMs": 3,
+            }
+        )
+    )
+    res = d.grep(
+        directory="logs",
+        pattern="ERROR.*\ncaused",
+        ignore_case=True,
+        multiline=True,
+        globs=["*.log", "!old/**"],
+        types=["log"],
+        types_not=["md"],
+        context_before=1,
+        context_after=2,
+    )
+    assert router.requests[-1].json == {
+        "directory": "logs",
+        "pattern": "ERROR.*\ncaused",
+        "recursive": False,
+        "maxDurationSeconds": 30,
+        "concurrency": 50,
+        "maxResults": 1000,
+        "ignoreCase": True,
+        "multiline": True,
+        "globs": ["*.log", "!old/**"],
+        "types": ["log"],
+        "typesNot": ["md"],
+        "contextBefore": 1,
+        "contextAfter": 2,
+    }
+    assert res.matches[0].end_line == 4
+    assert res.groups is not None
+    assert [(ln.line, ln.match) for ln in res.groups[0].lines] == [(2, False), (3, True), (4, True)]
 
 
 def test_share_default_expiry(archil, router):
