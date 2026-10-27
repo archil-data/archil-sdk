@@ -428,6 +428,12 @@ test("workspace: grep routes root globs by mount name", async () => {
     data: ["**/logs/**", "!**/cache"],
     logs: ["**/logs/**", "/**", "!**/cache"],
   });
+  // A leading `/` doesn't narrow a leading `**`.
+  assert.deepEqual(await globsSent("", ["/**/logs/**", "!/**/cache"]), {
+    data: ["/**/logs/**", "!/**/cache"],
+    logs: ["/**/logs/**", "/**", "!/**/cache"],
+  });
+  assert.deepEqual(await globsSent("", ["/**"]), { data: ["/**"], cache: ["/**"], logs: ["/**"] });
   // The control plane still checks the glob after the mount name.
   assert.deepEqual(await globsSent("", ["data/[", "["]), { data: ["/[", "["], cache: ["["], logs: ["["] });
   // Any other glob with a `/` is refused.

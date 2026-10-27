@@ -164,11 +164,12 @@ class _Workspace:
     def _root_globs(self, globs: List[str]) -> dict[str, List[str]]:
         """Route grep globs written against the workspace root to the mounts they
         can match. A glob that starts with a mount's name goes to that mount
-        without the name. One with no ``/`` or that starts with ``**/`` goes to
-        every mount as written, and also applies to a mount it names exactly,
-        like ``!cache`` or ``**/logs/**``. Leaves out a mount whose directory an
-        exclude names, or that no include reaches, and raises for any other glob
-        with a ``/``."""
+        without the name. One with no ``/``, or that starts with ``**/`` with or
+        without a leading ``/``, goes to every mount as written, and also applies
+        to a mount it names exactly, like ``!cache`` or ``**/logs/**``. Mount
+        names are matched literally, so ``!l*`` doesn't skip a ``logs`` mount.
+        Leaves out a mount whose directory an exclude names, or that no include
+        reaches, and raises for any other glob with a ``/``."""
         routed: dict[str, List[str]] = {name: [] for name in self._mounts}
         excluded: set[str] = set()
         for glob in globs:
@@ -181,9 +182,10 @@ class _Workspace:
             if anchored:
                 body = body[1:]
             # A glob with no `/` or that starts with `**/` matches inside every
-            # mount. At the root it also matches a mount it names exactly: the
-            # mount's directory, or after a leading `**/`, paths under it.
-            everywhere = not anchored and ("/" not in body or body.startswith("**/"))
+            # mount, and a leading `/` doesn't narrow a leading `**`. At the root
+            # it also matches a mount it names exactly: the mount's directory, or
+            # after a leading `**/`, paths under it.
+            everywhere = (not anchored and "/" not in body) or body == "**" or body.startswith("**/")
             if everywhere:
                 for mount_globs in routed.values():
                     mount_globs.append(glob)
@@ -337,8 +339,10 @@ class _Workspace:
         results. At the workspace root, a glob with a ``/`` must start with a
         mount name, like ``data/src/**``, which applies to that mount only, or
         with ``**/``. A glob with no ``/``, like ``*.ts``, or one starting with
-        ``**/`` applies inside every mount, and also to a mount it names
-        exactly, so ``!cache`` skips the cache mount."""
+        ``**/`` with or without a leading ``/``, applies inside every mount, and
+        also to a mount it names exactly, so ``!cache`` skips the cache mount.
+        Mount names are matched literally, not as patterns: ``!l*`` applies
+        inside every mount, but doesn't skip a mount named ``logs``."""
         # At the root, glob paths start with a mount's name, which its disk's
         # paths lack, so route each glob to the mounts it can match.
         root_globs = self._root_globs(globs) if globs and not to_segments(directory) else None

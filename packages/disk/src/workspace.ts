@@ -175,10 +175,12 @@ export class Workspace implements FileSystem {
 
   /** Route grep globs written against the workspace root to the mounts they
    * can match. A glob that starts with a mount's name goes to that mount without
-   * the name. One with no `/` or that starts with `**` + `/` goes to every mount
-   * as written, and also applies to a mount it names exactly, like `!cache` or
-   * `**` + `/logs/**`. Leaves out a mount whose directory an exclude names, or
-   * that no include reaches, and throws for any other glob with a `/`. */
+   * the name. One with no `/`, or that starts with `**` + `/` with or without a
+   * leading `/`, goes to every mount as written, and also applies to a mount it
+   * names exactly, like `!cache` or `**` + `/logs/**`. Mount names are matched
+   * literally, so `!l*` doesn't skip a `logs` mount. Leaves out a mount whose
+   * directory an exclude names, or that no include reaches, and throws for any
+   * other glob with a `/`. */
   private rootGlobs(globs: string[]): Map<string, string[]> {
     const routed = new Map<string, string[]>([...this.mounts.keys()].map((name) => [name, []]));
     const excluded = new Set<string>();
@@ -189,10 +191,11 @@ export class Workspace implements FileSystem {
       if (dirOnly) body = body.slice(0, -1);
       const anchored = body.startsWith("/");
       if (anchored) body = body.slice(1);
-      // A glob with no `/` or that starts with `**/` matches inside every mount.
-      // At the root it also matches a mount it names exactly: the mount's
-      // directory, or after a leading `**/`, paths under it.
-      const everywhere = !anchored && (!body.includes("/") || body.startsWith("**/"));
+      // A glob with no `/` or that starts with `**/` matches inside every mount,
+      // and a leading `/` doesn't narrow a leading `**`. At the root it also
+      // matches a mount it names exactly: the mount's directory, or after a
+      // leading `**/`, paths under it.
+      const everywhere = (!anchored && !body.includes("/")) || body === "**" || body.startsWith("**/");
       if (everywhere) for (const mountGlobs of routed.values()) mountGlobs.push(glob);
       const path = everywhere && body.startsWith("**/") ? body.slice(3) : body;
       const slash = path.indexOf("/");
@@ -314,9 +317,11 @@ export class Workspace implements FileSystem {
    * Grep the disks `directory` covers in parallel and merge their results. At
    * the workspace root, a glob with a `/` must start with a mount name, like
    * `data/src/**`, which applies to that mount only, or with `**` + `/`. A glob
-   * with no `/`, like `*.ts`, or one starting with `**` + `/` applies inside
-   * every mount, and also to a mount it names exactly, so `!cache` skips the
-   * cache mount.
+   * with no `/`, like `*.ts`, or one starting with `**` + `/` with or without a
+   * leading `/`, applies inside every mount, and also to a mount it names
+   * exactly, so `!cache` skips the cache mount. Mount names are matched
+   * literally, not as patterns: `!l*` applies inside every mount, but doesn't
+   * skip a mount named `logs`.
    */
   async grep(opts: GrepOptions): Promise<GrepResult> {
     const directory = opts.directory ?? "";

@@ -351,6 +351,12 @@ def test_workspace_grep_routes_root_globs_by_mount_name():
         "data": ["**/logs/**", "!**/cache"],
         "logs": ["**/logs/**", "/**", "!**/cache"],
     }
+    # A leading `/` doesn't narrow a leading `**`.
+    assert globs_sent("", ["/**/logs/**", "!/**/cache"]) == {
+        "data": ["/**/logs/**", "!/**/cache"],
+        "logs": ["/**/logs/**", "/**", "!/**/cache"],
+    }
+    assert globs_sent("", ["/**"]) == {"data": ["/**"], "cache": ["/**"], "logs": ["/**"]}
     # The control plane still checks the glob after the mount name.
     assert globs_sent("", ["data/[", "["]) == {"data": ["/[", "["], "cache": ["["], "logs": ["["]}
     # Any other glob with a `/` is refused.

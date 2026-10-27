@@ -1797,8 +1797,10 @@ class Workspace:
             results. At the workspace root, a glob with a ``/`` must start with a
             mount name, like ``data/src/**``, which applies to that mount only, or
             with ``**/``. A glob with no ``/``, like ``*.ts``, or one starting with
-            ``**/`` applies inside every mount, and also to a mount it names
-            exactly, so ``!cache`` skips the cache mount.
+            ``**/`` with or without a leading ``/``, applies inside every mount, and
+            also to a mount it names exactly, so ``!cache`` skips the cache mount.
+            Mount names are matched literally, not as patterns: ``!l*`` applies
+            inside every mount, but doesn't skip a mount named ``logs``.
             """
             ...
 
@@ -1807,8 +1809,10 @@ class Workspace:
             results. At the workspace root, a glob with a ``/`` must start with a
             mount name, like ``data/src/**``, which applies to that mount only, or
             with ``**/``. A glob with no ``/``, like ``*.ts``, or one starting with
-            ``**/`` applies inside every mount, and also to a mount it names
-            exactly, so ``!cache`` skips the cache mount.
+            ``**/`` with or without a leading ``/``, applies inside every mount, and
+            also to a mount it names exactly, so ``!cache`` skips the cache mount.
+            Mount names are matched literally, not as patterns: ``!l*`` applies
+            inside every mount, but doesn't skip a mount named ``logs``.
             """
             ...
 
