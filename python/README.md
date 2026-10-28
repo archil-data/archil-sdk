@@ -265,13 +265,14 @@ The same options work with `client.sandboxes.create.aio()` and
 `sandbox.set_timeout.aio()`. Omitted settings stay unchanged on edits. Updating
 the hard TTL resets its deadline from now; an idle-only edit does not. Changes
 made while inactive apply to the next powered-on session. Idle TTL accepts
-0–86,400 seconds; omitted or zero at creation disables it, and zero on edits
-disables it again.
+0–86,400 seconds and defaults to 30 minutes at creation; zero disables it, at
+creation or on edits.
 
 Both TTLs pause the sandbox, preserving memory and processes. Open direct
 process connections prevent idle expiry, but not hard expiry. The idle countdown
 starts when the last connection closes; detached processes and service-port
-traffic do not keep it alive. Disable idle TTL for unattended jobs.
+traffic do not keep it alive, so create unattended jobs and servers with
+`idle_ttl_seconds=0`.
 
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB. Sandbox

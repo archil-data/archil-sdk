@@ -348,13 +348,14 @@ console.log(timed.maxTtlSeconds, timed.idleTtlSeconds);
 
 Omitted settings stay unchanged on edits. Updating the hard TTL resets its
 deadline from now; an idle-only edit does not. Changes made while inactive apply
-to the next powered-on session. Idle TTL accepts 0–86,400 seconds; omitted or
-zero at creation disables it, and zero on edits disables it again.
+to the next powered-on session. Idle TTL accepts 0–86,400 seconds and defaults
+to 30 minutes at creation; zero disables it, at creation or on edits.
 
 Both TTLs pause the sandbox, preserving memory and processes. Open direct
 process connections prevent idle expiry, but not hard expiry. The idle countdown
 starts when the last connection closes; detached processes and service-port
-traffic do not keep it alive. Disable idle TTL for unattended jobs.
+traffic do not keep it alive, so create unattended jobs and servers with
+`idleTtlSeconds: 0`.
 
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpuCount` defaults to 1 and `memSizeMiB` defaults to 2,048 MiB. Sandbox
