@@ -1424,12 +1424,22 @@ class Sandbox:
     run: __run_spec
 
     class __attach_spec(typing_extensions.Protocol):
-        def __call__(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
-            """Reattach to a process, optionally resuming output from a cursor."""
+        def __call__(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True, shared: bool = False) -> SandboxProcess:
+            """Reattach to a process, optionally resuming output from a cursor.
+
+            Attaching takes the process over: the runtime closes the connection
+            that held it. With ``shared``, watch alongside that connection instead;
+            a shared connection is closed when the owner's closes.
+            """
             ...
 
-        async def aio(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True) -> SandboxProcess:
-            """Reattach to a process, optionally resuming output from a cursor."""
+        async def aio(self, /, process_id: str, *, offset: int = 0, on_output: collections.abc.Callable[[archil._models.SandboxProcessOutput], None] | None = None, collect_output: bool = True, shared: bool = False) -> SandboxProcess:
+            """Reattach to a process, optionally resuming output from a cursor.
+
+            Attaching takes the process over: the runtime closes the connection
+            that held it. With ``shared``, watch alongside that connection instead;
+            a shared connection is closed when the owner's closes.
+            """
             ...
 
     attach: __attach_spec

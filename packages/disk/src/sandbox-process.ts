@@ -25,6 +25,13 @@ export interface SandboxTerminalOptions {
 
 export interface SandboxProcessConnectOptions {
   offset?: number;
+  /**
+   * Watch alongside the connection that owns the process instead of taking it
+   * over. By default, attaching takes the process over and the runtime closes
+   * the previous connection. A shared connection is closed when the owner's
+   * closes.
+   */
+  shared?: boolean;
   onOutput?: SandboxProcessOutputHandler;
   /** Retain decoded stdout and stderr on the handle and result. Defaults to true. */
   collectOutput?: boolean;
@@ -59,7 +66,7 @@ type ProcessConnectionRequest =
       env: Record<string, string>;
       timeout_seconds?: number;
     }
-  | { type: "attach"; process_id: string; offset: number };
+  | { type: "attach"; process_id: string; offset: number; shared?: true };
 
 export type ProcessControlRequest =
   | { type: "kill"; process_id: string }
@@ -82,6 +89,12 @@ type ProcessControlEvent =
   | { type: "error"; error: string; message: string };
 
 const PROCESS_STDIN_CHUNK_BYTES = 1024 * 1024;
+
+/** Close codes the runtime uses when it ends a connection to a running process. */
+const CLOSE_REASONS: Record<number, string> = {
+  4001: "Process was taken over by another connection",
+  4003: "Process owner disconnected",
+};
 
 /** The subprotocol the runtime selects for a process connection. */
 export const CONNECT_SUBPROTOCOL = "archil.connect.v1";
@@ -333,7 +346,9 @@ export class SandboxProcess {
     });
     socket.addEventListener(
       "close",
-      () => {
+      (event: CloseEvent) => {
+        const reason = CLOSE_REASONS[event.code];
+        if (reason && !this._result) this._connectionError = new Error(reason);
         if (this._socket === socket) this._socket = undefined;
         if (!readySettled) {
           rejectReady(new Error("Process connection closed before ready"));
