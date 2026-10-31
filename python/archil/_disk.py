@@ -21,6 +21,7 @@ from ._models import (
     DiskMetrics,
     DiskStatus,
     DiskUser,
+    S3User,
     ExecResult,
     GrepResult,
     ListObjectsResult,
@@ -235,7 +236,7 @@ class _Disk:
         )
         return AuthorizedUser.from_json(data)
 
-    async def remove_user(self, user_type: Literal["token", "awssts"], identifier: str) -> None:
+    async def remove_user(self, user_type: Literal["token", "awssts", "s3"], identifier: str) -> None:
         await self._transport.request_empty(
             "DELETE",
             f"/api/disks/{self.id}/users/{user_type}",
@@ -255,6 +256,26 @@ class _Disk:
 
     async def remove_token_user(self, identifier: str) -> None:
         await self.remove_user("token", identifier)
+
+    async def create_s3_credentials(
+        self,
+        nickname: Optional[str] = None,
+        ttl: Optional[str] = None,
+        expires_at: Optional[str] = None,
+        read_only: Optional[bool] = None,
+    ) -> AuthorizedUser:
+        """Create an S3 access key pair for this disk's S3 API and return it,
+        including the one-time ``s3_secret_key``. The keys can read and write the
+        whole disk, so keep them server-side and give browsers presigned URLs."""
+        user = await self.add_user(
+            S3User(nickname=nickname, ttl=ttl, expires_at=expires_at, read_only=read_only)
+        )
+        if not user.s3_access_key_id or not user.s3_secret_key or not user.identifier:
+            raise RuntimeError("Server did not return generated S3 credentials")
+        return user
+
+    async def remove_s3_credentials(self, access_key_id: str) -> None:
+        await self.remove_user("s3", access_key_id)
 
     async def list_delegations(self) -> list[Delegation]:
         """List the delegations currently held on this disk."""

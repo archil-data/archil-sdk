@@ -140,6 +140,7 @@ export type {
   DiskUser,
   TokenUser,
   AwsStsUser,
+  S3User,
   CreateApiTokenRequest,
   ApiTokenResponse,
   ExecRequest,
