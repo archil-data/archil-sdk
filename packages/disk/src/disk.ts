@@ -12,6 +12,7 @@ import type { FileSystem } from "./filesystem.js";
 import type {
   DiskResponse,
   DiskUser,
+  S3User,
   AuthorizedUser,
   MountResponse,
   RootAttrs,
@@ -499,7 +500,7 @@ export class Disk implements FileSystem {
     );
   }
 
-  async removeUser(userType: "token" | "awssts", identifier: string): Promise<void> {
+  async removeUser(userType: "token" | "awssts" | "s3", identifier: string): Promise<void> {
     await unwrapEmpty(
       retryApiRequest(
         () =>
@@ -533,6 +534,25 @@ export class Disk implements FileSystem {
 
   async removeTokenUser(identifier: string): Promise<void> {
     await this.removeUser("token", identifier);
+  }
+
+  /**
+   * Create an S3 access key pair for this disk's S3 API. The secret key is
+   * returned only here. The keys can read and write the whole disk, so keep
+   * them server-side and give browsers presigned URLs instead.
+   */
+  async createS3Credentials(
+    options: Omit<S3User, "type"> = {},
+  ): Promise<AuthorizedUser & { s3AccessKeyId: string; s3SecretKey: string; identifier: string }> {
+    const user = await this.addUser({ ...options, type: "s3" });
+    if (!user.s3AccessKeyId || !user.s3SecretKey || !user.identifier) {
+      throw new Error("Server did not return generated S3 credentials");
+    }
+    return user as AuthorizedUser & { s3AccessKeyId: string; s3SecretKey: string; identifier: string };
+  }
+
+  async removeS3Credentials(accessKeyId: string): Promise<void> {
+    await this.removeUser("s3", accessKeyId);
   }
 
   /**

@@ -20,6 +20,8 @@ class AuthorizedUser:
     token: Optional[str] = None
     identifier: Optional[str] = None
     created_at: Optional[str] = None
+    s3_access_key_id: Optional[str] = None
+    s3_secret_key: Optional[str] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "AuthorizedUser":
@@ -31,6 +33,8 @@ class AuthorizedUser:
             token=d.get("token"),
             identifier=d.get("identifier"),
             created_at=d.get("createdAt"),
+            s3_access_key_id=d.get("s3AccessKeyId"),
+            s3_secret_key=d.get("s3SecretKey"),
         )
 
 
@@ -962,7 +966,31 @@ class AwsStsUser:
         return {"type": "awssts", "principal": self.principal}
 
 
-DiskUser = Union[TokenUser, AwsStsUser]
+@dataclass
+class S3User:
+    """An S3 access key pair for the disk's S3 API. The keys can read and write
+    the whole disk, so keep them server-side and give browsers presigned URLs.
+    ``ttl`` is a Go duration (``"1h"``) and ``expires_at`` an RFC3339 timestamp;
+    pass at most one."""
+
+    nickname: Optional[str] = None
+    ttl: Optional[str] = None
+    expires_at: Optional[str] = None
+    read_only: Optional[bool] = None
+
+    def to_json(self) -> dict:
+        return _drop_none(
+            {
+                "type": "s3",
+                "nickname": self.nickname,
+                "ttl": self.ttl,
+                "expiresAt": self.expires_at,
+                "readOnly": self.read_only,
+            }
+        )
+
+
+DiskUser = Union[TokenUser, AwsStsUser, S3User]
 
 
 @dataclass(frozen=True)

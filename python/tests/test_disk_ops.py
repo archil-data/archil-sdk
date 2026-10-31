@@ -3,7 +3,7 @@ import uuid
 import httpx
 import pytest
 
-from archil import ArchilApiError, AwsStsUser, Branch, Delegation, ExecMountSpec, TokenUser
+from archil import ArchilApiError, AwsStsUser, Branch, Delegation, ExecMountSpec, S3User, TokenUser
 from conftest import error_envelope, ok_envelope
 
 DISK_JSON = {
@@ -35,6 +35,43 @@ def test_add_user_awssts(archil, router):
     router.set(lambda req: ok_envelope({"type": "awssts", "identifier": "arn:x"}))
     d.add_user(AwsStsUser(principal="arn:x"))
     assert router.requests[-1].json == {"type": "awssts", "principal": "arn:x"}
+
+
+def test_add_user_s3(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: ok_envelope({"type": "s3", "identifier": "AKIA1"}))
+    d.add_user(S3User(ttl="1h", read_only=True))
+    assert router.requests[-1].json == {"type": "s3", "ttl": "1h", "readOnly": True}
+
+
+def test_create_s3_credentials_returns_keys(archil, router):
+    d = _disk(archil, router)
+    router.set(
+        lambda req: ok_envelope(
+            {"type": "s3", "identifier": "AKIA1", "s3AccessKeyId": "AKIA1", "s3SecretKey": "secret"}
+        )
+    )
+    user = d.create_s3_credentials(nickname="uploads")
+    assert user.s3_access_key_id == "AKIA1"
+    assert user.s3_secret_key == "secret"
+    assert router.requests[-1].json == {"type": "s3", "nickname": "uploads"}
+
+
+def test_create_s3_credentials_requires_secret(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: ok_envelope({"type": "s3", "identifier": "AKIA1", "s3AccessKeyId": "AKIA1"}))
+    with pytest.raises(RuntimeError, match="S3 credentials"):
+        d.create_s3_credentials()
+
+
+def test_remove_s3_credentials(archil, router):
+    d = _disk(archil, router)
+    router.set(lambda req: ok_envelope(None))
+    d.remove_s3_credentials("AKIA1")
+    req = router.requests[-1]
+    assert req.method == "DELETE"
+    assert req.path == "/api/disks/dsk-1/users/s3"
+    assert req.query["identifier"] == "AKIA1"
 
 
 def test_remove_user_query_param(archil, router):

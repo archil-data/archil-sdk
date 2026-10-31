@@ -493,19 +493,19 @@ class Disk:
         ...
 
     class __add_user_spec(typing_extensions.Protocol):
-        def __call__(self, /, user: archil._models.TokenUser | archil._models.AwsStsUser | dict) -> archil._models.AuthorizedUser:
+        def __call__(self, /, user: archil._models.TokenUser | archil._models.AwsStsUser | archil._models.S3User | dict) -> archil._models.AuthorizedUser:
             ...
 
-        async def aio(self, /, user: archil._models.TokenUser | archil._models.AwsStsUser | dict) -> archil._models.AuthorizedUser:
+        async def aio(self, /, user: archil._models.TokenUser | archil._models.AwsStsUser | archil._models.S3User | dict) -> archil._models.AuthorizedUser:
             ...
 
     add_user: __add_user_spec
 
     class __remove_user_spec(typing_extensions.Protocol):
-        def __call__(self, /, user_type: typing.Literal['token', 'awssts'], identifier: str) -> None:
+        def __call__(self, /, user_type: typing.Literal['token', 'awssts', 's3'], identifier: str) -> None:
             ...
 
-        async def aio(self, /, user_type: typing.Literal['token', 'awssts'], identifier: str) -> None:
+        async def aio(self, /, user_type: typing.Literal['token', 'awssts', 's3'], identifier: str) -> None:
             ...
 
     remove_user: __remove_user_spec
@@ -533,6 +533,32 @@ class Disk:
             ...
 
     remove_token_user: __remove_token_user_spec
+
+    class __create_s3_credentials_spec(typing_extensions.Protocol):
+        def __call__(self, /, nickname: str | None = None, ttl: str | None = None, expires_at: str | None = None, read_only: bool | None = None) -> archil._models.AuthorizedUser:
+            """Create an S3 access key pair for this disk's S3 API and return it,
+            including the one-time ``s3_secret_key``. The keys can read and write the
+            whole disk, so keep them server-side and give browsers presigned URLs.
+            """
+            ...
+
+        async def aio(self, /, nickname: str | None = None, ttl: str | None = None, expires_at: str | None = None, read_only: bool | None = None) -> archil._models.AuthorizedUser:
+            """Create an S3 access key pair for this disk's S3 API and return it,
+            including the one-time ``s3_secret_key``. The keys can read and write the
+            whole disk, so keep them server-side and give browsers presigned URLs.
+            """
+            ...
+
+    create_s3_credentials: __create_s3_credentials_spec
+
+    class __remove_s3_credentials_spec(typing_extensions.Protocol):
+        def __call__(self, /, access_key_id: str) -> None:
+            ...
+
+        async def aio(self, /, access_key_id: str) -> None:
+            ...
+
+    remove_s3_credentials: __remove_s3_credentials_spec
 
     class __list_delegations_spec(typing_extensions.Protocol):
         def __call__(self, /) -> list[archil._models.Delegation]:
@@ -566,7 +592,8 @@ class Disk:
             ``idempotency_key`` is a UUID identifying this create. Pass the same key
             (and arguments) when you retry a create yourself, so a retry of one that
             succeeded returns that branch instead of a 409. It defaults to a fresh
-            key per call; the SDK's own retries always reuse it."""
+            key per call; the SDK's own retries always reuse it.
+            """
             ...
 
         async def aio(self, /, name: str, from_checkpoint: str, *, from_branch: str | None = None, idempotency_key: str | None = None) -> archil._models.Branch:
@@ -578,7 +605,8 @@ class Disk:
             ``idempotency_key`` is a UUID identifying this create. Pass the same key
             (and arguments) when you retry a create yourself, so a retry of one that
             succeeded returns that branch instead of a 409. It defaults to a fresh
-            key per call; the SDK's own retries always reuse it."""
+            key per call; the SDK's own retries always reuse it.
+            """
             ...
 
     create_branch: __create_branch_spec
@@ -1738,6 +1766,18 @@ class Workspace:
 
     def _covered(self, prefix: str) -> list[tuple[str, archil._workspace._Mount, str]]:
         """Mounts touched by a key prefix; an empty prefix fans out to all of them."""
+        ...
+
+    def _root_globs(self, globs: typing.List[str]) -> dict[str, typing.List[str]]:
+        """Route grep globs written against the workspace root to the mounts they
+        can match. A glob that starts with a mount's name goes to that mount
+        without the name. One with no ``/``, or that starts with ``**/`` with or
+        without a leading ``/``, goes to every mount as written, and also applies
+        to a mount it names exactly, like ``!cache`` or ``**/logs/**``. Mount
+        names are matched literally, so ``!l*`` doesn't skip a ``logs`` mount.
+        Leaves out a mount whose directory an exclude names, or that no include
+        reaches, and raises for any other glob with a ``/``.
+        """
         ...
 
     def _disk_key(self, entry: archil._workspace._Mount, rel: str) -> str:
