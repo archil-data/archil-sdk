@@ -113,22 +113,26 @@ class ArchilMount:
                 f"mount {self.disk}",
                 timeout=120,
             )
+            self._mounted[id(session)] = mount_path.as_posix()
+            session.register_pre_stop_hook(lambda: self.detach(session))
         finally:
             await session.exec(f"rm -f {quoted_token_file}", timeout=30, user=self.user)
-
-        self._mounted[id(session)] = mount_path.as_posix()
-        session.register_pre_stop_hook(lambda: self.detach(session))
 
         if self.make_writable and not self.read_only and not self.shared:
             await self._make_writable(session, mount_path)
         return mount_path.as_posix()
 
     async def detach(self, session: BaseSandboxSession) -> None:
-        """Flush buffered writes and release the disk. Safe to call more than once."""
-        mount_path = self._mounted.pop(id(session), None)
+        """Flush buffered writes and release the disk.
+
+        Safe to call more than once; after a failure, calling it again retries."""
+        mount_path = self._mounted.get(id(session))
         if mount_path is None:
             return
-        path = shlex.quote(mount_path)
+        await self._release(session, shlex.quote(mount_path))
+        del self._mounted[id(session)]
+
+    async def _release(self, session: BaseSandboxSession, path: str) -> None:
         unmount = await session.exec(f"archil unmount {path}", timeout=300, user=self.user)
         if unmount.exit_code == 0 or self.read_only:
             return

@@ -41,6 +41,9 @@ case "$1" in
   unmount)
     [ -n "$FAKE_UNMOUNT_FAILS" ] && { echo "cannot detach" >&2; exit 1; }
     exit 0 ;;
+  sync)
+    [ -n "$FAKE_SYNC_FAILS" ] && { echo "sync failed" >&2; exit 1; }
+    exit 0 ;;
   delegations)
     printf '[{"path": "%s", "state": "Held"}, {"path": "%s/sub/dir", "state": "Held"}]\n' "$2" "$2" ;;
 esac
@@ -184,6 +187,39 @@ async def test_detach_falls_back_to_sync_and_checkin_when_unmount_fails(fake_arc
         f"checkin {mount_path}/sub/dir",
         f"checkin {mount_path}",
     ]
+
+
+async def test_failed_release_can_be_retried(fake_archil, session, monkeypatch):
+    mount = local_mount(path="data")
+    mount_path = await mount.attach(session)
+    monkeypatch.setenv("FAKE_UNMOUNT_FAILS", "1")
+    monkeypatch.setenv("FAKE_SYNC_FAILS", "1")
+
+    with pytest.raises(ArchilMountError, match="sync failed"):
+        await mount.detach(session)
+    monkeypatch.delenv("FAKE_UNMOUNT_FAILS")
+    monkeypatch.delenv("FAKE_SYNC_FAILS")
+    await mount.detach(session)
+
+    assert fake_archil().count(f"unmount {mount_path}") == 2
+
+
+async def test_release_is_registered_even_if_token_cleanup_fails(fake_archil, session, monkeypatch):
+    mount = local_mount(path="data")
+    original_exec = session.exec
+
+    async def exec_failing_cleanup(command, *args, **kwargs):
+        if str(command).startswith("rm -f"):
+            raise RuntimeError("cleanup failed")
+        return await original_exec(command, *args, **kwargs)
+
+    monkeypatch.setattr(session, "exec", exec_failing_cleanup)
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        await mount.attach(session)
+    monkeypatch.setattr(session, "exec", original_exec)
+    await session.aclose()
+
+    assert any(call.startswith("unmount ") for call in fake_archil())
 
 
 async def test_read_only_detach_does_not_check_in(fake_archil, session, monkeypatch):
