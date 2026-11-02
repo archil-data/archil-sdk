@@ -537,15 +537,17 @@ class Disk:
     class __create_s3_credentials_spec(typing_extensions.Protocol):
         def __call__(self, /, nickname: str | None = None, ttl: str | None = None, expires_at: str | None = None, read_only: bool | None = None) -> archil._models.AuthorizedUser:
             """Create an S3 access key pair for this disk's S3 API and return it,
-            including the one-time ``s3_secret_key``. The keys can read and write the
-            whole disk, so keep them server-side and give browsers presigned URLs.
+            including the one-time ``s3_secret_key``. The keys reach the whole disk,
+            read-write unless ``read_only`` is set, so keep them server-side and give
+            browsers presigned URLs.
             """
             ...
 
         async def aio(self, /, nickname: str | None = None, ttl: str | None = None, expires_at: str | None = None, read_only: bool | None = None) -> archil._models.AuthorizedUser:
             """Create an S3 access key pair for this disk's S3 API and return it,
-            including the one-time ``s3_secret_key``. The keys can read and write the
-            whole disk, so keep them server-side and give browsers presigned URLs.
+            including the one-time ``s3_secret_key``. The keys reach the whole disk,
+            read-write unless ``read_only`` is set, so keep them server-side and give
+            browsers presigned URLs.
             """
             ...
 

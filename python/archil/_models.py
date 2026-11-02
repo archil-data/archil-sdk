@@ -968,8 +968,9 @@ class AwsStsUser:
 
 @dataclass
 class S3User:
-    """An S3 access key pair for the disk's S3 API. The keys can read and write
-    the whole disk, so keep them server-side and give browsers presigned URLs.
+    """An S3 access key pair for the disk's S3 API. The keys reach the whole
+    disk, read-write unless ``read_only`` is set, so keep them server-side and
+    give browsers presigned URLs.
     ``ttl`` is a Go duration (``"1h"``) and ``expires_at`` an RFC3339 timestamp;
     pass at most one."""
 

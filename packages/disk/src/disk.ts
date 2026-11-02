@@ -538,8 +538,9 @@ export class Disk implements FileSystem {
 
   /**
    * Create an S3 access key pair for this disk's S3 API. The secret key is
-   * returned only here. The keys can read and write the whole disk, so keep
-   * them server-side and give browsers presigned URLs instead.
+   * returned only here. The keys reach the whole disk, read-write unless
+   * `readOnly` is set, so keep them server-side and give browsers presigned
+   * URLs instead.
    */
   async createS3Credentials(
     options: Omit<S3User, "type"> = {},

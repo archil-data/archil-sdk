@@ -21,7 +21,6 @@ from ._models import (
     DiskMetrics,
     DiskStatus,
     DiskUser,
-    S3User,
     ExecResult,
     GrepResult,
     ListObjectsResult,
@@ -35,6 +34,7 @@ from ._models import (
     RootAttrs,
     PutObjectResult,
     S3Object,
+    S3User,
     ShareUrl,
     UploadPart,
 )
@@ -265,8 +265,9 @@ class _Disk:
         read_only: Optional[bool] = None,
     ) -> AuthorizedUser:
         """Create an S3 access key pair for this disk's S3 API and return it,
-        including the one-time ``s3_secret_key``. The keys can read and write the
-        whole disk, so keep them server-side and give browsers presigned URLs."""
+        including the one-time ``s3_secret_key``. The keys reach the whole disk,
+        read-write unless ``read_only`` is set, so keep them server-side and give
+        browsers presigned URLs."""
         user = await self.add_user(
             S3User(nickname=nickname, ttl=ttl, expires_at=expires_at, read_only=read_only)
         )
