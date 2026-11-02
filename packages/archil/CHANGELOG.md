@@ -1,5 +1,12 @@
 # archil
 
+## 0.0.2
+
+### Patch Changes
+
+- Updated dependencies [2135fc1]
+  - disk@1.11.0
+
 ## 0.0.1
 
 ### Patch Changes
