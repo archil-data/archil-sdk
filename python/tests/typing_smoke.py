@@ -144,6 +144,8 @@ def sync_usage() -> None:
         pass
     user = d.add_user(TokenUser(nickname="ci"))
     d.remove_user("token", user.identifier or "")
+    s3 = d.create_s3_credentials(ttl="1h", read_only=True)
+    d.remove_s3_credentials(s3.s3_access_key_id or "")
     delegations: list[Delegation] = d.list_delegations()
     if delegations:
         d.revoke_delegation(delegations[0])

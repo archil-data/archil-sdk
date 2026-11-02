@@ -23,6 +23,7 @@ export type Branch = components["schemas"]["BranchResponse"];
 export type DiskUser = components["schemas"]["DiskUser"];
 export type TokenUser = components["schemas"]["TokenUser"];
 export type AwsStsUser = components["schemas"]["AwsStsUser"];
+export type S3User = components["schemas"]["S3User"];
 
 export type CreateApiTokenRequest = components["schemas"]["CreateApiTokenRequest"];
 export type ApiTokenResponse = components["schemas"]["ApiTokenResponse"];
