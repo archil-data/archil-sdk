@@ -693,7 +693,17 @@ async with session:
     await Runner.run(agent, "Summarize data/report.csv", run_config=RunConfig(sandbox=SandboxRunConfig(session=session)))
 ```
 
-`attach` mounts the disk at `path` (relative to the workspace root, or absolute) and registers a hook that flushes and releases the disk when the session closes; call `detach(session)` to release it sooner. The mount is left out of workspace snapshots. Options: `token` (the disk's mount token, default `ARCHIL_MOUNT_TOKEN`), `region` (default `ARCHIL_REGION`), `read_only`, `shared` (mount in several sandboxes at once; writes need `archil checkout`), `install_client`, and `make_writable` (hand the disk's root directory to the sandbox's default user if it can't write to it). The token is written to a short-lived file rather than the command line, so it stays out of the SDK's audit events and traces, but code in the sandbox with root access can read it; it grants access to this disk only.
+`attach` mounts the disk at `path` (relative to the workspace root, or absolute) and registers a hook that flushes and releases the disk when the session closes; call `detach(session)` to release it sooner. The mount is left out of workspace snapshots. Options: `token` (the disk's mount token, default `ARCHIL_MOUNT_TOKEN`), `region` (default `ARCHIL_REGION`), `read_only`, `shared`, `conditional`, `install_client`, and `make_writable` (hand the disk's root directory to the sandbox's default user if it can't write to it).
+
+Pick a mode by how many sandboxes write to the disk:
+
+- **Exclusive** (the default): one sandbox mounts the disk at a time. Use it when a single agent owns the disk.
+- **`shared=True`**: several sandboxes mount the disk, read-only until one runs `archil checkout <path>` to take a path for writing. Use it when agents need coordinated, exclusive ownership of the paths they write.
+- **`conditional=True`**: several sandboxes mount the disk and each can write any path no other client has checked out, without a checkout; the last write wins. Use it for parallel agents that write separate files. A write can take up to about 30 seconds to appear in other sandboxes.
+
+`shared` and `conditional` are mutually exclusive; `read_only` combines with either.
+
+The token is written to a short-lived file rather than the command line, so it stays out of the SDK's audit events and traces, but code in the sandbox with root access can read it; it grants access to this disk only.
 
 `ArchilMount` attaches to a running session rather than being a manifest `Mount` entry because, since openai-agents 0.20, the SDK only accepts the mount types it ships.
 

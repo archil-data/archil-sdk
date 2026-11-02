@@ -97,6 +97,9 @@ def local_mount(**kwargs) -> ArchilMount:
         ({}, "--region aws-us-east-1"),
         ({"shared": True}, "--region aws-us-east-1 --shared"),
         ({"read_only": True}, "--region aws-us-east-1 --read-only"),
+        ({"conditional": True}, "--region aws-us-east-1 --conditional"),
+        ({"shared": True, "read_only": True}, "--region aws-us-east-1 --shared --read-only"),
+        ({"conditional": True, "read_only": True}, "--region aws-us-east-1 --conditional --read-only"),
     ],
 )
 async def test_attach_runs_archil_mount_with_cli_flags(fake_archil, session, options, flags):
@@ -241,6 +244,19 @@ async def test_paths_outside_or_at_the_workspace_root_are_rejected(fake_archil, 
 async def test_missing_token_is_rejected(fake_archil, session):
     with pytest.raises(ValueError, match="ARCHIL_MOUNT_TOKEN"):
         await local_mount(token=None).attach(session)
+
+
+def test_shared_and_conditional_are_mutually_exclusive():
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        local_mount(shared=True, conditional=True)
+
+
+async def test_conditional_mount_hands_an_unwritable_root_to_the_default_user(fake_archil, session, monkeypatch):
+    monkeypatch.setenv("FAKE_ROOT_NOT_WRITABLE", "1")
+    mount_path = await local_mount(path="data", conditional=True).attach(session)
+    Path(mount_path).chmod(0o755)
+
+    assert f"chown {os.getuid()}:{os.getgid()} {mount_path}" in fake_archil()
 
 
 def test_repr_hides_the_token():

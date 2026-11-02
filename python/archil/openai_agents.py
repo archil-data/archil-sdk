@@ -48,9 +48,17 @@ class ArchilMount:
     ``path`` is relative to the workspace root unless it is absolute. ``token``
     is the disk's mount token and defaults to ``ARCHIL_MOUNT_TOKEN``; ``region``
     defaults to ``ARCHIL_REGION``. ``user`` is the sandbox user that runs the
-    ``archil`` client, which needs root. With ``make_writable``, a writable
-    exclusive mount whose root directory the session's default user cannot
-    write to is handed to that user, so the agent can write to the disk.
+    ``archil`` client, which needs root.
+
+    By default the mount is exclusive: one client holds the disk at a time.
+    ``shared`` lets several clients mount it, read-only until a client runs
+    ``archil checkout`` on a path. ``conditional`` lets several clients write
+    without a checkout: each writes any path no other client has checked out,
+    and the last write wins. ``read_only`` combines with either.
+
+    With ``make_writable``, a writable, non-shared mount whose root directory
+    the session's default user cannot write to is handed to that user, so the
+    agent can write to the disk.
     """
 
     disk: str
@@ -59,10 +67,15 @@ class ArchilMount:
     region: str | None = None
     read_only: bool = False
     shared: bool = False
+    conditional: bool = False
     install_client: bool = True
     make_writable: bool = True
     user: str | None = "root"
     _mounted: dict[int, str] = field(default_factory=dict, init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.shared and self.conditional:
+            raise ValueError("shared and conditional are mutually exclusive; pick one")
 
     async def attach(self, session: BaseSandboxSession) -> str:
         """Mount the disk in a started session and return the mount path.
@@ -143,6 +156,8 @@ class ArchilMount:
         args = ["archil", "mount", self.disk, mount_path.as_posix(), "--region", region]
         if self.shared:
             args.append("--shared")
+        if self.conditional:
+            args.append("--conditional")
         if self.read_only:
             args.append("--read-only")
         return f"mkdir -p {shlex.quote(mount_path.as_posix())} && {shlex.join(args)}"

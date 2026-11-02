@@ -2,8 +2,11 @@
 """End-to-end test for ``archil.openai_agents.ArchilMount``.
 
 Creates a disk, mounts it through the OpenAI Agents SDK in one sandbox and
-writes a file, then mounts it read-only in a second sandbox and reads the file
-back, and finally reads it through the Archil API. Deletes the disk afterwards.
+writes a file, mounts it shared and writes after a checkout, mounts it read-only
+and reads both files from an agent's shell tool, then mounts it in conditional
+mode in two sandboxes at once that each write without a checkout and see the
+other's file. Finally reads the first file through the Archil API and deletes
+the disk.
 
     python integration/openai_agents_mount_test.py e2b|daytona
 
@@ -103,6 +106,39 @@ async def run_in_sandbox(backend: str, mount: ArchilMount, command: str, *, via_
         await client.delete(session)
 
 
+async def write_and_wait(session, mine: str, theirs: str) -> str:
+    """Write ``mine``, then poll up to 60 s for the other client's ``theirs`` to appear."""
+    result = await session.exec(
+        f"echo {mine} > data/{mine}.txt && for i in $(seq 60); do"
+        f" [ -f data/{theirs}.txt ] && cat data/{theirs}.txt && exit 0; sleep 1; done; exit 1",
+        timeout=120,
+    )
+    if result.exit_code != 0:
+        raise AssertionError(f"{theirs}.txt never appeared for {mine}: {result.stderr.decode()}")
+    return result.stdout.decode().strip()
+
+
+async def conditional_pair(backend: str, disk_id: str, token: str) -> None:
+    """Two sandboxes mount the disk in conditional mode and write without a checkout."""
+    clients = [sandbox_client(backend) for _ in range(2)]
+    sessions = [await client.create(manifest=manifest, options=options) for client, options, manifest in clients]
+    try:
+        for session in sessions:
+            await session.start()
+            await ArchilMount(disk=disk_id, token=token, path="data", conditional=True).attach(session)
+        print("  both sandboxes mounted the disk in conditional mode")
+        seen = await asyncio.gather(
+            write_and_wait(sessions[0], "alpha", "beta"), write_and_wait(sessions[1], "beta", "alpha")
+        )
+        assert seen == ["beta", "alpha"], seen
+        print("  each sandbox wrote its file and saw the other's")
+    finally:
+        for (client, _, _), session in zip(clients, sessions):
+            await session.aclose()
+            await client.delete(session)
+    print("  released the disk and closed both sessions")
+
+
 def assert_released(disk) -> None:
     held = archil.get_disk(disk.id).list_delegations()
     assert not held, f"delegations still held after the session closed: {held}"
@@ -141,6 +177,10 @@ async def main(backend: str) -> None:
             via_agent=True,
         )
         assert f"{expected}\nshared\nread-only" in read_back, read_back
+
+        print("sandboxes 4 and 5: mount conditional at the same time and write without a checkout")
+        await conditional_pair(backend, disk.id, token)
+        assert_released(disk)
 
         from_api = archil.get_disk(disk.id).get_object("hello.txt").decode().strip()
         assert from_api == expected, from_api
