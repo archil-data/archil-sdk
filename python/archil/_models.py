@@ -1009,3 +1009,23 @@ class DiskPage:
 
     disks: list[Any]  # Disks (wrapped); typed as Any to avoid an import cycle.
     next_cursor: Optional[str] = None
+
+
+def exec_vm_body(
+    *,
+    base_image: Optional[str],
+    image_id: Optional[str],
+    vcpu_count: Optional[int],
+    mem_size_mib: Optional[int],
+    network: Optional[SandboxNetwork],
+) -> dict:
+    """The exec request fields that choose the VM's image, size, and network."""
+    return _drop_none(
+        {
+            "baseImage": base_image,
+            "imageId": image_id,
+            "vcpuCount": vcpu_count,
+            "memSizeMib": mem_size_mib,
+            "network": network.to_json() if network is not None else None,
+        }
+    )

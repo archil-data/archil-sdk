@@ -7,6 +7,7 @@ import { Tokens } from "./tokens.js";
 import { Workspace } from "./workspace.js";
 import { deriveS3BaseUrl, resolveBaseUrl } from "./regions.js";
 import { retryApiRequest } from "./retry.js";
+import { type ExecVmOptions, execVmBody } from "./exec-options.js";
 import type { ExecDiskResult } from "./types.js";
 
 export interface ArchilOptions {
@@ -79,7 +80,7 @@ export interface ExecMountSpec {
  */
 export type ExecMount = Disk | string | ExecMountSpec;
 
-export interface ExecOptions {
+export interface ExecOptions extends ExecVmOptions {
   /**
    * Disks to mount, keyed by the relative path under `/mnt/archil` at which
    * to mount each one. At least one entry is required. Paths must be
@@ -189,7 +190,7 @@ export class Archil {
       retryApiRequest(
         () =>
           this._client.POST("/api/exec", {
-            body: { disks, command: opts.command },
+            body: { ...execVmBody(opts), disks, command: opts.command },
           }),
         "connect",
       ),

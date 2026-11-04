@@ -45,19 +45,41 @@ class Archil:
         ...
 
     class __exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, disks: dict[str, object | str | archil._archil.ExecMountSpec], command: str) -> archil._models.ExecResult:
+        def __call__(self, /, *, disks: dict[str, object | str | archil._archil.ExecMountSpec], command: str, base_image: str | None = None, image_id: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, network: archil._models.SandboxNetwork | None = None) -> archil._models.ExecResult:
             """Run a command in a container with multiple disks mounted
             simultaneously, each at its own relative path under ``/mnt/archil``.
             Blocks until the command completes and returns its stdout, stderr, exit
             code, and timing.
+
+            ``base_image`` is a public Linux OCI image reference (such as
+            ``python:3.12-slim``) to run the command in; the first exec with an
+            image waits while it is converted. ``image_id`` is a ready image from
+            ``images.build()`` instead, for images that need registry credentials.
+            Without either, the command runs in Archil's exec image.
+            ``vcpu_count`` (1-32, default 2) and ``mem_size_mib`` (256-65536,
+            default 4096) size the VM; an exec larger than the default bills as
+            that many multiples of a call. ``network`` sets an egress policy (not
+            available on free plans); a default-deny policy still allows the
+            disks' mounts.
             """
             ...
 
-        async def aio(self, /, *, disks: dict[str, object | str | archil._archil.ExecMountSpec], command: str) -> archil._models.ExecResult:
+        async def aio(self, /, *, disks: dict[str, object | str | archil._archil.ExecMountSpec], command: str, base_image: str | None = None, image_id: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, network: archil._models.SandboxNetwork | None = None) -> archil._models.ExecResult:
             """Run a command in a container with multiple disks mounted
             simultaneously, each at its own relative path under ``/mnt/archil``.
             Blocks until the command completes and returns its stdout, stderr, exit
             code, and timing.
+
+            ``base_image`` is a public Linux OCI image reference (such as
+            ``python:3.12-slim``) to run the command in; the first exec with an
+            image waits while it is converted. ``image_id`` is a ready image from
+            ``images.build()`` instead, for images that need registry credentials.
+            Without either, the command runs in Archil's exec image.
+            ``vcpu_count`` (1-32, default 2) and ``mem_size_mib`` (256-65536,
+            default 4096) size the VM; an exec larger than the default bills as
+            that many multiples of a call. ``network`` sets an egress policy (not
+            available on free plans); a default-deny policy still allows the
+            disks' mounts.
             """
             ...
 
@@ -719,15 +741,37 @@ class Disk:
     wait_until_ready: __wait_until_ready_spec
 
     class __exec_spec(typing_extensions.Protocol):
-        def __call__(self, /, command: str) -> archil._models.ExecResult:
+        def __call__(self, /, command: str, *, base_image: str | None = None, image_id: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, network: archil._models.SandboxNetwork | None = None) -> archil._models.ExecResult:
             """Execute a command in a container with this disk mounted. Blocks until
             the command completes and returns stdout, stderr, and exit code.
+
+            ``base_image`` is a public Linux OCI image reference (such as
+            ``python:3.12-slim``) to run the command in; the first exec with an
+            image waits while it is converted. ``image_id`` is a ready image from
+            ``images.build()`` instead, for images that need registry credentials.
+            Without either, the command runs in Archil's exec image.
+            ``vcpu_count`` (1-32, default 2) and ``mem_size_mib`` (256-65536,
+            default 4096) size the VM; an exec larger than the default bills as
+            that many multiples of a call. ``network`` sets an egress policy (not
+            available on free plans); a default-deny policy still allows the
+            disks' mounts.
             """
             ...
 
-        async def aio(self, /, command: str) -> archil._models.ExecResult:
+        async def aio(self, /, command: str, *, base_image: str | None = None, image_id: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, network: archil._models.SandboxNetwork | None = None) -> archil._models.ExecResult:
             """Execute a command in a container with this disk mounted. Blocks until
             the command completes and returns stdout, stderr, and exit code.
+
+            ``base_image`` is a public Linux OCI image reference (such as
+            ``python:3.12-slim``) to run the command in; the first exec with an
+            image waits while it is converted. ``image_id`` is a ready image from
+            ``images.build()`` instead, for images that need registry credentials.
+            Without either, the command runs in Archil's exec image.
+            ``vcpu_count`` (1-32, default 2) and ``mem_size_mib`` (256-65536,
+            default 4096) size the VM; an exec larger than the default bills as
+            that many multiples of a call. ``network`` sets an egress policy (not
+            available on free plans); a default-deny policy still allows the
+            disks' mounts.
             """
             ...
 

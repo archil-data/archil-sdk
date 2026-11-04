@@ -7,7 +7,7 @@ from typing import Optional, Union
 from ._disks import _Disks
 from ._http import DEFAULT_MAX_THROTTLE_WAIT, _Transport
 from ._images import _Images
-from ._models import ExecResult
+from ._models import ExecResult, SandboxNetwork, exec_vm_body
 from ._regions import derive_s3_base_url, resolve_base_url
 from ._sandboxes import _Sandboxes
 from ._tokens import _Tokens
@@ -116,11 +116,32 @@ class _Archil:
     def sandboxes(self) -> "_Sandboxes":
         return self._sandboxes
 
-    async def exec(self, *, disks: dict[str, ExecMount], command: str) -> ExecResult:
+    async def exec(
+        self,
+        *,
+        disks: dict[str, ExecMount],
+        command: str,
+        base_image: Optional[str] = None,
+        image_id: Optional[str] = None,
+        vcpu_count: Optional[int] = None,
+        mem_size_mib: Optional[int] = None,
+        network: Optional[SandboxNetwork] = None,
+    ) -> ExecResult:
         """Run a command in a container with multiple disks mounted
         simultaneously, each at its own relative path under ``/mnt/archil``.
         Blocks until the command completes and returns its stdout, stderr, exit
-        code, and timing."""
+        code, and timing.
+
+        ``base_image`` is a public Linux OCI image reference (such as
+        ``python:3.12-slim``) to run the command in; the first exec with an
+        image waits while it is converted. ``image_id`` is a ready image from
+        ``images.build()`` instead, for images that need registry credentials.
+        Without either, the command runs in Archil's exec image.
+        ``vcpu_count`` (1-32, default 2) and ``mem_size_mib`` (256-65536,
+        default 4096) size the VM; an exec larger than the default bills as
+        that many multiples of a call. ``network`` sets an egress policy (not
+        available on free plans); a default-deny policy still allows the
+        disks' mounts."""
         payload: dict[str, object] = {}
         for rel_path, mount in disks.items():
             if isinstance(mount, ExecMountSpec):
@@ -134,7 +155,21 @@ class _Archil:
                 payload[rel_path] = entry
             else:
                 payload[rel_path] = _disk_id(mount)
-        data = await self._transport.request_json("POST", "/api/exec", json={"disks": payload, "command": command})
+        data = await self._transport.request_json(
+            "POST",
+            "/api/exec",
+            json={
+                **exec_vm_body(
+                    base_image=base_image,
+                    image_id=image_id,
+                    vcpu_count=vcpu_count,
+                    mem_size_mib=mem_size_mib,
+                    network=network,
+                ),
+                "disks": payload,
+                "command": command,
+            },
+        )
         return ExecResult.from_json(data)
 
     def workspace(self, mounts: dict[str, ExecMount]) -> "_Workspace":
