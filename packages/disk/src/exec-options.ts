@@ -31,13 +31,13 @@ export interface ExecVmOptions {
   network?: ExecNetwork;
 }
 
-/** @internal The request fields for `options`, leaving out the unset ones. */
+/** @internal Copies only the known option keys into a request body. */
 export function execVmBody(options: ExecVmOptions | undefined): ExecVmOptions {
-  const body: ExecVmOptions = {};
-  if (options?.baseImage !== undefined) body.baseImage = options.baseImage;
-  if (options?.imageId !== undefined) body.imageId = options.imageId;
-  if (options?.vcpuCount !== undefined) body.vcpuCount = options.vcpuCount;
-  if (options?.memSizeMib !== undefined) body.memSizeMib = options.memSizeMib;
-  if (options?.network !== undefined) body.network = options.network;
-  return body;
+  return {
+    baseImage: options?.baseImage,
+    imageId: options?.imageId,
+    vcpuCount: options?.vcpuCount,
+    memSizeMib: options?.memSizeMib,
+    network: options?.network,
+  };
 }
