@@ -2,10 +2,7 @@ import type { SandboxEgressPolicy } from "./sandbox.js";
 
 /** Network policy for an exec's container, using the sandbox egress rules. */
 export interface ExecNetwork {
-  /**
-   * Egress policy. A default-deny policy also allows the Archil endpoints the
-   * container's disks mount through. Egress is unrestricted when omitted.
-   */
+  /** Egress policy. Egress is unrestricted when omitted. */
   egress?: SandboxEgressPolicy;
 }
 
