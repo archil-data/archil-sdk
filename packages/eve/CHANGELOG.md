@@ -1,5 +1,17 @@
 # @archildata/eve
 
+## 0.0.23
+
+### Patch Changes
+
+- 036417b: `disk` now depends only on `@archildata/api-types` and `undici`. It no longer installs `uuid`, `openapi-fetch`, `fast-xml-parser`, `commander`, or `@clack/prompts`: the control-plane client, S3 XML parsing, and the `disk`/`sandbox` command-line parsing, spinner, and API-key prompt are built in. `zod` is now an optional peer dependency used only by `disk/internal/tools`, so installing `disk` no longer pulls it in; `@archildata/eve` now depends on `zod` directly. `undici` is updated to 8.12.3 and no longer pinned to an exact version (`^8.12.3`), and `@archildata/api-types` to 0.0.79. S3 listings now keep leading and trailing spaces in object keys (they were trimmed) and decode numeric character references such as `&#233;`.
+- Updated dependencies [340d4bb]
+- Updated dependencies [036417b]
+- Updated dependencies [e282728]
+- Updated dependencies [4516a02]
+- Updated dependencies [e491563]
+  - disk@1.12.0
+
 ## 0.0.22
 
 ### Patch Changes

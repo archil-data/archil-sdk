@@ -1,5 +1,16 @@
 # archil
 
+## 0.0.3
+
+### Patch Changes
+
+- Updated dependencies [340d4bb]
+- Updated dependencies [036417b]
+- Updated dependencies [e282728]
+- Updated dependencies [4516a02]
+- Updated dependencies [e491563]
+  - disk@1.12.0
+
 ## 0.0.2
 
 ### Patch Changes

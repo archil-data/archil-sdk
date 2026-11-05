@@ -1,5 +1,18 @@
 # disk
 
+## 1.12.0
+
+### Minor Changes
+
+- 036417b: `disk` now depends only on `@archildata/api-types` and `undici`. It no longer installs `uuid`, `openapi-fetch`, `fast-xml-parser`, `commander`, or `@clack/prompts`: the control-plane client, S3 XML parsing, and the `disk`/`sandbox` command-line parsing, spinner, and API-key prompt are built in. `zod` is now an optional peer dependency used only by `disk/internal/tools`, so installing `disk` no longer pulls it in; `@archildata/eve` now depends on `zod` directly. `undici` is updated to 8.12.3 and no longer pinned to an exact version (`^8.12.3`), and `@archildata/api-types` to 0.0.79. S3 listings now keep leading and trailing spaces in object keys (they were trimmed) and decode numeric character references such as `&#233;`.
+- e282728: Exec takes the image, size, and egress policy of the VM it runs in: `baseImage` or `imageId`, `vcpuCount`, `memSizeMib`, and `network` on `exec`, `disk.exec`, and `disks.exec` (`base_image`, `image_id`, `vcpu_count`, `mem_size_mib`, and `network` in Python).
+- 4516a02: Attaching to a sandbox process now takes it over: the runtime closes the connection that held it, and that connection's `wait()` fails with "Process was taken over by another connection". Pass `shared: true` (`shared=True` in Python) to watch alongside the owner instead; a shared connection's `wait()` fails with "Process owner disconnected" when the owner's connection closes.
+
+### Patch Changes
+
+- 340d4bb: Send the API key exactly as given as a standard bearer token (`Authorization: Bearer <key>`) on control-plane and S3 requests, so credential-injecting proxies that substitute a placeholder token work. Keys without their `key-` prefix need a control plane that accepts them after `Bearer`.
+- e491563: Sandbox process connections send their connection token in the WebSocket `Sec-WebSocket-Protocol` header instead of the URL, when the API provides one, so the token no longer appears in logs that record request URLs.
+
 ## 1.11.0
 
 ### Minor Changes

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.21.0
+
+### Minor Changes
+
+- e282728: Exec takes the image, size, and egress policy of the VM it runs in: `baseImage` or `imageId`, `vcpuCount`, `memSizeMib`, and `network` on `exec`, `disk.exec`, and `disks.exec` (`base_image`, `image_id`, `vcpu_count`, `mem_size_mib`, and `network` in Python).
+- 4516a02: Attaching to a sandbox process now takes it over: the runtime closes the connection that held it, and that connection's `wait()` fails with "Process was taken over by another connection". Pass `shared: true` (`shared=True` in Python) to watch alongside the owner instead; a shared connection's `wait()` fails with "Process owner disconnected" when the owner's connection closes.
+
+### Patch Changes
+
+- 340d4bb: Send the API key exactly as given as a standard bearer token (`Authorization: Bearer <key>`) on control-plane and S3 requests, so credential-injecting proxies that substitute a placeholder token work. Keys without their `key-` prefix need a control plane that accepts them after `Bearer`.
+- e491563: Sandbox process connections send their connection token in the WebSocket `Sec-WebSocket-Protocol` header instead of the URL, when the API provides one, so the token no longer appears in logs that record request URLs.
+
 ## 0.20.0
 
 ### Minor Changes
