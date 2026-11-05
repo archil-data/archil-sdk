@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
-import { Command } from "commander";
+import { Command } from "../src/cli/command.js";
 import {
   addGlobalOptions,
   addProfileCommands,

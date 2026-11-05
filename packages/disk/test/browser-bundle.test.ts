@@ -321,7 +321,7 @@ test("SDK runs in a browser sandbox: S3 getObject returns bytes", async () => {
   assert.equal(new TextDecoder().decode(bytes), "hi!");
 });
 
-test("SDK runs in a browser sandbox: S3 listObjects parses XML (fast-xml-parser)", async () => {
+test("SDK runs in a browser sandbox: S3 listObjects parses XML", async () => {
   const { sdk } = await loadSdkInBrowserSandbox(routingFetch([]));
   const archil = new sdk.Archil({ apiKey: "key-test", region: "aws-us-east-1" });
   const [disk] = await archil.disks.list();

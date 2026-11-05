@@ -79,12 +79,6 @@ importers:
       '@archildata/api-types':
         specifier: ^0.0.78
         version: 0.0.78
-      '@clack/prompts':
-        specifier: ^1.7.0
-        version: 1.7.0
-      commander:
-        specifier: ^14.0.3
-        version: 14.0.3
       undici:
         specifier: 8.10.2
         version: 8.10.2

@@ -1,7 +1,5 @@
 import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { Readable, Writable } from "node:stream";
-import { isCancel, password } from "@clack/prompts";
 import { credentialFilePath } from "./config-paths.js";
 import type { DiskProfile } from "./profiles.js";
 
@@ -106,19 +104,53 @@ export async function promptSecret(
     for await (const chunk of input) chunks.push(Buffer.from(chunk));
     return validateApiKey(Buffer.concat(chunks).toString("utf8"));
   }
-  const result = await password({
-    message: prompt,
-    input: input as unknown as Readable,
-    output: output as unknown as Writable,
-    withGuide: false,
-    validate(value) {
-      try {
-        validateApiKey(value ?? "");
-      } catch (error) {
-        return error instanceof Error ? error.message : String(error);
+  return readMaskedLine(prompt, input, output);
+}
+
+/**
+ * Read a line from a TTY in raw mode, echoing `*` per character. An invalid key
+ * prints the reason and asks again; Ctrl-C cancels.
+ */
+function readMaskedLine(prompt: string, input: SecretInput, output: SecretOutput): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const wasRaw = input.isRaw;
+    let value = "";
+    const finish = (settle: () => void) => {
+      input.off("data", onData);
+      input.setRawMode(wasRaw);
+      input.pause();
+      output.write("\n");
+      settle();
+    };
+    const onData = (chunk: Buffer) => {
+      for (const char of chunk.toString("utf8")) {
+        if (char === "\x03" || (char === "\x04" && value === "")) {
+          finish(() => reject(new Error("Profile creation cancelled")));
+          return;
+        }
+        if (char === "\r" || char === "\n") {
+          try {
+            const key = validateApiKey(value);
+            finish(() => resolve(key));
+            return;
+          } catch (error) {
+            output.write(`\n${error instanceof Error ? error.message : String(error)}\n${prompt}`);
+            value = "";
+          }
+        } else if (char === "\x7f" || char === "\b") {
+          if (value) {
+            value = value.slice(0, -1);
+            output.write("\b \b");
+          }
+        } else if (char >= " ") {
+          value += char;
+          output.write("*");
+        }
       }
-    },
+    };
+    output.write(prompt);
+    input.setRawMode(true);
+    input.resume();
+    input.on("data", onData);
   });
-  if (isCancel(result)) throw new Error("Profile creation cancelled");
-  return validateApiKey(result);
 }

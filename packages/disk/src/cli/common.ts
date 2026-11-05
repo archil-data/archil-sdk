@@ -1,6 +1,5 @@
-import { spinner } from "@clack/prompts";
-import type { Command } from "commander";
-import { Option } from "commander";
+import { Option, type Command } from "./command.js";
+import { spinner } from "./spinner.js";
 import {
   validateCredentialAndResolveRegion,
   type CredentialValidationOptions,
@@ -61,7 +60,7 @@ export function addProfileCommands(
       }
       const apiKey = validateApiKey(global.apiKey ?? await promptSecret());
       const progress = !global.region && !global.baseUrl && process.stderr.isTTY
-        ? spinner({ output: process.stderr, withGuide: false })
+        ? spinner(process.stderr)
         : undefined;
       progress?.start("Finding the API key's region");
       let region: string;
