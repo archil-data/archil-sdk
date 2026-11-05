@@ -77,8 +77,8 @@ importers:
   packages/disk:
     dependencies:
       '@archildata/api-types':
-        specifier: ^0.0.79
-        version: 0.0.79
+        specifier: ^0.0.81
+        version: 0.0.81
       undici:
         specifier: ^8.12.3
         version: 8.12.3
@@ -363,8 +363,8 @@ packages:
     peerDependencies:
       zod: ^3.23.8
 
-  '@archildata/api-types@0.0.79':
-    resolution: {integrity: sha512-ZxB7GVxuWzxBTU4kH+yF4VvlUuGC7rfz6jviBNOv/d5RD3T2Eu37D0McmeDXIx1aAz+uPihcmqKon6iWbhar+g==}
+  '@archildata/api-types@0.0.81':
+    resolution: {integrity: sha512-v5POIAOhko0pzVM9kQUvFJj31D3fDo/8kwHgmly0wNT20SepGPGThoB6qOcvUoA3rfiS3PGCkynLNfkoZf/QxQ==}
 
   '@archildata/native@0.8.18':
     resolution: {integrity: sha512-/gKLR8H9kbQdULY5wbfGXgsYo4wLr0f4iAsDfNeYA8QZufZH0AQXm/7CfpQTDzcXZ9vgUrQwkXQkCkhPOjx2Sg==}
@@ -2868,7 +2868,7 @@ snapshots:
       zod: 4.4.3
       zod-to-json-schema: 3.25.2(zod@4.4.3)
 
-  '@archildata/api-types@0.0.79': {}
+  '@archildata/api-types@0.0.81': {}
 
   '@archildata/native@0.8.18': {}
 

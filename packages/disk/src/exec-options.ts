@@ -1,38 +1,24 @@
+import type { components } from "@archildata/api-types";
 import type { SandboxEgressPolicy } from "./sandbox.js";
 
 /** Network policy for an exec's container, using the sandbox egress rules. */
-export interface ExecNetwork {
-  /** Egress policy. Egress is unrestricted when omitted. */
+export type ExecNetwork = Omit<components["schemas"]["ExecNetwork"], "egress"> & {
   egress?: SandboxEgressPolicy;
-}
+};
 
 /** The image, size, and network of the VM an exec runs in. */
-export interface ExecVmOptions {
-  /**
-   * Public Linux OCI image reference to run the command in, such as
-   * `python:3.12-slim`. The first exec with an image waits while it is
-   * converted; later execs reuse it. Defaults to Archil's exec image.
-   * Cannot be combined with `imageId`.
-   */
-  baseImage?: string;
-  /**
-   * Ready image from `images.build()`, for images that need registry
-   * credentials. Cannot be combined with `baseImage`.
-   */
-  imageId?: string;
-  /**
-   * vCPUs for the VM, from 1 to 32. Defaults to 2. An exec larger than the
-   * default size (2 vCPUs, 4096 MiB) bills as that many multiples of a call.
-   */
-  vcpuCount?: number;
-  /** Memory in MiB for the VM, from 256 to 65536. Defaults to 4096. */
-  memSizeMib?: number;
-  /** Network policy. Free plans cannot set one. */
+export type ExecVmOptions = Omit<components["schemas"]["ExecDiskRequest"], "command" | "network"> & {
   network?: ExecNetwork;
-}
+};
 
-/** @internal Copies only the known option keys into a request body. */
-export function execVmBody(options: ExecVmOptions | undefined): ExecVmOptions {
+/**
+ * @internal Copies only the known option keys into a request body. Every key
+ * is required here, so an option added to the API fails to compile until it is
+ * copied.
+ */
+export function execVmBody(options: ExecVmOptions | undefined): {
+  [K in keyof Required<ExecVmOptions>]: ExecVmOptions[K];
+} {
   return {
     baseImage: options?.baseImage,
     imageId: options?.imageId,
