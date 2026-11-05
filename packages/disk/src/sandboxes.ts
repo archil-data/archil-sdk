@@ -34,7 +34,7 @@ export interface CreateSandboxRequest {
   imageId?: string;
   env?: Record<string, string>;
   maxTtlSeconds?: number;
-  /** Seconds without a direct process connection before pausing. Omitted or zero disables idle expiry. */
+  /** Seconds without a direct process connection before pausing. Defaults to 1800 (30 minutes); zero disables idle expiry. */
   idleTtlSeconds?: number;
   /** Maximum concurrently attached exec sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs?: number;
