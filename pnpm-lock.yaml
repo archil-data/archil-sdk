@@ -80,7 +80,7 @@ importers:
         specifier: ^0.0.79
         version: 0.0.79
       undici:
-        specifier: 8.12.3
+        specifier: ^8.12.3
         version: 8.12.3
     devDependencies:
       '@types/node':
