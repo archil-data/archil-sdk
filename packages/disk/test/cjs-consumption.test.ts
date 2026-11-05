@@ -1,14 +1,10 @@
 // Guards the CJS `require("disk")` path. The SDK ships dual ESM/CJS builds; the
 // CJS build goes through bundler-generated Node interop, where a dependency's
-// `__esModule` marker can nest its default export under `.default`.
-// openapi-fetch is exactly such a dependency, so without an interop shim in
-// client.ts, `require("disk")` throws
-// "(0 , import_openapi_fetch.default) is not a function" the moment you
-// construct an Archil client.
+// `__esModule` marker can nest its default export under `.default` and break
+// calls into it.
 //
 // This builds the library entry to CJS with tsdown, then requires the output
-// and constructs a client — exercising the real createApiClient →
-// openapi-fetch factory path.
+// and constructs a client — exercising the real createApiClient path.
 
 import { test } from "vitest";
 import assert from "node:assert/strict";
@@ -43,8 +39,7 @@ test("require()-ing the CJS build constructs a working client", async () => {
     const sdk = require(path.join(outDir, "index.cjs"));
 
     assert.equal(typeof sdk.Archil, "function");
-    // Construction calls createApiClient → the openapi-fetch factory. Before the
-    // interop fix this threw "default is not a function" right here.
+    // Construction calls createApiClient.
     const archil = new sdk.Archil({ apiKey: "key-test", region: "aws-us-east-1" });
     assert.equal(typeof archil.disks.list, "function");
     assert.equal(typeof archil.tokens.list, "function");

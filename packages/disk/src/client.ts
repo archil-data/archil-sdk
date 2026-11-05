@@ -1,23 +1,11 @@
-import createClientDefault, { type Client } from "openapi-fetch";
-import type { paths } from "@archildata/api-types";
 import type { Dispatcher } from "undici";
 import type { ConnectionOptions } from "node:tls";
+import { createClient, type ApiClient } from "./api-fetch.js";
 import { ArchilApiError } from "./errors.js";
 import { resolveBaseUrl } from "./regions.js";
 import { USER_AGENT } from "./version.js";
 
-// openapi-fetch ships dual ESM/CJS builds. In our ESM output the default import
-// is the factory function directly; in our CJS output (dist/index.cjs) Node's
-// CJS interop can hand back the whole module namespace instead, so the real
-// factory is nested under `.default`. Unwrap it when the import isn't directly
-// callable. Without this, `require("disk")` throws "default is not a function".
-const createClient = (
-  typeof createClientDefault === "function"
-    ? createClientDefault
-    : (createClientDefault as { default: typeof createClientDefault }).default
-);
-
-export type ApiClient = Client<paths>;
+export type { ApiClient };
 
 export interface ArchilTlsOptions {
   /**
@@ -159,7 +147,7 @@ function createPooledFetch(
 
   return async (request: Request): Promise<Response> => {
     const { fetch, dispatcher } = await getSharedTransport(key, ca);
-    // openapi-fetch builds the global Request, which Undici's fetch does not
+    // The client builds the global Request, which Undici's fetch does not
     // accept as input, so hand over its parts. SDK request bodies are bounded.
     const body = request.body === null ? null : new Uint8Array(await request.arrayBuffer());
     const response = await fetch(request.url, {
@@ -188,7 +176,7 @@ export function apiKeyAuthorization(apiKey: string): string {
 export function createApiClient(opts: ApiClientOptions): ApiClient {
   const baseUrl = opts.baseUrl ?? resolveBaseUrl(opts.region);
   const authorization = apiKeyAuthorization(opts.apiKey);
-  return createClient<paths>({
+  return createClient({
     baseUrl,
     fetch: createPooledFetch(baseUrl, authorization, opts.tls),
     headers: {

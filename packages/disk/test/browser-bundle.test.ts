@@ -8,7 +8,7 @@
 //   2. The bundle is executed inside a `vm` context that mimics a browser:
 //      only web-platform globals are present — there is no `process`, no
 //      `require`, and no `Buffer`. The SDK's production code (Archil client,
-//      openapi-fetch transport, S3 XML parsing) is driven against a mocked
+//      control-plane transport, S3 XML parsing) is driven against a mocked
 //      `fetch`, which would throw `process is not defined` / `require is not
 //      defined` at the first misstep if anything reached for a Node API.
 
@@ -47,8 +47,6 @@ async function bundleForBrowser(format: BundleFormat, globalName?: string) {
     define: { __SDK_VERSION__: JSON.stringify("0-test") },
     deps: {
       alwaysBundle: (id) =>
-        id === "openapi-fetch" ||
-        id === "fast-xml-parser" ||
         id === "zod" ||
         id.startsWith("zod/"),
     },
@@ -136,8 +134,8 @@ function routingFetch(calls: BrowserCall[]): FetchMock {
   return (input: any, init?: any) => {
     const raw = typeof input === "string" ? input : input.url;
     const u = new URL(raw);
-    // openapi-fetch calls fetch(Request, ...) — the verb is on the Request, not
-    // in init — while raw fetches pass (url, init). Read whichever applies.
+    // The SDK calls fetch(Request) — the verb is on the Request, not in init —
+    // while raw fetches pass (url, init). Read whichever applies.
     const method = (typeof input === "string" ? init?.method : input.method) ?? "GET";
     calls.push({ url: raw, method });
 
@@ -323,7 +321,7 @@ test("SDK runs in a browser sandbox: S3 getObject returns bytes", async () => {
   assert.equal(new TextDecoder().decode(bytes), "hi!");
 });
 
-test("SDK runs in a browser sandbox: S3 listObjects parses XML (fast-xml-parser)", async () => {
+test("SDK runs in a browser sandbox: S3 listObjects parses XML", async () => {
   const { sdk } = await loadSdkInBrowserSandbox(routingFetch([]));
   const archil = new sdk.Archil({ apiKey: "key-test", region: "aws-us-east-1" });
   const [disk] = await archil.disks.list();

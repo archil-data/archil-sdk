@@ -4,7 +4,6 @@
 
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { validate as isUuid } from "uuid";
 import { Disk } from "../src/disk.js";
 import { ArchilApiError } from "../src/errors.js";
 import type { ApiClient } from "../src/client.js";
@@ -77,7 +76,10 @@ test("createBranch() posts the spec's field names with a UUID Idempotency-Key", 
     from_checkpoint_name: "cp1",
     from_branch: "base",
   });
-  assert.ok(isUuid(calls[0].params?.header?.["Idempotency-Key"] ?? ""));
+  assert.match(
+    calls[0].params?.header?.["Idempotency-Key"] ?? "",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
 });
 
 test("createBranch() reuses the Idempotency-Key when it retries", async () => {

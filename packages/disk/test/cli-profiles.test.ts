@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Command } from "commander";
+import { Command } from "../src/cli/command.js";
 import { afterEach, test, vi } from "vitest";
 import { addGlobalOptions, addProfileCommands } from "../src/cli/common.js";
 import { validateCredentialAndResolveRegion } from "../src/cli/credential-validation.js";
