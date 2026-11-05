@@ -94,12 +94,6 @@ importers:
       undici:
         specifier: 8.10.2
         version: 8.10.2
-      uuid:
-        specifier: ^11.1.1
-        version: 11.1.1
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^26.0.1
@@ -113,8 +107,15 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.9(@types/node@26.1.0)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(tsx@4.23.0)(yaml@2.9.0))
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/eve:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@archildata/mock':
         specifier: workspace:*
@@ -380,6 +381,7 @@ packages:
   '@archildata/native@0.8.18':
     resolution: {integrity: sha512-/gKLR8H9kbQdULY5wbfGXgsYo4wLr0f4iAsDfNeYA8QZufZH0AQXm/7CfpQTDzcXZ9vgUrQwkXQkCkhPOjx2Sg==}
     engines: {node: '>= 18'}
+    deprecated: 'SECURITY (ARCHIL-SA-2026-001): versions before 0.10.0 can trust certificates from compromised eMudhra CA keys. Upgrade to 0.10.0 or later now; older clients are rejected from 2026-11-20 20:00 UTC. https://archil.com/security/advisories/2026-10-emudhra'
 
   '@babel/generator@8.0.0':
     resolution: {integrity: sha512-NT9NrVwJsbSV6Y2FSstWa71EETOnzrjkL5/wX3D2mYHtKM+qvqB1DvR4D0Setb/gDBsHzRICifwEWMO8CnTF6g==}
