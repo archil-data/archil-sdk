@@ -172,8 +172,14 @@ class _Sandbox:
         offset: int = 0,
         on_output: Optional[SandboxProcessOutputHandler] = None,
         collect_output: bool = True,
+        shared: bool = False,
     ) -> "_SandboxProcess":
-        """Reattach to a process, optionally resuming output from a cursor."""
+        """Reattach to a process, optionally resuming output from a cursor.
+
+        Attaching takes the process over: the runtime closes the connection
+        that held it. With ``shared``, watch alongside that connection instead;
+        a shared connection is closed when the owner's closes.
+        """
         process = _SandboxProcess(
             process_id,
             offset,
@@ -182,10 +188,10 @@ class _Sandbox:
             self._new_process_connection,
             self._control_process,
         )
-        await process._connect(
-            {"type": "attach", "process_id": process_id, "offset": offset},
-            "attached",
-        )
+        request: dict[str, object] = {"type": "attach", "process_id": process_id, "offset": offset}
+        if shared:
+            request["shared"] = True
+        await process._connect(request, "attached")
         return process
 
     async def _new_process_connection(self) -> ClientConnection:

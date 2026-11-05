@@ -16,6 +16,11 @@ from ._models import (
 )
 
 _STDIN_CHUNK_BYTES = 1024 * 1024
+# Close codes the runtime uses when it ends a connection to a running process.
+_CLOSE_REASONS = {
+    4001: "Process was taken over by another connection",
+    4003: "Process owner disconnected",
+}
 
 
 class _SandboxProcess:
@@ -40,6 +45,7 @@ class _SandboxProcess:
         self._closed: Optional[asyncio.Future[None]] = None
         self._terminal: Optional[asyncio.Future[SandboxProcessResult]] = None
         self._connection_error: Optional[BaseException] = None
+        self._close_reason: Optional[str] = None
         self._result: Optional[SandboxProcessResult] = None
         self._stdin_closed = False
         self._stdin_lock = asyncio.Lock()
@@ -106,6 +112,8 @@ class _SandboxProcess:
         await asyncio.wait((self._terminal, self._closed), return_when=asyncio.FIRST_COMPLETED)
         if self._result is not None:
             return self._result
+        if self._close_reason is not None:
+            raise ConnectionError(self._close_reason)
         if self._connection_error is not None:
             raise ConnectionError("Process connection failed") from self._connection_error
         raise ConnectionError("Process connection closed before exit")
@@ -152,6 +160,9 @@ class _SandboxProcess:
             self._fail(self._ready, error)
             await socket.close()
         finally:
+            reason = _CLOSE_REASONS.get(getattr(socket, "close_code", None))
+            if reason is not None and self._result is None:
+                self._close_reason = reason
             if self._socket is socket:
                 self._socket = None
             self._fail(self._ready, ConnectionError("Process connection closed before ready"))

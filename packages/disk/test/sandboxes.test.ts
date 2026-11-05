@@ -1001,6 +1001,38 @@ test("openProcessSocket accepts a URL string or an endpoint", async () => {
   assert.deepEqual(endpoint.protocols, ["archil.connect.v1", "archil.token.c2lnbmVk"]);
 });
 
+test.each([
+  [4001, "Process was taken over by another connection"],
+  [4003, "Process owner disconnected"],
+])("a process connection the runtime closes with %i says why", async (code, message) => {
+  const client = {
+    POST: async () =>
+      ok({ url: "wss://sandbox.example/connect?token=signed", expires_at: now }),
+  } as unknown as ApiClient;
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const attaching = sandbox.attach("0198-process", { shared: code === 4003 });
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[0]?.sent.length, 1));
+  const socket = TestWebSocket.instances[0];
+  assert.deepEqual(JSON.parse(socket.sent[0] as string), {
+    type: "attach",
+    process_id: "0198-process",
+    offset: 0,
+    ...(code === 4003 ? { shared: true } : {}),
+  });
+  socket.emit("message", {
+    data: JSON.stringify({ type: "attached", process_id: "0198-process" }),
+  });
+  const process = await attaching;
+  const waiting = process.wait();
+  socket.emit("close", { code, reason: "", wasClean: true });
+
+  await assert.rejects(waiting, { message });
+  assert.equal(process.connected, false);
+});
+
 test("process connections retry API and WebSocket handshake failures", async () => {
   vi.spyOn(Math, "random").mockReturnValue(0);
   let connectionAttempts = 0;

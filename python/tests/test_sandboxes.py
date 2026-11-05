@@ -36,6 +36,7 @@ class FakeWebSocket:
     def __init__(self) -> None:
         self.sent: list[Union[str, bytes]] = []
         self.close_reason = None
+        self.close_code = None
         self._messages = asyncio.Queue()
 
     def __aiter__(self):
@@ -59,8 +60,9 @@ class FakeWebSocket:
     async def push(self, data: Union[str, bytes]) -> None:
         await self._messages.put(data)
 
-    async def finish(self, reason: str) -> None:
+    async def finish(self, reason: str, code: int = 1000) -> None:
         self.close_reason = reason
+        self.close_code = code
         await self._messages.put(_CLOSED)
 
 
@@ -148,6 +150,42 @@ async def test_process_connection_sends_the_token_as_a_subprotocol(archil, route
 
     assert connections == [("wss://sandbox.example/ws", ["archil.connect.v1", "archil.token.c2lnbmVk"])]
     await process.disconnect.aio()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("code", "message", "shared"),
+    [
+        (4001, "Process was taken over by another connection", False),
+        (4003, "Process owner disconnected", True),
+    ],
+)
+async def test_process_connection_closed_by_the_runtime_says_why(archil, router, monkeypatch, code, message, shared):
+    import archil._sandbox as sandbox_module
+
+    sockets = []
+
+    def handler(request):
+        if not request.url.path.endswith("/connections"):
+            return ok_envelope(sandbox_json())
+        return ok_envelope({"url": "wss://sandbox.example/ws", "expires_at": NOW})
+
+    async def connect(_url: str):
+        sockets.append(FakeProcessWebSocket())
+        return sockets[-1]
+
+    router.set(handler)
+    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+
+    process = await sandbox.attach.aio("process-1", shared=shared)
+    request = json.loads(sockets[0].sent[0])
+    assert request == {"type": "attach", "process_id": "process-1", "offset": 0, **({"shared": True} if shared else {})}
+    await sockets[0].finish("", code)
+
+    with pytest.raises(ConnectionError, match=message):
+        await process.wait.aio()
+    assert not process.connected
 
 
 @pytest.mark.asyncio

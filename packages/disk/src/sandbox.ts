@@ -382,7 +382,12 @@ export class Sandbox {
       () => this._connectionEndpoint(),
       (request) => this._control(request),
     );
-    await process._connect({ type: "attach", process_id: processId, offset });
+    await process._connect({
+      type: "attach",
+      process_id: processId,
+      offset,
+      ...(options.shared ? { shared: true as const } : {}),
+    });
     return process;
   }
 
