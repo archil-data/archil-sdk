@@ -46,8 +46,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@archildata/api-types": "^0.0.78",
-    "undici": "8.10.2"
+    "@archildata/api-types": "^0.0.79",
+    "undici": "8.12.3"
   },
   "peerDependencies": {
     "zod": "^4.4.3"

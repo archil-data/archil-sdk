@@ -77,11 +77,11 @@ importers:
   packages/disk:
     dependencies:
       '@archildata/api-types':
-        specifier: ^0.0.78
-        version: 0.0.78
+        specifier: ^0.0.79
+        version: 0.0.79
       undici:
-        specifier: 8.10.2
-        version: 8.10.2
+        specifier: 8.12.3
+        version: 8.12.3
     devDependencies:
       '@types/node':
         specifier: ^26.0.1
@@ -363,8 +363,8 @@ packages:
     peerDependencies:
       zod: ^3.23.8
 
-  '@archildata/api-types@0.0.78':
-    resolution: {integrity: sha512-8GpIvigDx6Zf2CJkPRxLsOx+PeH2XcvEON4f7D8w+jiZ4sxVC4EXot6JPtzB3SauOnZxBHaZU/xVBfcut2a7Yw==}
+  '@archildata/api-types@0.0.79':
+    resolution: {integrity: sha512-ZxB7GVxuWzxBTU4kH+yF4VvlUuGC7rfz6jviBNOv/d5RD3T2Eu37D0McmeDXIx1aAz+uPihcmqKon6iWbhar+g==}
 
   '@archildata/native@0.8.18':
     resolution: {integrity: sha512-/gKLR8H9kbQdULY5wbfGXgsYo4wLr0f4iAsDfNeYA8QZufZH0AQXm/7CfpQTDzcXZ9vgUrQwkXQkCkhPOjx2Sg==}
@@ -2510,8 +2510,8 @@ packages:
   undici-types@8.3.0:
     resolution: {integrity: sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==}
 
-  undici@8.10.2:
-    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
+  undici@8.12.3:
+    resolution: {integrity: sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==}
     engines: {node: '>=22.19.0'}
 
   unenv@2.0.0-rc.24:
@@ -2868,7 +2868,7 @@ snapshots:
       zod: 4.4.3
       zod-to-json-schema: 3.25.2(zod@4.4.3)
 
-  '@archildata/api-types@0.0.78': {}
+  '@archildata/api-types@0.0.79': {}
 
   '@archildata/native@0.8.18': {}
 
@@ -5137,7 +5137,7 @@ snapshots:
 
   undici-types@8.3.0: {}
 
-  undici@8.10.2: {}
+  undici@8.12.3: {}
 
   unenv@2.0.0-rc.24:
     dependencies:
