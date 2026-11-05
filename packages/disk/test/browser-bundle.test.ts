@@ -47,7 +47,6 @@ async function bundleForBrowser(format: BundleFormat, globalName?: string) {
     define: { __SDK_VERSION__: JSON.stringify("0-test") },
     deps: {
       alwaysBundle: (id) =>
-        id === "fast-xml-parser" ||
         id === "zod" ||
         id.startsWith("zod/"),
     },

@@ -49,7 +49,6 @@
     "@archildata/api-types": "^0.0.78",
     "@clack/prompts": "^1.7.0",
     "commander": "^14.0.3",
-    "fast-xml-parser": "^5.7.0",
     "undici": "8.10.2"
   },
   "peerDependencies": {
