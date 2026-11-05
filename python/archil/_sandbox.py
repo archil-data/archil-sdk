@@ -31,6 +31,10 @@ from ._sandbox_files import _SandboxFiles
 
 
 _POLL_INTERVAL_SECONDS = 0.5
+# The subprotocol the runtime selects for a process connection, and the
+# prefix of the one that carries the connection token.
+_CONNECT_SUBPROTOCOL = "archil.connect.v1"
+_TOKEN_SUBPROTOCOL_PREFIX = "archil.token."
 
 
 class _Sandbox:
@@ -193,6 +197,13 @@ class _Sandbox:
                     f"/api/sandboxes/{self.id}/connections",
                     retry="transient",
                 )
+                # Prefer the token in a subprotocol, which keeps it out of
+                # request-line logs; older control planes only return `url`.
+                if data.get("endpoint") and data.get("token"):
+                    return await _websocket_connect(
+                        data["endpoint"],
+                        subprotocols=[_CONNECT_SUBPROTOCOL, f"{_TOKEN_SUBPROTOCOL_PREFIX}{data['token']}"],
+                    )
                 return await _websocket_connect(data["url"])
             except httpx.TransportError as exc:
                 raise ConnectionError("Process connection failed") from exc

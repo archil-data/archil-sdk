@@ -119,6 +119,38 @@ async def test_process_connection_retries_transient_control_plane_failures(archi
 
 
 @pytest.mark.asyncio
+async def test_process_connection_sends_the_token_as_a_subprotocol(archil, router, monkeypatch):
+    import archil._sandbox as sandbox_module
+
+    connections = []
+
+    def handler(request):
+        if not request.url.path.endswith("/connections"):
+            return ok_envelope(sandbox_json())
+        return ok_envelope(
+            {
+                "url": "wss://sandbox.example/ws?token=signed",
+                "endpoint": "wss://sandbox.example/ws",
+                "token": "c2lnbmVk",
+                "expires_at": NOW,
+            }
+        )
+
+    async def connect(url: str, subprotocols=None):
+        connections.append((url, subprotocols))
+        return FakeProcessWebSocket()
+
+    router.set(handler)
+    monkeypatch.setattr(sandbox_module, "_websocket_connect", connect)
+    sandbox = await archil.sandboxes.get.aio("sbx-1")
+
+    process = await sandbox.run.aio("true")
+
+    assert connections == [("wss://sandbox.example/ws", ["archil.connect.v1", "archil.token.c2lnbmVk"])]
+    await process.disconnect.aio()
+
+
+@pytest.mark.asyncio
 async def test_process_connection_does_not_retry_non_transient_api_errors(archil, router, monkeypatch):
     connection_attempts = 0
 

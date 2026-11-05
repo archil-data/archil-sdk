@@ -5,6 +5,7 @@ import { ArchilApiError, SandboxPauseError } from "../src/errors.js";
 import { Disks } from "../src/disks.js";
 import { SandboxFiles } from "../src/sandbox-files.js";
 import { SandboxProcess, SandboxProcesses } from "../src/index.js";
+import { openProcessSocket } from "../src/sandbox-process.js";
 import { Sandbox } from "../src/sandbox.js";
 import { Sandboxes } from "../src/sandboxes.js";
 import { json, startOrigin, type CannedResponse, type Respond } from "./helpers/origin.js";
@@ -80,6 +81,7 @@ class TestWebSocket {
   static autoOpen = true;
 
   readonly url: string;
+  readonly protocols?: string[];
   readonly sent: unknown[] = [];
   readyState = 0;
   binaryType = "blob";
@@ -88,8 +90,9 @@ class TestWebSocket {
     Array<{ listener: (event: any) => void; once: boolean }>
   >();
 
-  constructor(url: string) {
+  constructor(url: string, protocols?: string[]) {
     this.url = url;
+    this.protocols = protocols;
     TestWebSocket.instances.push(this);
     if (TestWebSocket.autoOpen) queueMicrotask(() => this.emit("open", {}));
   }
@@ -956,6 +959,48 @@ test.each([undefined, "/workspace/a 'quote' $literal"])("exec forwards cwd=%s an
   });
 });
 
+test("process connections send the token as a subprotocol when the API provides one", async () => {
+  const client = {
+    POST: async () =>
+      ok({
+        url: "wss://sandbox.example/connect/0198-sandbox?token=signed",
+        endpoint: "wss://sandbox.example/connect/0198-sandbox",
+        token: "c2lnbmVk",
+        expires_at: now,
+      }),
+  } as unknown as ApiClient;
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
+  const sandbox = new Sandbox(sandboxWire("running") as any, client);
+
+  const starting = sandbox.run("true");
+  await vi.waitFor(() => assert.equal(TestWebSocket.instances[0]?.sent.length, 1));
+  const socket = TestWebSocket.instances[0];
+  assert.equal(socket.url, "wss://sandbox.example/connect/0198-sandbox");
+  assert.deepEqual(socket.protocols, ["archil.connect.v1", "archil.token.c2lnbmVk"]);
+  socket.emit("message", {
+    data: JSON.stringify({ type: "started", process_id: "0198-process" }),
+  });
+  await (await starting).disconnect();
+});
+
+test("openProcessSocket accepts a URL string or an endpoint", async () => {
+  vi.stubGlobal("WebSocket", TestWebSocket);
+  TestWebSocket.instances = [];
+
+  await openProcessSocket(async () => "wss://sandbox.example/connect?token=signed");
+  await openProcessSocket(async () => ({
+    url: "wss://sandbox.example/connect",
+    protocols: ["archil.connect.v1", "archil.token.c2lnbmVk"],
+  }));
+
+  const [legacy, endpoint] = TestWebSocket.instances;
+  assert.equal(legacy.url, "wss://sandbox.example/connect?token=signed");
+  assert.equal(legacy.protocols, undefined);
+  assert.equal(endpoint.url, "wss://sandbox.example/connect");
+  assert.deepEqual(endpoint.protocols, ["archil.connect.v1", "archil.token.c2lnbmVk"]);
+});
+
 test("process connections retry API and WebSocket handshake failures", async () => {
   vi.spyOn(Math, "random").mockReturnValue(0);
   let connectionAttempts = 0;
@@ -1055,6 +1100,7 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
     first.url,
     "wss://sandbox.example/connect?token=signed",
   );
+  assert.equal(first.protocols, undefined);
   assert.deepEqual(JSON.parse(first.sent[0] as string), {
     type: "start",
     command: "echo hello",

@@ -83,6 +83,20 @@ type ProcessControlEvent =
 
 const PROCESS_STDIN_CHUNK_BYTES = 1024 * 1024;
 
+/** The subprotocol the runtime selects for a process connection. */
+export const CONNECT_SUBPROTOCOL = "archil.connect.v1";
+/** Prefix of the subprotocol that carries a connection token. */
+export const TOKEN_SUBPROTOCOL_PREFIX = "archil.token.";
+
+/** Where to open a process WebSocket, and the subprotocols that carry its token. */
+export interface ProcessEndpoint {
+  url: string;
+  protocols?: string[];
+}
+
+/** A WebSocket URL with the token in its query string, or a {@link ProcessEndpoint}. */
+export type ProcessConnectionTarget = string | ProcessEndpoint;
+
 async function waitForSocketOpen(socket: WebSocket): Promise<void> {
   if (socket.readyState === WebSocket.OPEN) return;
   await new Promise<void>((resolve, reject) => {
@@ -110,13 +124,16 @@ async function waitForSocketOpen(socket: WebSocket): Promise<void> {
 }
 
 export async function openProcessSocket(
-  connectionUrl: () => Promise<string>,
+  connectionEndpoint: () => Promise<ProcessConnectionTarget>,
 ): Promise<WebSocket> {
   for (let attempt = 0; ; attempt++) {
-    const url = await connectionUrl();
+    const target = await connectionEndpoint();
+    const endpoint = typeof target === "string" ? { url: target } : target;
     let socket: WebSocket | undefined;
     try {
-      socket = new WebSocket(url);
+      socket = endpoint.protocols
+        ? new WebSocket(endpoint.url, endpoint.protocols)
+        : new WebSocket(endpoint.url);
       await waitForSocketOpen(socket);
       return socket;
     } catch (error) {
@@ -165,7 +182,7 @@ export class SandboxProcess {
   private _cursor: number;
   private readonly _onOutput?: SandboxProcessOutputHandler;
   private readonly _collectOutput: boolean;
-  private readonly _connectionUrl: () => Promise<string>;
+  private readonly _connectionEndpoint: () => Promise<ProcessConnectionTarget>;
   private readonly _controlProcess: (
     request: ProcessControlRequest,
   ) => Promise<void>;
@@ -185,14 +202,14 @@ export class SandboxProcess {
     cursor: number,
     onOutput: SandboxProcessOutputHandler | undefined,
     collectOutput: boolean,
-    connectionUrl: () => Promise<string>,
+    connectionEndpoint: () => Promise<ProcessConnectionTarget>,
     controlProcess: (request: ProcessControlRequest) => Promise<void>,
   ) {
     this._id = processId;
     this._cursor = cursor;
     this._onOutput = onOutput;
     this._collectOutput = collectOutput;
-    this._connectionUrl = connectionUrl;
+    this._connectionEndpoint = connectionEndpoint;
     this._controlProcess = controlProcess;
     this._terminal = new Promise((resolve) => {
       this._resolveTerminal = resolve;
@@ -266,7 +283,7 @@ export class SandboxProcess {
 
   /** @internal */
   async _connect(request: ProcessConnectionRequest): Promise<void> {
-    const socket = await openProcessSocket(this._connectionUrl);
+    const socket = await openProcessSocket(this._connectionEndpoint);
     socket.binaryType = "arraybuffer";
     this._socket = socket;
 

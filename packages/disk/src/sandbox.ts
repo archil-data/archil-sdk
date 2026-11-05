@@ -4,8 +4,11 @@ import { unwrap, unwrapEmpty, unwrapPage } from "./client.js";
 import {
   SandboxProcess,
   SandboxProcesses,
+  CONNECT_SUBPROTOCOL,
+  TOKEN_SUBPROTOCOL_PREFIX,
   openProcessSocket,
   type ProcessControlRequest,
+  type ProcessEndpoint,
   type SandboxProcessConnectOptions,
   type SandboxProcessResult,
   type SandboxProcessStartOptions,
@@ -35,6 +38,12 @@ export type SandboxMountWire = components["schemas"]["SandboxMount"];
 
 /** @internal */
 export type SandboxWire = components["schemas"]["Sandbox"];
+
+/** `endpoint` and `token` are absent from control planes that predate them. */
+type SandboxConnection = components["schemas"]["SandboxConnection"] & {
+  endpoint?: string;
+  token?: string;
+};
 
 /**
  * One Archil disk to mount inside a sandbox. `path` is the absolute guest
@@ -338,7 +347,7 @@ export class Sandbox {
       0,
       options.onOutput,
       options.collectOutput ?? true,
-      () => this._connectionUrl(),
+      () => this._connectionEndpoint(),
       (request) => this._control(request),
     );
     const terminal =
@@ -370,15 +379,15 @@ export class Sandbox {
       offset,
       options.onOutput,
       options.collectOutput ?? true,
-      () => this._connectionUrl(),
+      () => this._connectionEndpoint(),
       (request) => this._control(request),
     );
     await process._connect({ type: "attach", process_id: processId, offset });
     return process;
   }
 
-  private async _connectionUrl(): Promise<string> {
-    const data = await unwrap(
+  private async _connectionEndpoint(): Promise<ProcessEndpoint> {
+    const data: SandboxConnection = await unwrap(
       retryApiRequest(
         () =>
           this._client.POST("/api/sandboxes/{sid}/connections", {
@@ -387,11 +396,19 @@ export class Sandbox {
         "transient",
       ),
     );
-    return data.url;
+    // Prefer the token in a subprotocol, which keeps it out of request-line
+    // logs; older control planes only return `url`.
+    if (data.endpoint && data.token) {
+      return {
+        url: data.endpoint,
+        protocols: [CONNECT_SUBPROTOCOL, `${TOKEN_SUBPROTOCOL_PREFIX}${data.token}`],
+      };
+    }
+    return { url: data.url };
   }
 
   private async _control(request: ProcessControlRequest): Promise<void> {
-    const socket = await openProcessSocket(() => this._connectionUrl());
+    const socket = await openProcessSocket(() => this._connectionEndpoint());
     const expected = request.type === "kill" ? "killed" : "resized";
     await new Promise<void>((resolve, reject) => {
       socket.addEventListener("message", (message) => {
