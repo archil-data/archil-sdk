@@ -6,19 +6,9 @@ allowBuilds:
   esbuild: true
   node-liblzma: true
 minimumReleaseAgeExclude:
-  - '@archildata/api-types@0.0.7'
-  - '@archildata/api-types@0.0.18'
+  - '@archildata/api-types@0.0.7 || 0.0.18 || 0.0.23 || 0.0.24 || 0.0.36 || 0.0.40 || 0.0.49 || 0.0.54 || 0.0.69 || 0.0.78 || 0.0.81'
   - ai@7.0.5
-  - eve@0.17.1
-  - eve@0.20.0
-  - '@archildata/api-types@0.0.23'
-  - '@archildata/api-types@0.0.24'
-  - '@archildata/api-types@0.0.36'
-  - '@archildata/api-types@0.0.40'
-  - '@archildata/api-types@0.0.49'
-  - '@archildata/api-types@0.0.54'
-  - '@archildata/api-types@0.0.69'
-  - '@archildata/api-types@0.0.78'
+  - 'eve@0.17.1 || 0.20.0'
 
 catalog:
   typescript: ^6.0.3
