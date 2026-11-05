@@ -40,6 +40,16 @@ d = archil.get_disk("dsk-abc123")
 res = d.exec("ls -la /mnt && cat /mnt/config.json")
 print(res.stdout, res.stderr, res.exit_code)
 
+# Choose the image, size, and egress policy of the exec's VM
+from archil import SandboxEgressPolicy, SandboxNetwork
+d.exec(
+    "python3 train.py",
+    base_image="python:3.12-slim",
+    vcpu_count=4,
+    mem_size_mib=8192,
+    network=SandboxNetwork(egress=SandboxEgressPolicy(default="deny", allow=["pypi.org", "files.pythonhosted.org"])),
+)
+
 # Manage who can mount the disk
 from archil import TokenUser
 user = d.add_user(TokenUser(nickname="ci"))

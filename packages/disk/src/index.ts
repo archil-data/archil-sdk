@@ -9,6 +9,7 @@ import { Workspace } from "./workspace.js";
 
 export { Archil } from "./archil.js";
 export type { ArchilOptions, ExecMount, ExecMountSpec, ExecOptions } from "./archil.js";
+export type { ExecNetwork, ExecVmOptions } from "./exec-options.js";
 export type { ArchilTlsOptions } from "./client.js";
 
 export { Disks } from "./disks.js";

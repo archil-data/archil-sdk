@@ -329,8 +329,25 @@ def delete_api_key(id: str) -> None:
     return _client().tokens.delete(id)
 
 
-def exec(*, disks: dict, command: str) -> ExecResult:
-    return _client().exec(disks=disks, command=command)
+def exec(
+    *,
+    disks: dict,
+    command: str,
+    base_image: Optional[str] = None,
+    image_id: Optional[str] = None,
+    vcpu_count: Optional[int] = None,
+    mem_size_mib: Optional[int] = None,
+    network: Optional[SandboxNetwork] = None,
+) -> ExecResult:
+    return _client().exec(
+        disks=disks,
+        command=command,
+        base_image=base_image,
+        image_id=image_id,
+        vcpu_count=vcpu_count,
+        mem_size_mib=mem_size_mib,
+        network=network,
+    )
 
 
 def workspace(mounts: dict) -> Workspace:

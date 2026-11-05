@@ -82,6 +82,13 @@ def sync_usage() -> None:
     mounted = mounted.start(mounts=[SandboxMountSpec(disk="dsk-0123456789abcdef", path="/mnt/other")], wait=False)
     mounted = mounted.start(mounts=[], wait=False)
     _network: SandboxNetwork = sandbox.get_network()
+    _exec: archil.ExecResult = disk.exec("nproc", base_image="python:3.12-slim", vcpu_count=4, mem_size_mib=8192)
+    _exec = client.exec(
+        disks={"data": disk},
+        command="ls /mnt/archil/data",
+        image_id="0" * 64,
+        network=SandboxNetwork(egress=SandboxEgressPolicy(default="deny", allow=["pypi.org"])),
+    )
     _network = sandbox.update_network(SandboxNetwork())
     image: Image = client.images.build(
         source="ghcr.io/acme/app:v1", registry_auth=RegistryAuth(username="bot", password="secret"), timeout=600
@@ -191,6 +198,7 @@ async def async_usage() -> None:
         sandbox = await sandbox.set_timeout.aio(idle_ttl_seconds=300)
         sandbox = await sandbox.set_timeout.aio(3600, idle_ttl_seconds=0)
         _network: SandboxNetwork = await sandbox.get_network.aio()
+        _exec: archil.ExecResult = await client.exec.aio(disks={"data": "dsk-1"}, command="true", vcpu_count=4)
         _network = await sandbox.update_network.aio(SandboxNetwork())
         result: SandboxProcessResult = await sandbox.exec.aio("echo ready")
         _sandbox_exit: Optional[int] = result.exit_code

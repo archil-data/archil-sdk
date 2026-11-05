@@ -97,6 +97,14 @@ const d = await archil.getDisk("dsk-abc123");
 // Run a command in a container with the disk mounted
 const { stdout, stderr, exitCode } = await d.exec("ls -la /mnt && cat /mnt/config.json");
 
+// Choose the image, size, and egress policy of the exec's VM
+await d.exec("python3 train.py", {
+  baseImage: "python:3.12-slim",
+  vcpuCount: 4,
+  memSizeMib: 8192,
+  network: { egress: { default: "deny", allow: ["pypi.org", "files.pythonhosted.org"] } },
+});
+
 // Manage who can mount the disk
 const user = await d.addUser({ type: "token", nickname: "ci" });
 await d.removeUser("token", user.identifier!);

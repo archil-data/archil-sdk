@@ -1,4 +1,5 @@
 import type { ApiClient } from "./client.js";
+import { type ExecVmOptions, execVmBody } from "./exec-options.js";
 import { unwrap, unwrapPage } from "./client.js";
 import { retryApiRequest } from "./retry.js";
 import { Disk, type ExecResult } from "./disk.js";
@@ -152,13 +153,13 @@ export class Disks {
    * disk ID directly so callers that do not need its metadata can execute
    * without fetching the disk first.
    */
-  async exec(id: string, command: string): Promise<ExecResult> {
+  async exec(id: string, command: string, options?: ExecVmOptions): Promise<ExecResult> {
     return unwrap<ExecResult>(
       retryApiRequest(
         () =>
           this._client.POST("/api/disks/{id}/exec", {
             params: { path: { id } },
-            body: { command },
+            body: { ...execVmBody(options), command },
           }),
         "connect",
       ),

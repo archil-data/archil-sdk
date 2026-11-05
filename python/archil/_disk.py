@@ -35,8 +35,10 @@ from ._models import (
     PutObjectResult,
     S3Object,
     S3User,
+    SandboxNetwork,
     ShareUrl,
     UploadPart,
+    exec_vm_body,
 )
 from ._s3xml import (
     build_complete_multipart_upload,
@@ -391,19 +393,46 @@ class _Disk:
             if disk.status in ("failed", "deleted", "deleting"):
                 raise RuntimeError(f"Disk {disk.id} reached terminal status {disk.status!r}")
             if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"Disk {disk.id} not ready after {timeout}s (status {disk.status!r})"
-                )
+                raise TimeoutError(f"Disk {disk.id} not ready after {timeout}s (status {disk.status!r})")
             await asyncio.sleep(poll_interval)
             disk = await disk.refresh()
 
     # --- Compute -----------------------------------------------------------
 
-    async def exec(self, command: str) -> ExecResult:
+    async def exec(
+        self,
+        command: str,
+        *,
+        base_image: Optional[str] = None,
+        image_id: Optional[str] = None,
+        vcpu_count: Optional[int] = None,
+        mem_size_mib: Optional[int] = None,
+        network: Optional[SandboxNetwork] = None,
+    ) -> ExecResult:
         """Execute a command in a container with this disk mounted. Blocks until
-        the command completes and returns stdout, stderr, and exit code."""
+        the command completes and returns stdout, stderr, and exit code.
+
+        ``base_image`` is a public Linux OCI image reference (such as
+        ``python:3.12-slim``) to run the command in; the first exec with an
+        image waits while it is converted. ``image_id`` is a ready image from
+        ``images.build()`` instead, for images that need registry credentials.
+        Without either, the command runs in Archil's exec image.
+        ``vcpu_count`` (1-32, default 2) and ``mem_size_mib`` (256-65536,
+        default 4096) size the VM. ``network`` sets an egress policy (not
+        available on free plans)."""
         data = await self._transport.request_json(
-            "POST", f"/api/disks/{self.id}/exec", json={"command": command}
+            "POST",
+            f"/api/disks/{self.id}/exec",
+            json={
+                **exec_vm_body(
+                    base_image=base_image,
+                    image_id=image_id,
+                    vcpu_count=vcpu_count,
+                    mem_size_mib=mem_size_mib,
+                    network=network,
+                ),
+                "command": command,
+            },
         )
         return ExecResult.from_json(data)
 
