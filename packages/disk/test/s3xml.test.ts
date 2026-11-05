@@ -1,5 +1,5 @@
 // The S3 gateway's XML responses are parsed by a small in-house reader, so its
-// entity decoding and array shaping are pinned here.
+// entity decoding, array shaping, and handling of hostile input are pinned here.
 
 import { test } from "vitest";
 import assert from "node:assert/strict";
@@ -45,4 +45,38 @@ test("blank input parses to an empty object and mismatched tags throw", () => {
   assert.deepEqual(parseXml("  "), {});
   assert.throws(() => parseXml("<a></b>"), /Malformed XML/);
   assert.throws(() => parseXml("<html><body>oops"), /Malformed XML/);
+});
+
+test("keeps leading and trailing spaces in values", () => {
+  const xml = "<ListBucketResult><Contents><Key>  spaced name  </Key></Contents></ListBucketResult>";
+  assert.deepEqual(parseXml(xml), { ListBucketResult: { Contents: [{ Key: "  spaced name  " }] } });
+});
+
+test("rejects DOCTYPE so no custom entities can be declared", () => {
+  assert.throws(
+    () => parseXml('<!DOCTYPE x [<!ENTITY a "aaaa">]><R><K>&a;</K></R>'),
+    /DOCTYPE/,
+  );
+  assert.deepEqual(parseXml("<R><K>&a;</K></R>"), { R: { K: "&a;" } });
+});
+
+test("a __proto__ tag is an ordinary own property", () => {
+  const parsed = parseXml("<R><__proto__><Contents>x</Contents></__proto__></R>") as {
+    R: Record<string, unknown>;
+  };
+  assert.equal(Object.getPrototypeOf(parsed.R), Object.prototype);
+  assert.deepEqual(Object.keys(parsed.R), ["__proto__"]);
+  assert.equal(parsed.R.Contents, undefined);
+});
+
+test("unterminated markup fails fast instead of backtracking", () => {
+  const start = performance.now();
+  for (const hostile of ["<".repeat(200_000), "<a".repeat(200_000), "<!--".repeat(200_000), "&a".repeat(200_000)]) {
+    try {
+      parseXml(hostile);
+    } catch {
+      // Malformed input may throw; it just must not hang.
+    }
+  }
+  assert.ok(performance.now() - start < 1000, "parsing hostile input took over a second");
 });
