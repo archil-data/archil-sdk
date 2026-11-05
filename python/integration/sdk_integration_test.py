@@ -25,7 +25,16 @@ from pathlib import Path
 
 import httpx
 
-from archil import Archil, ArchilApiError, ArchilError, ArchilS3Error, SandboxTerminal, TokenUser
+from archil import (
+    Archil,
+    ArchilApiError,
+    ArchilError,
+    ArchilS3Error,
+    SandboxEgressPolicy,
+    SandboxNetwork,
+    SandboxTerminal,
+    TokenUser,
+)
 
 
 def require_env(name: str) -> str:
@@ -475,6 +484,64 @@ def run_agent_tools_suite(disk) -> None:
         assert_that(disk.object_exists(f"{base}/notes.txt") is False, "object not deleted")
 
 
+def run_exec_suite(archil, disk) -> None:
+    """Serverless exec through both routes: the default image, a chosen image
+    and size, a built image, and an egress policy, with the disk mounted."""
+    print("\n--- Serverless exec ---")
+    marker = f"exec-{uuid.uuid4().hex[:12]}"
+    image = "python:3.13-alpine"
+    fetch = "wget -q -T 5 -t 1 -O /dev/null http://example.com"
+
+    with step("disk.exec writes through the mounted disk"):
+        result = disk.exec(f"printf {marker} > /mnt/archil/exec-marker.txt && cat /mnt/archil/exec-marker.txt")
+        assert_that(result.exit_code == 0, f"exec failed: {result.stderr}")
+        assert_that(result.stdout == marker, f"unexpected stdout: {result.stdout!r}")
+
+    with step("archil.exec runs in a chosen image and size"):
+        result = archil.exec(
+            disks={"data": disk},
+            base_image=image,
+            vcpu_count=4,
+            mem_size_mib=2048,
+            command="grep -q '^ID=alpine' /etc/os-release && cat /mnt/archil/data/exec-marker.txt && echo && "
+            "nproc && awk '/MemTotal/ {print int($2 / 1024)}' /proc/meminfo",
+        )
+        assert_that(result.exit_code == 0, f"exec failed: {result.stderr}")
+        seen, vcpus, memory_mib = result.stdout.split()
+        assert_that(seen == marker, f"disk contents not visible: {result.stdout!r}")
+        assert_that(vcpus == "4", f"expected 4 vCPUs: {result.stdout!r}")
+        # The kernel keeps some memory for itself.
+        assert_that(1536 < int(memory_mib) <= 2048, f"expected ~2048 MiB: {result.stdout!r}")
+
+    with step("an out-of-range size is rejected"):
+        try:
+            disk.exec("true", vcpu_count=64)
+            raise AssertionError("expected vcpu_count=64 to be rejected")
+        except ArchilApiError as err:
+            assert_that(err.status == 400, f"expected 400, got {err.status}: {err}")
+
+    with step("exec runs an image from images.build"):
+        built = archil.images.build(source="python:3.12-alpine")
+        result = disk.exec("python3 -c 'import sys; print(*sys.version_info[:2], sep=\".\")'", image_id=built.image_id)
+        assert_that(result.exit_code == 0, f"exec failed: {result.stderr}")
+        assert_that(result.stdout.strip() == "3.12", f"unexpected python: {result.stdout!r}")
+
+    with step("egress is open without a policy"):
+        result = disk.exec(fetch, base_image=image)
+        assert_that(result.exit_code == 0, f"unrestricted exec could not reach example.com: {result.stderr}")
+
+    with step("a deny-all policy blocks egress but keeps the disk"):
+        deny = SandboxNetwork(egress=SandboxEgressPolicy(default="deny"))
+        result = archil.exec(
+            disks={"data": disk},
+            base_image=image,
+            network=deny,
+            command=f"cat /mnt/archil/data/exec-marker.txt && ! {fetch}",
+        )
+        assert_that(result.exit_code == 0, f"deny-all exec reached example.com or lost the disk: {result.stderr}")
+        assert_that(result.stdout == marker, f"unexpected stdout: {result.stdout!r}")
+
+
 def run_workspace_agent_tools_suite(archil, disk_a, disk_b) -> None:
     """Multi-disk workspace routing over two real disks: file operations must
     route to the disk named by the path, and list_files at the workspace root
@@ -624,6 +691,8 @@ def main() -> None:
         run_s3_advanced_suite(disk)
 
         run_agent_tools_suite(disk)
+
+        run_exec_suite(archil, disk)
 
         with step("Create second disk for workspace routing"):
             result_b = archil.disks.create(name=f"{disk_name}-b")
