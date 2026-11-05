@@ -138,8 +138,7 @@ class _Archil:
         ``images.build()`` instead, for images that need registry credentials.
         Without either, the command runs in Archil's exec image.
         ``vcpu_count`` (1-32, default 2) and ``mem_size_mib`` (256-65536,
-        default 4096) size the VM; an exec larger than the default bills as
-        that many multiples of a call. ``network`` sets an egress policy (not
+        default 4096) size the VM. ``network`` sets an egress policy (not
         available on free plans)."""
         payload: dict[str, object] = {}
         for rel_path, mount in disks.items():
