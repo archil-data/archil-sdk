@@ -4,7 +4,7 @@
 // in lockstep with package.json.
 //
 // Like the CJS-consumption test, this builds the real library entry with
-// tsdown and exercises the actual createApiClient -> openapi-fetch -> Undici
+// tsdown and exercises the actual createApiClient -> Undici
 // path against a local origin that records the outbound request.
 
 import { test } from "vitest";

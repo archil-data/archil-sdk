@@ -1,4 +1,5 @@
 import type { ApiClient } from "./client.js";
+import { buildQuery } from "./api-fetch.js";
 import { unwrap, unwrapEmpty } from "./client.js";
 import { ArchilS3Error, parseS3Error } from "./errors.js";
 import { parseXml } from "./s3xml.js";
@@ -1171,11 +1172,6 @@ export class Disk implements FileSystem {
       );
     }
 
-    const call = this._client[method] as unknown as (
-      url: string,
-      init: Record<string, unknown>,
-    ) => Promise<{ error?: unknown; response: Response }>;
-
     // Percent-encode each key segment so reserved characters (?, #, %, space,
     // …) can't be reinterpreted as query/fragment or break URL parsing. Encode
     // per-segment to preserve the `/` path separators that model the key's
@@ -1186,22 +1182,16 @@ export class Disk implements FileSystem {
       .map(encodeURIComponent)
       .join("/");
     const path = encodedKey ? `/${this.id}/${encodedKey}` : `/${this.id}`;
-    const init: Record<string, unknown> = {
-      baseUrl: this._s3BaseUrl,
-      parseAs: "stream",
-      ...(opts.query ? { params: { query: opts.query } } : {}),
+    const url = `${this._s3BaseUrl.replace(/\/+$/, "")}${path}${buildQuery(opts.query)}`;
+    const init = {
       // fetch accepts string / Uint8Array / ArrayBuffer bodies directly; pass it
       // through unchanged (no Node Buffer in the data path). Bodies are fully
       // buffered (never streams), so re-sending one on a retry is safe.
-      ...(opts.body !== undefined ? { body: opts.body, bodySerializer: (b: unknown) => b } : {}),
-      ...(opts.contentType || opts.extraHeaders
-        ? {
-            headers: {
-              ...(opts.contentType ? { "Content-Type": opts.contentType } : {}),
-              ...opts.extraHeaders,
-            },
-          }
-        : {}),
+      body: opts.body,
+      headers: {
+        ...(opts.contentType ? { "Content-Type": opts.contentType } : {}),
+        ...opts.extraHeaders,
+      },
     };
 
     // GET (object reads, listings) and POST (multipart Initiate/Complete,
@@ -1216,10 +1206,9 @@ export class Disk implements FileSystem {
     // and appendObject (a retry would duplicate the appended bytes).
     const maxRetries = opts.retry === false ? 0 : MAX_RETRIES;
     for (let attempt = 0; ; attempt++) {
-      let error: unknown;
       let response: Response;
       try {
-        ({ error, response } = await call(path, init));
+        response = await this._client.raw(method, url, init);
       } catch (transportError) {
         if (attempt < maxRetries) {
           await retrySleep(attempt);
@@ -1231,26 +1220,23 @@ export class Disk implements FileSystem {
       if (!response.ok) {
         if (isTransientStatus(response.status) && attempt < maxRetries) {
           // Release the response before retrying so the underlying connection
-          // returns to the pool now rather than at GC. (openapi-fetch already
-          // reads error bodies, but cancel here is the safe, explicit guard.)
+          // returns to the pool now rather than at GC.
           await response.body?.cancel().catch(() => {});
           await retrySleep(attempt);
           continue;
         }
-        // openapi-fetch consumes a non-2xx body into `error` (the raw text, or
-        // parsed JSON if it happens to parse) — for the S3 gateway that's the
-        // XML <Error> document. Surface it as the response body so callers see
-        // the gateway's detail, not just a status line.
-        const message = typeof error === "string" ? error : error ? JSON.stringify(error) : "";
+        // For the S3 gateway the error body is the XML <Error> document;
+        // surface it so callers see the gateway's detail, not just a status line.
         return {
           ok: false,
           status: response.status,
           statusText: response.statusText,
           headers: response.headers,
-          body: new TextEncoder().encode(message),
+          body: new Uint8Array(await response.arrayBuffer()),
         };
       }
 
+      if (!hasBody) await response.body?.cancel().catch(() => {});
       const bytes = hasBody ? new Uint8Array(await response.arrayBuffer()) : new Uint8Array(0);
       return {
         ok: true,
