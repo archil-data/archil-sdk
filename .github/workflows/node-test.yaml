@@ -31,6 +31,8 @@ jobs:
         with:
           node-version: 22
 
+      - uses: oven-sh/setup-bun@v2
+
       - uses: pnpm/action-setup@v6
         with:
           version: 11
@@ -46,3 +48,8 @@ jobs:
 
       - name: Test
         run: pnpm run test
+
+      # Bun swaps its own stub in for `undici`; these tests prove the SDK still
+      # gets the real one and its HTTP/2 transport there.
+      - name: Test the transport under Bun
+        run: pnpm --filter disk run test:bun

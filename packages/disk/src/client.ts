@@ -27,11 +27,14 @@ function isNodeRuntime(): boolean {
   return typeof process !== "undefined" && typeof process.versions?.node === "string";
 }
 
+// Bun replaces the bare `undici` import with a stub over its own HTTP/1.1
+// fetch but leaves subpath imports alone, so the real package loads from one.
+const undiciSpecifier = isNodeRuntime() && process.versions.bun !== undefined ? "undici/index.js" : "undici";
+
 // Begin resolving the Node transport as soon as the SDK module loads, just as
 // a static Node import would. Keeping the specifier non-literal preserves the
 // browser build, while eager resolution keeps module-loading work out of the
 // first API request's latency.
-const undiciSpecifier = "undici";
 const undiciModule = isNodeRuntime()
   ? import(undiciSpecifier) as Promise<typeof import("undici")>
   : undefined;

@@ -43,7 +43,8 @@
     "build": "tsdown",
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:bun": "bun test test/client-pool.test.ts test/client-tls.test.ts test/control-plane-retries.test.ts test/http2-goaway.test.ts"
   },
   "dependencies": {
     "@archildata/api-types": "^0.0.81",
