@@ -492,6 +492,7 @@ class SandboxData:
     on_timeout: SandboxTimeoutAction = "pause"
     checkpoint: Optional[str] = None
     image_digest: str = ""
+    labels: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_json(cls, d: dict) -> "SandboxData":
@@ -516,6 +517,7 @@ class SandboxData:
             exit_reason=d.get("exit_reason"),
             checkpoint=d.get("checkpoint"),
             image_digest=d.get("image_digest", ""),
+            labels=dict(d.get("labels") or {}),
         )
 
 
