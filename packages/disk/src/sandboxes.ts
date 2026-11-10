@@ -1,6 +1,6 @@
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
-import { unwrap } from "./client.js";
+import { unwrap, unwrapPage } from "./client.js";
 import { retryApiRequest } from "./retry.js";
 import type { Disk } from "./disk.js";
 import {
@@ -48,11 +48,67 @@ export interface CreateSandboxRequest {
    * is forked.
    */
   mounts?: SandboxMountSpec[];
+  /**
+   * Key-value labels for finding the sandbox later with `list({ labels })`.
+   * Forks keep them. Up to 32; keys are 1-63 letters, digits, or `. _ / : -`,
+   * and values at most 256 bytes.
+   */
+  labels?: Record<string, string>;
 }
 
 export interface ListSandboxesOptions {
   /** Only return sandboxes that mount this disk. */
   disk?: Disk | string;
+  /** Only return sandboxes carrying every one of these labels. */
+  labels?: Record<string, string>;
+  /** Only return the sandbox with this name. */
+  name?: string;
+  /** Only return sandboxes whose name starts with this. */
+  namePrefix?: string;
+}
+
+/** `labels` is newer than the minimum @archildata/api-types version. */
+type CreateSandboxWire = components["schemas"]["CreateSandboxRequest"] & {
+  labels?: Record<string, string>;
+};
+
+/** Server-side maximum page size for `GET /api/sandboxes`. */
+const SANDBOX_PAGE_LIMIT = 100;
+
+/** The list filters and paging are newer than the minimum @archildata/api-types version. */
+type SandboxListClient = {
+  GET(
+    path: "/api/sandboxes",
+    options: {
+      params: {
+        query: {
+          filesystem?: string;
+          label?: string[];
+          name?: string;
+          name_prefix?: string;
+          limit: number;
+          cursor?: string;
+        };
+      };
+    },
+  ): Promise<{
+    data?: {
+      success: boolean;
+      data?: { sandboxes?: SandboxWire[] } | null;
+      nextCursor?: string;
+      error?: string;
+    };
+    error?: unknown;
+    response: Response;
+  }>;
+};
+
+function matchesListFilters(sandbox: SandboxWire, options: ListSandboxesOptions): boolean {
+  return (
+    Object.entries(options.labels ?? {}).every(([key, value]) => sandbox.labels?.[key] === value) &&
+    (options.name === undefined || sandbox.name === options.name) &&
+    sandbox.name.startsWith(options.namePrefix ?? "")
+  );
 }
 
 export class Sandboxes {
@@ -64,22 +120,43 @@ export class Sandboxes {
     this._client = client;
   }
 
-  /** List the account's sandboxes, oldest first. */
+  /**
+   * List the account's sandboxes, oldest first, keeping those that match every
+   * filter given. Follows the server's pages until none remain.
+   */
   async list(options: ListSandboxesOptions = {}): Promise<Sandbox[]> {
     const filesystem =
       typeof options.disk === "string" ? options.disk : options.disk?.id;
-    const data = await unwrap(
-      retryApiRequest(
-        () =>
-          this._client.GET("/api/sandboxes", {
-            params: { query: { filesystem } },
-          }),
-        "transient",
-      ),
-    );
-    return ((data as { sandboxes?: SandboxWire[] } | null)?.sandboxes ?? []).map(
-      (sandbox) => new Sandbox(sandbox, this._client),
-    );
+    const labels = Object.entries(options.labels ?? {}).map(([key, value]) => `${key}=${value}`);
+    const client = this._client as unknown as SandboxListClient;
+    const sandboxes: Sandbox[] = [];
+    let cursor: string | undefined;
+    for (;;) {
+      const { data, nextCursor } = await unwrapPage(
+        retryApiRequest(
+          () =>
+            client.GET("/api/sandboxes", {
+              params: {
+                query: {
+                  filesystem,
+                  label: labels.length > 0 ? labels : undefined,
+                  name: options.name,
+                  name_prefix: options.namePrefix,
+                  limit: SANDBOX_PAGE_LIMIT,
+                  cursor,
+                },
+              },
+            }),
+          "transient",
+        ),
+      );
+      for (const sandbox of data?.sandboxes ?? []) {
+        // A control plane that predates these filters ignores them.
+        if (matchesListFilters(sandbox, options)) sandboxes.push(new Sandbox(sandbox, this._client));
+      }
+      if (!nextCursor || nextCursor === cursor) return sandboxes;
+      cursor = nextCursor;
+    }
   }
 
   async get(id: string): Promise<Sandbox> {
@@ -112,14 +189,15 @@ export class Sandboxes {
       network: request.network,
       ports: request.ports,
       ...(request.mounts !== undefined && { mounts: request.mounts.map(sandboxMountWire) }),
-    } satisfies Partial<components["schemas"]["CreateSandboxRequest"]>;
+      labels: request.labels,
+    } satisfies Partial<CreateSandboxWire>;
     const data = await unwrap(
       retryApiRequest(
         () =>
           this._client.POST("/api/sandboxes", {
             params: { query: { wait: options.wait ?? true } },
             // Generated types require defaulted fields; omission lets the server choose them.
-            body: body as components["schemas"]["CreateSandboxRequest"],
+            body: body as CreateSandboxWire,
           }),
         "connect",
       ),

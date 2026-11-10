@@ -1334,6 +1334,10 @@ class Sandbox:
         ...
 
     @property
+    def labels(self) -> dict[str, str]:
+        ...
+
+    @property
     def status(self) -> typing.Literal['pending', 'running', 'pausing', 'paused', 'stopping', 'stopped', 'exited', 'failed', 'deleting', 'deleted']:
         ...
 
@@ -1535,25 +1539,27 @@ class Sandbox:
     resume: __resume_spec
 
     class __fork_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+        def __call__(self, /, *, name: str | None = None, labels: dict[str, str] | None = None, wait: bool = True) -> Sandbox:
             """Fork this sandbox's current state. A running sandbox is paused for the
             snapshot and resumed once the fork is accepted; a paused or stopped
             sandbox is left as it is. The fork names the checkpoint the pause
             returned, so it does not depend on the source still being paused when
             the request lands. Resuming the source is best effort: the child is
             returned even if the source could not be resumed, and this sandbox is
-            updated in place with the source's state after the fork.
+            updated in place with the source's state after the fork. The fork keeps
+            this sandbox's labels unless ``labels`` replaces them; ``{}`` clears them.
             """
             ...
 
-        async def aio(self, /, *, name: str | None = None, wait: bool = True) -> Sandbox:
+        async def aio(self, /, *, name: str | None = None, labels: dict[str, str] | None = None, wait: bool = True) -> Sandbox:
             """Fork this sandbox's current state. A running sandbox is paused for the
             snapshot and resumed once the fork is accepted; a paused or stopped
             sandbox is left as it is. The fork names the checkpoint the pause
             returned, so it does not depend on the source still being paused when
             the request lands. Resuming the source is best effort: the child is
             returned even if the source could not be resumed, and this sandbox is
-            updated in place with the source's state after the fork.
+            updated in place with the source's state after the fork. The fork keeps
+            this sandbox's labels unless ``labels`` replaces them; ``{}`` clears them.
             """
             ...
 
@@ -1715,10 +1721,20 @@ class Sandboxes:
         ...
 
     class __list_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, disk: object | str | None = None) -> list[Sandbox]:
+        def __call__(self, /, *, disk: object | str | None = None, labels: dict[str, str] | None = None, name: str | None = None, name_prefix: str | None = None) -> list[Sandbox]:
+            """List the account's sandboxes that match every filter given: mounting
+            ``disk``, carrying each of ``labels``, named ``name``, or with a name
+            starting with ``name_prefix``. Follows the server's pages until none
+            remain.
+            """
             ...
 
-        async def aio(self, /, *, disk: object | str | None = None) -> list[Sandbox]:
+        async def aio(self, /, *, disk: object | str | None = None, labels: dict[str, str] | None = None, name: str | None = None, name_prefix: str | None = None) -> list[Sandbox]:
+            """List the account's sandboxes that match every filter given: mounting
+            ``disk``, carrying each of ``labels``, named ``name``, or with a name
+            starting with ``name_prefix``. Follows the server's pages until none
+            remain.
+            """
             ...
 
     list: __list_spec
@@ -1733,10 +1749,10 @@ class Sandboxes:
     get: __get_spec
 
     class __create_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, image_id: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, mounts: list[archil._models.SandboxMountSpec] | None = None, wait: bool = True) -> Sandbox:
+        def __call__(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, image_id: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, mounts: list[archil._models.SandboxMountSpec] | None = None, labels: dict[str, str] | None = None, wait: bool = True) -> Sandbox:
             ...
 
-        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, image_id: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, mounts: list[archil._models.SandboxMountSpec] | None = None, wait: bool = True) -> Sandbox:
+        async def aio(self, /, *, name: str | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, base_image: str | None = None, image_id: str | None = None, env: dict[str, str] | None = None, max_ttl_seconds: int | None = None, idle_ttl_seconds: int | None = None, max_concurrent_execs: int | None = None, network: archil._models.SandboxNetwork | None = None, ports: list[int] | None = None, mounts: list[archil._models.SandboxMountSpec] | None = None, labels: dict[str, str] | None = None, wait: bool = True) -> Sandbox:
             ...
 
     create: __create_spec

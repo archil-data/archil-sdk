@@ -37,7 +37,10 @@ export type SandboxNetwork = Omit<components["schemas"]["SandboxNetwork"], "egre
 export type SandboxMountWire = components["schemas"]["SandboxMount"];
 
 /** @internal */
-export type SandboxWire = components["schemas"]["Sandbox"];
+/** `labels` is newer than the minimum @archildata/api-types version. */
+export type SandboxWire = components["schemas"]["Sandbox"] & {
+  labels?: Record<string, string>;
+};
 
 /** `endpoint` and `token` are absent from control planes that predate them. */
 type SandboxConnection = components["schemas"]["SandboxConnection"] & {
@@ -145,6 +148,7 @@ function portTokenFromWire(data: components["schemas"]["SandboxPortToken"]): San
 export interface SandboxResponse {
   id: string;
   name: string;
+  labels: Record<string, string>;
   status: SandboxStatus;
   vcpuCount: number;
   memSizeMiB: number;
@@ -189,6 +193,8 @@ export interface SandboxStartOptions extends SandboxWaitOptions {
 export interface SandboxForkOptions extends SandboxWaitOptions {
   /** Name for the fork. The server generates one when omitted. */
   name?: string;
+  /** Labels for the fork. Omit to keep this sandbox's labels; `{}` clears them. */
+  labels?: Record<string, string>;
 }
 
 export interface SandboxTimeoutOptions {
@@ -257,6 +263,7 @@ function sleep(): Promise<void> {
 export class Sandbox {
   id!: string;
   name!: string;
+  labels!: Record<string, string>;
   status!: SandboxStatus;
   vcpuCount!: number;
   memSizeMiB!: number;
@@ -293,6 +300,7 @@ export class Sandbox {
   private _apply(data: SandboxWire): this {
     this.id = data.sandbox_id;
     this.name = data.name;
+    this.labels = { ...data.labels };
     this.status = data.status;
     this.vcpuCount = data.vcpu_count;
     this.memSizeMiB = data.mem_size_mib;
@@ -317,6 +325,7 @@ export class Sandbox {
     return {
       id: this.id,
       name: this.name,
+      labels: { ...this.labels },
       status: this.status,
       vcpuCount: this.vcpuCount,
       memSizeMiB: this.memSizeMiB,
@@ -565,7 +574,7 @@ export class Sandbox {
 
     // A source we paused resumes as soon as the fork is accepted, not after the child boots.
     const wait = resumeAfterFork ? false : (options.wait ?? true);
-    const body = { name: options.name, checkpoint };
+    const body = { name: options.name, checkpoint, labels: options.labels };
     const fork = await waitWhileSandboxStatus(this, "pausing")
       .then(() =>
         unwrap(
