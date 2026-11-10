@@ -56,6 +56,10 @@ class _Sandbox:
         return self._data.name
 
     @property
+    def labels(self) -> dict[str, str]:
+        return dict(self._data.labels)
+
+    @property
     def status(self) -> SandboxStatus:
         return self._data.status
 
@@ -317,20 +321,27 @@ class _Sandbox:
         sandbox = _Sandbox(self._transport, SandboxData.from_json(data))
         return await sandbox._wait_for_start() if wait else sandbox
 
-    async def fork(self, *, name: Optional[str] = None, wait: bool = True) -> "_Sandbox":
+    async def fork(
+        self, *, name: Optional[str] = None, labels: Optional[dict[str, str]] = None, wait: bool = True
+    ) -> "_Sandbox":
         """Fork this sandbox's current state. A running sandbox is paused for the
         snapshot and resumed once the fork is accepted; a paused or stopped
         sandbox is left as it is. The fork names the checkpoint the pause
         returned, so it does not depend on the source still being paused when
         the request lands. Resuming the source is best effort: the child is
         returned even if the source could not be resumed, and this sandbox is
-        updated in place with the source's state after the fork."""
+        updated in place with the source's state after the fork. The fork keeps
+        this sandbox's labels unless ``labels`` replaces them; ``{}`` clears them."""
         # Pause is idempotent: "pausing" means the sandbox was live and is ours
         # to resume; "paused" or "stopped" means it was already inactive.
         source = await self.pause(wait=False)
         resume_after_fork = source.status == "pausing"
         checkpoint = source.checkpoint
-        body = {key: value for key, value in {"name": name, "checkpoint": checkpoint}.items() if value is not None}
+        body = {
+            key: value
+            for key, value in {"name": name, "checkpoint": checkpoint, "labels": labels}.items()
+            if value is not None
+        }
         try:
             source = await source._wait_while("pausing")
             data = await self._transport.request_json(

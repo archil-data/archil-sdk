@@ -191,6 +191,19 @@ const all = await client.sandboxes.list();
 const usingDisk = await client.sandboxes.list({ disk: "dsk-abc123" });
 ```
 
+Label sandboxes when you create or fork them, then find them by label or name:
+
+```ts
+const agent = await client.sandboxes.create({ labels: { trial: "t-42", role: "agent" } });
+const verifier = await agent.fork({ labels: { trial: "t-42", role: "verifier" } });
+
+const trial = await client.sandboxes.list({ labels: { trial: "t-42" } });
+const named = await client.sandboxes.list({ namePrefix: "harbor-" });
+```
+
+A fork keeps its source's labels unless `labels` is given; `{}` clears them.
+`list()` follows the server's pages until none remain.
+
 Build a sandbox image from an OCI reference, then create sandboxes from it:
 
 ```ts

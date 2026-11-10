@@ -1,5 +1,6 @@
 import asyncio
 import json
+from urllib.parse import parse_qs, urlsplit
 from datetime import datetime
 from typing import Union
 
@@ -323,11 +324,13 @@ async def test_sandbox_control_plane_calls_select_safe_retry_modes():
     class RecordingTransport:
         async def request_json(self, method, path, *, retry="none", retry_throttled=False, **_kwargs):
             calls.append((method, path, retry, retry_throttled))
-            if method == "GET" and path == "/api/sandboxes":
-                return {"sandboxes": []}
             if path.endswith("/network"):
                 return {}
             return sandbox_json()
+
+        async def request_json_page(self, method, path, *, retry="none", **_kwargs):
+            calls.append((method, path, retry, False))
+            return {"sandboxes": []}, None
 
         async def request_empty(self, method, path, *, retry="none", **_kwargs):
             calls.append((method, path, retry, False))
@@ -614,12 +617,13 @@ def test_create_and_list_sandboxes(archil, router):
 
     def handler(request):
         if request.method == "POST":
-            return ok_envelope(sandbox_json())
+            return ok_envelope(sandbox_json(labels={"trial": "t1"}))
         return ok_envelope({"sandboxes": [sandbox_json()]})
 
     router.set(handler)
     sandbox = archil.sandboxes.create(
         name="harbor-trial",
+        labels={"trial": "t1"},
         vcpu_count=2,
         mem_size_mib=4096,
         base_image="docker:29.7.1-dind",
@@ -653,6 +657,7 @@ def test_create_and_list_sandboxes(archil, router):
     assert sandbox.platform == "amd64"
     assert sandbox.idle_ttl_seconds == 30
     assert sandbox.image_digest == ""
+    assert sandbox.labels == {"trial": "t1"}
     assert sandbox.endpoints[0].hostname == "8080.sbx.example.com"
     assert isinstance(sandbox.created_at, datetime)
     assert router.requests[0].query == {"wait": "true"}
@@ -667,11 +672,51 @@ def test_create_and_list_sandboxes(archil, router):
         "max_concurrent_execs": 4,
         "ports": [3000, 8080],
         "network": network_json,
+        "labels": {"trial": "t1"},
     }
 
     listed = archil.sandboxes.list(disk="dsk-1")
     assert [item.id for item in listed] == ["sbx-1"]
-    assert router.requests[1].query == {"filesystem": "dsk-1"}
+    assert listed[0].labels == {}
+    assert router.requests[1].query == {"filesystem": "dsk-1", "limit": "100"}
+
+
+def test_list_sandboxes_filters_and_follows_pages(archil, router):
+    agent = {"trial": "t1", "role": "agent"}
+    pages = {
+        None: ({"sandboxes": [sandbox_json(labels=agent)]}, "sbx-1"),
+        "sbx-1": ({"sandboxes": []}, "sbx-9"),
+        "sbx-9": ({"sandboxes": [sandbox_json(sandbox_id="sbx-10", name="harbor-trial-2", labels=agent)]}, None),
+    }
+    router.set(lambda request: ok_envelope(*pages[request.url.params.get("cursor")]))
+
+    listed = archil.sandboxes.list(labels=agent, name_prefix="harbor-")
+
+    assert [item.id for item in listed] == ["sbx-1", "sbx-10"]
+    query = {"label": ["trial=t1", "role=agent"], "name_prefix": ["harbor-"], "limit": ["100"]}
+    assert [parse_qs(urlsplit(request.raw_path).query) for request in router.requests] == [
+        query,
+        {**query, "cursor": ["sbx-1"]},
+        {**query, "cursor": ["sbx-9"]},
+    ]
+
+
+def test_list_sandboxes_filters_what_an_older_control_plane_returns(archil, router):
+    router.set(
+        lambda request: ok_envelope(
+            {
+                "sandboxes": [
+                    sandbox_json(labels={"trial": "t1"}),
+                    sandbox_json(sandbox_id="sbx-2", name="harbor-trial-2", labels={"trial": "t2"}),
+                    sandbox_json(sandbox_id="sbx-3", name="other", labels={"trial": "t1"}),
+                ]
+            }
+        )
+    )
+
+    assert [item.id for item in archil.sandboxes.list(labels={"trial": "t1"})] == ["sbx-1", "sbx-3"]
+    assert [item.id for item in archil.sandboxes.list(name="harbor-trial-2")] == ["sbx-2"]
+    assert [item.id for item in archil.sandboxes.list(name_prefix="harbor-")] == ["sbx-1", "sbx-2"]
 
 
 def test_create_from_image_sends_image_id_and_exposes_digest(archil, router):
@@ -1038,7 +1083,7 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
 
     router.set(handler)
     sandbox = archil.sandboxes.get("sbx-1")
-    fork = sandbox.fork(name="forked")
+    fork = sandbox.fork(name="forked", labels={"role": "verifier"})
     assert sandbox.status == "running"
     stopped = sandbox.stop()
     stopped.delete()
@@ -1049,7 +1094,7 @@ def test_lifecycle_fork_and_delete(archil, router, monkeypatch):
     assert [request.path.rsplit("/", 1)[-1] for request in posts] == ["pause", "fork", "resume", "stop"]
     pause_request, fork_request, resume_request = posts[0], posts[1], posts[2]
     assert pause_request.query == {}
-    assert fork_request.json == {"name": "forked", "checkpoint": "sandbox-sbx-1-epoch-1"}
+    assert fork_request.json == {"name": "forked", "checkpoint": "sandbox-sbx-1-epoch-1", "labels": {"role": "verifier"}}
     assert fork_request.query == {"wait": "false"}
     assert resume_request.query == {"wait": "false"}
     assert router.requests[-1].method == "DELETE"
@@ -1363,8 +1408,13 @@ def test_module_level_sandbox_helpers(monkeypatch):
     )
 
     network = SandboxNetwork(egress=SandboxEgressPolicy(default="deny", allow=["github.com"]))
-    assert archil_module.create_sandbox(name="trial", idle_ttl_seconds=0, network=network, ports=[3000], wait=False) is expected
-    assert archil_module.list_sandboxes(disk="dsk-1") == [expected]
+    assert (
+        archil_module.create_sandbox(
+            name="trial", idle_ttl_seconds=0, network=network, ports=[3000], labels={"trial": "t1"}, wait=False
+        )
+        is expected
+    )
+    assert archil_module.list_sandboxes(disk="dsk-1", labels={"trial": "t1"}, name_prefix="trial") == [expected]
     assert archil_module.get_sandbox("sbx-1") is expected
     assert calls == [
         (
@@ -1382,10 +1432,11 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "network": network,
                 "ports": [3000],
                 "mounts": None,
+                "labels": {"trial": "t1"},
                 "wait": False,
             },
         ),
-        ("list", {"disk": "dsk-1"}),
+        ("list", {"disk": "dsk-1", "labels": {"trial": "t1"}, "name": None, "name_prefix": "trial"}),
         ("get", "sbx-1"),
     ]
 

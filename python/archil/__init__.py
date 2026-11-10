@@ -290,6 +290,7 @@ def create_sandbox(
     network: Optional[SandboxNetwork] = None,
     ports: Optional[list[int]] = None,
     mounts: Optional[list[SandboxMountSpec]] = None,
+    labels: Optional[dict[str, str]] = None,
     wait: bool = True,
 ) -> Sandbox:
     return _client().sandboxes.create(
@@ -305,12 +306,19 @@ def create_sandbox(
         network=network,
         ports=ports,
         mounts=mounts,
+        labels=labels,
         wait=wait,
     )
 
 
-def list_sandboxes(*, disk: Optional[Union[Disk, str]] = None) -> list[Sandbox]:
-    return _client().sandboxes.list(disk=disk)
+def list_sandboxes(
+    *,
+    disk: Optional[Union[Disk, str]] = None,
+    labels: Optional[dict[str, str]] = None,
+    name: Optional[str] = None,
+    name_prefix: Optional[str] = None,
+) -> list[Sandbox]:
+    return _client().sandboxes.list(disk=disk, labels=labels, name=name, name_prefix=name_prefix)
 
 
 def get_sandbox(id: str) -> Sandbox:

@@ -157,6 +157,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
   assert.deepEqual(listed[0].toJSON(), {
     id: "0198-sandbox",
     name: "prepared-environment",
+    labels: {},
     status: "running",
     vcpuCount: 2,
     memSizeMiB: 4096,
@@ -186,6 +187,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     idleTtlSeconds: 30,
     maxConcurrentExecs: 16,
     ports: [3000, 8080],
+    labels: { trial: "t1" },
     network: {
       egress: {
         default: "deny",
@@ -210,7 +212,18 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     {
       method: "GET",
       path: "/api/sandboxes",
-      options: { params: { query: { filesystem: "dsk-0123456789abcdef" } } },
+      options: {
+        params: {
+          query: {
+            filesystem: "dsk-0123456789abcdef",
+            label: undefined,
+            name: undefined,
+            name_prefix: undefined,
+            limit: 100,
+            cursor: undefined,
+          },
+        },
+      },
     },
     {
       method: "POST",
@@ -246,10 +259,57 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
               ],
             },
           },
+          labels: { trial: "t1" },
         },
       },
     },
   ]);
+});
+
+test("Sandboxes.list sends label and name filters and follows pages", async () => {
+  const agent = { trial: "t1", role: "agent" };
+  const pages: Record<string, unknown> = {
+    "": { success: true, data: { sandboxes: [{ ...sandboxWire("running"), labels: agent }] }, nextCursor: "0198-sandbox" },
+    "0198-sandbox": { success: true, data: { sandboxes: [] }, nextCursor: "0199-skipped" },
+    "0199-skipped": { success: true, data: { sandboxes: [{ ...sandboxWire("paused", "0200-sandbox"), labels: agent }] } },
+  };
+  const control = await origin((request) => json(pages[request.url.searchParams.get("cursor") ?? ""]));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
+
+  const listed = await new Sandboxes(client).list({ labels: agent, namePrefix: "prepared-" });
+
+  assert.deepEqual(listed.map((sandbox) => sandbox.id), ["0198-sandbox", "0200-sandbox"]);
+  assert.deepEqual(listed[0].labels, agent);
+  assert.deepEqual(
+    control.requests.map(({ url }) => [...url.searchParams]),
+    [undefined, "0198-sandbox", "0199-skipped"].map((cursor) => [
+      ["label", "trial=t1"],
+      ["label", "role=agent"],
+      ["name_prefix", "prepared-"],
+      ["limit", "100"],
+      ...(cursor ? [["cursor", cursor]] : []),
+    ]),
+  );
+});
+
+test("Sandboxes.list filters what an older control plane returns", async () => {
+  const client = {
+    GET: async () =>
+      ok({
+        sandboxes: [
+          { ...sandboxWire("running", "0198-a"), labels: { trial: "t1" } },
+          { ...sandboxWire("running", "0198-b"), name: "prepared-b", labels: { trial: "t2" } },
+          { ...sandboxWire("running", "0198-c"), name: "other" },
+        ],
+      }),
+  } as unknown as ApiClient;
+  const sandboxes = new Sandboxes(client);
+  const ids = async (options: Parameters<Sandboxes["list"]>[0]) =>
+    (await sandboxes.list(options)).map((sandbox) => sandbox.id);
+
+  assert.deepEqual(await ids({ labels: { trial: "t1" } }), ["0198-a"]);
+  assert.deepEqual(await ids({ name: "prepared-b" }), ["0198-b"]);
+  assert.deepEqual(await ids({ namePrefix: "prepared-" }), ["0198-a", "0198-b"]);
 });
 
 test("sandbox public ports use the expose/list/unexpose API", async () => {
@@ -735,7 +795,7 @@ test("fork creates a named branch and waits for it to start", async () => {
   } as unknown as ApiClient;
   const sandbox = new Sandbox(sandboxWire("stopped") as any, client);
 
-  const forking = sandbox.fork({ name: "agent-task" });
+  const forking = sandbox.fork({ name: "agent-task", labels: { role: "verifier" } });
   await vi.advanceTimersByTimeAsync(500);
   const fork = await forking;
 
@@ -746,7 +806,7 @@ test("fork creates a named branch and waits for it to start", async () => {
     path: "/api/sandboxes/{sid}/fork",
     options: {
       params: { path: { sid: "0198-sandbox" }, query: { wait: true } },
-      body: { name: "agent-task", checkpoint: "sandbox-0198-sandbox-epoch-1" },
+      body: { name: "agent-task", checkpoint: "sandbox-0198-sandbox-epoch-1", labels: { role: "verifier" } },
     },
   });
 });
@@ -763,7 +823,7 @@ test("fork pauses a running sandbox and resumes it once the fork is accepted", a
       if (path.endsWith("/resume")) sourceStatus = "pending";
       if (path.endsWith("/fork")) {
         assert.equal(sourceStatus, "paused");
-        assert.deepEqual(options.body, { name: "agent-task", checkpoint: "sandbox-0198-sandbox-epoch-1" });
+        assert.deepEqual(options.body, { name: "agent-task", checkpoint: "sandbox-0198-sandbox-epoch-1", labels: undefined });
         return ok(sandboxWire("pending", "0198-fork"));
       }
       return ok(sandboxWire(sourceStatus));
@@ -824,7 +884,7 @@ test("fork keeps the pause checkpoint when someone else resumes the source first
 
   assert.equal(fork.id, "0198-fork");
   assert.equal(polls, 1);
-  assert.deepEqual(forkBodies, [{ name: undefined, checkpoint: "sandbox-0198-sandbox-epoch-1" }]);
+  assert.deepEqual(forkBodies, [{ name: undefined, checkpoint: "sandbox-0198-sandbox-epoch-1", labels: undefined }]);
 });
 
 test("fork returns the child even when the source cannot be resumed", async () => {
