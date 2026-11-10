@@ -113,8 +113,10 @@ function options(baseUrl: string, tls?: ArchilOptions["tls"]): ArchilOptions {
 }
 
 function isUntrusted(error: unknown): boolean {
-  const code = (error as { cause?: { code?: string } }).cause?.code;
-  return code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" || code === "UNABLE_TO_GET_ISSUER_CERT_LOCALLY";
+  // Undici nests the TLS code under `cause`; Bun's global fetch puts it on the error.
+  const { code, cause } = error as { code?: string; cause?: { code?: string } };
+  const tlsCode = cause?.code ?? code;
+  return tlsCode === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" || tlsCode === "UNABLE_TO_GET_ISSUER_CERT_LOCALLY";
 }
 
 test("private CA applies to control-plane and S3 requests without changing global trust", async () => {
