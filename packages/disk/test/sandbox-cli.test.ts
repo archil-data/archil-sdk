@@ -37,6 +37,7 @@ function fakeSandbox(overrides: Partial<Sandbox> = {}): Sandbox {
     platform: "arm64",
     maxTtlSeconds: 3600,
     idleTtlSeconds: 0,
+    onTimeout: "pause",
     maxConcurrentExecs: 4,
     endpoints: [{ port: 8080, hostname: "one.example" }],
     createdAt: new Date("2026-01-01T00:00:00Z"),
@@ -89,6 +90,7 @@ function harness(sandboxes: Sandbox[], options: { tty?: boolean; stdoutTty?: boo
       name: request?.name ?? "generated",
       vcpuCount: request?.vcpuCount ?? 1,
       memSizeMiB: request?.memSizeMiB ?? 2048,
+      onTimeout: request?.onTimeout ?? "pause",
     })),
   };
   const exitCodes: number[] = [];
@@ -150,13 +152,17 @@ test("create validates options, maps repeated values, and dispatches no-wait", a
   assert.throws(() => parseCreateSandboxOptions("ok", { memSizeMib: "255", env: [] }), /Memory/);
   assert.throws(() => parseCreateSandboxOptions("ok", { idleTtlSeconds: "-1", env: [] }), /Idle TTL/);
   assert.equal(parseCreateSandboxOptions("ok", { idleTtlSeconds: "300", env: [] }).idleTtlSeconds, 300);
+  assert.throws(() => parseCreateSandboxOptions("ok", { onTimeout: "stop", env: [] }), /On timeout/);
+  assert.equal(parseCreateSandboxOptions("ok", { env: [] }).onTimeout, undefined);
 
   const cli = harness([]);
-  await cli.run("create", "agent-task", "--vcpu-count", "4", "--mem-size-mib", "512", "--idle-ttl-seconds", "0", "--env", "A=b", "--no-wait");
+  await cli.run("create", "agent-task", "--vcpu-count", "4", "--mem-size-mib", "512", "--idle-ttl-seconds", "0", "--on-timeout", "delete", "--env", "A=b", "--no-wait");
   const create = cli.service.create as ReturnType<typeof vi.fn>;
   assert.equal(create.mock.calls[0]![0].name, "agent-task");
   assert.equal(create.mock.calls[0]![0].memSizeMiB, 512);
   assert.equal(create.mock.calls[0]![0].idleTtlSeconds, 0);
+  assert.equal(create.mock.calls[0]![0].onTimeout, "delete");
+  assert.match(text(cli.stdout.values), /on timeout\s+│ delete/);
   assert.deepEqual(create.mock.calls[0]![1], { wait: false });
 
   const invalidMemory = harness([]);

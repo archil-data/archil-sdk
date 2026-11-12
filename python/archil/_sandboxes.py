@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ._http import _Transport
-from ._models import SandboxData, SandboxMountSpec, SandboxNetwork
+from ._models import SandboxData, SandboxMountSpec, SandboxNetwork, SandboxTimeoutAction
 from ._sandbox import _Sandbox
 
 
@@ -35,6 +35,7 @@ class _Sandboxes:
         env: Optional[dict[str, str]] = None,
         max_ttl_seconds: Optional[int] = None,
         idle_ttl_seconds: Optional[int] = None,
+        on_timeout: Optional[SandboxTimeoutAction] = None,
         max_concurrent_execs: Optional[int] = None,
         network: Optional[SandboxNetwork] = None,
         ports: Optional[list[int]] = None,
@@ -52,6 +53,7 @@ class _Sandboxes:
                 "env": env,
                 "max_ttl_seconds": max_ttl_seconds,
                 "idle_ttl_seconds": idle_ttl_seconds,
+                "on_timeout": on_timeout,
                 "max_concurrent_execs": max_concurrent_execs,
                 "network": network.to_json() if network is not None else None,
                 "ports": ports,

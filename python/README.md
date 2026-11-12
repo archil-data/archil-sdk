@@ -283,6 +283,13 @@ process connections prevent idle expiry, but not hard expiry. The idle countdown
 starts when the last connection closes; detached processes and service-port
 traffic do not keep it alive. Disable idle TTL for unattended jobs.
 
+Create a sandbox with `on_timeout="delete"` to delete it and its disk, without a
+memory snapshot, when either TTL runs out. With the default 30-minute idle TTL,
+such a sandbox is also deleted after 30 minutes without a direct process
+connection; set `idle_ttl_seconds=0` to delete it only at the hard TTL. A sandbox
+whose forks still exist is left stopped instead. Forks inherit `on_timeout`, and
+it cannot be changed after creation; `sandbox.on_timeout` reads it back.
+
 Sandboxes support 1–32 vCPUs and 256–65,536 MiB of memory. When omitted,
 `vcpu_count` defaults to 1 and `mem_size_mib` defaults to 2,048 MiB. Sandbox
 timeouts default to 24 hours and can be reset up to 24 hours from now.

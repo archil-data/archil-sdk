@@ -27,6 +27,7 @@ function sandboxWire(status: string = "pending", id: string = "0198-sandbox") {
     platform: "arm64",
     max_ttl_seconds: 3600,
     idle_ttl_seconds: 30,
+    on_timeout: "delete",
     max_concurrent_execs: 8,
     endpoints: [{ port: 8080, hostname: "8080-sandbox.example.com" }],
     created_at: now,
@@ -165,6 +166,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     platform: "arm64",
     maxTtlSeconds: 3600,
     idleTtlSeconds: 30,
+    onTimeout: "delete",
     maxConcurrentExecs: 8,
     endpoints: [{ port: 8080, hostname: "8080-sandbox.example.com" }],
     mounts: [],
@@ -184,6 +186,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
     env: { NODE_ENV: "test" },
     maxTtlSeconds: 600,
     idleTtlSeconds: 30,
+    onTimeout: "delete",
     maxConcurrentExecs: 16,
     ports: [3000, 8080],
     network: {
@@ -226,6 +229,7 @@ test("Sandboxes translates list/create inputs and wraps camelCase snapshots", as
           env: { NODE_ENV: "test" },
           max_ttl_seconds: 600,
           idle_ttl_seconds: 30,
+          on_timeout: "delete",
           max_concurrent_execs: 16,
           ports: [3000, 8080],
           network: {
@@ -363,6 +367,14 @@ test.each([undefined, 0, 30])("sandbox creation serializes idle TTL %s", async (
   assert.deepEqual(JSON.parse(request.body), idleTtlSeconds === undefined ? {} : { idle_ttl_seconds: idleTtlSeconds });
 });
 
+test.each([undefined, "pause", "delete"] as const)("sandbox creation serializes onTimeout %s", async (onTimeout) => {
+  const control = await origin(() => json({ success: true, data: sandboxWire("running") }));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
+  await new Sandboxes(client).create({ onTimeout });
+  const [request] = control.requests;
+  assert.deepEqual(JSON.parse(request.body), onTimeout === undefined ? {} : { on_timeout: onTimeout });
+});
+
 test("sandbox creation sends imageId and exposes the image digest", async () => {
   const imageId = "a".repeat(64);
   const responses: CannedResponse[] = [
@@ -391,6 +403,13 @@ test("sandbox snapshots from older servers default idle TTL to disabled", () => 
   const sandbox = new Sandbox(data as any, {} as ApiClient);
   assert.equal(sandbox.idleTtlSeconds, 0);
   assert.equal(sandbox.toJSON().idleTtlSeconds, 0);
+});
+
+test("sandbox snapshots from older servers default onTimeout to pause", () => {
+  const { on_timeout: _, ...data } = sandboxWire("running");
+  const sandbox = new Sandbox(data as any, {} as ApiClient);
+  assert.equal(sandbox.onTimeout, "pause");
+  assert.equal(sandbox.toJSON().onTimeout, "pause");
 });
 
 test.each([
