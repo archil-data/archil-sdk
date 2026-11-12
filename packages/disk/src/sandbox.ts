@@ -20,6 +20,8 @@ import type { ExecMountSpec } from "./archil.js";
 
 export type SandboxNetworkAction = components["schemas"]["SandboxNetworkAction"];
 
+export type SandboxTimeoutAction = "pause" | "delete";
+
 export type SandboxEgressPolicy = components["schemas"]["SandboxEgressPolicy"] & {
   /** Host patterns supporting * anywhere. All paths count; selectors do not grant network access. */
   drain_on_pause?: string[];
@@ -37,7 +39,9 @@ export type SandboxNetwork = Omit<components["schemas"]["SandboxNetwork"], "egre
 export type SandboxMountWire = components["schemas"]["SandboxMount"];
 
 /** @internal */
-export type SandboxWire = components["schemas"]["Sandbox"];
+export type SandboxWire = components["schemas"]["Sandbox"] & {
+  on_timeout?: SandboxTimeoutAction;
+};
 
 /** `endpoint` and `token` are absent from control planes that predate them. */
 type SandboxConnection = components["schemas"]["SandboxConnection"] & {
@@ -155,6 +159,7 @@ export interface SandboxResponse {
   platform?: "arm64" | "amd64";
   maxTtlSeconds: number;
   idleTtlSeconds: number;
+  onTimeout: SandboxTimeoutAction;
   /** Maximum concurrently attached process sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs: number;
   endpoints?: SandboxEndpoint[];
@@ -265,6 +270,7 @@ export class Sandbox {
   platform?: "arm64" | "amd64";
   maxTtlSeconds!: number;
   idleTtlSeconds!: number;
+  onTimeout!: SandboxTimeoutAction;
   maxConcurrentExecs!: number;
   endpoints?: SandboxEndpoint[];
   mounts!: SandboxMount[];
@@ -301,6 +307,7 @@ export class Sandbox {
     this.platform = data.platform;
     this.maxTtlSeconds = data.max_ttl_seconds;
     this.idleTtlSeconds = data.idle_ttl_seconds ?? 0;
+    this.onTimeout = data.on_timeout ?? "pause";
     this.maxConcurrentExecs = data.max_concurrent_execs;
     this.endpoints = data.endpoints?.map((endpoint) => ({ ...endpoint }));
     this.mounts = (data.mounts ?? []).map(sandboxMountFromWire);
@@ -325,6 +332,7 @@ export class Sandbox {
       platform: this.platform,
       maxTtlSeconds: this.maxTtlSeconds,
       idleTtlSeconds: this.idleTtlSeconds,
+      onTimeout: this.onTimeout,
       maxConcurrentExecs: this.maxConcurrentExecs,
       endpoints: this.endpoints?.map((endpoint) => ({ ...endpoint })),
       mounts: this.mounts.map((mount) => ({ ...mount })),
