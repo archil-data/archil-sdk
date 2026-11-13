@@ -684,6 +684,39 @@ pip install "archil[langchain]"       # LangChain / LangGraph
 
 Expose a subset of tools with `tools=[...]` (e.g. read-only research: `d.agent_tools(tools=["read_file", "list_files", "grep"])`). To give an agent read-only access to a disk in a workspace, mount it with `ExecMountSpec(disk=d, read_only=True)` — `write_file` / `delete_file` then return an error instead of mutating it.
 
+## Mounting a disk in OpenAI Agents SDK sandboxes
+
+`ArchilMount` mounts a disk inside a [sandbox agent](https://openai.github.io/openai-agents-python/sandbox/guide/)'s sandbox, so the agent's shell and file tools see it as a regular directory and everything written there outlives the sandbox. It runs the `archil` client in the sandbox (installing it if needed), so the backend must support FUSE: E2B and Daytona work. The Docker backend doesn't yet, because it only enables FUSE for the SDK's built-in mounts.
+
+```python
+from agents import Runner
+from agents.run import RunConfig
+from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig
+from agents.extensions.sandbox.e2b import E2BSandboxClient, E2BSandboxClientOptions
+from archil.openai_agents import ArchilMount
+
+agent = SandboxAgent(name="analyst", instructions="Your files are in data/.")
+client = E2BSandboxClient()
+session = await client.create(manifest=Manifest(), options=E2BSandboxClientOptions(sandbox_type="e2b"))
+async with session:
+    await ArchilMount(disk="dsk-abc123", token=disk_token, path="data").attach(session)
+    await Runner.run(agent, "Summarize data/report.csv", run_config=RunConfig(sandbox=SandboxRunConfig(session=session)))
+```
+
+`attach` mounts the disk at `path` (relative to the workspace root, or absolute) and registers a hook that flushes and releases the disk when the session closes; call `detach(session)` to release it sooner. The mount is left out of workspace snapshots. Options: `token` (the disk's mount token, default `ARCHIL_MOUNT_TOKEN`), `region` (default `ARCHIL_REGION`), `read_only`, `shared`, `conditional`, `install_client`, and `make_writable` (hand the disk's root directory to the sandbox's default user if it can't write to it).
+
+Pick a mode by how many sandboxes write to the disk:
+
+- **Exclusive** (the default): one sandbox mounts the disk at a time. Use it when a single agent owns the disk.
+- **`shared=True`**: several sandboxes mount the disk, read-only until one runs `archil checkout <path>` to take a path for writing. Use it when agents need coordinated, exclusive ownership of the paths they write.
+- **`conditional=True`**: several sandboxes mount the disk and each can write any path no other client has checked out, without a checkout; the last write wins. Use it for parallel agents that write separate files. A write can take up to about 30 seconds to appear in other sandboxes.
+
+`shared` and `conditional` are mutually exclusive; `read_only` combines with either.
+
+The token is written to a short-lived file rather than the command line, so it stays out of the SDK's audit events and traces, but code in the sandbox with root access can read it; it grants access to this disk only.
+
+`ArchilMount` attaches to a running session rather than being a manifest `Mount` entry because, since openai-agents 0.20, the SDK only accepts the mount types it ships.
+
 ## Connecting to a disk's data plane
 
 To run a command against a disk, use `Disk.exec()` — it returns stdout, stderr, and an exit code from an Archil-managed container with the disk pre-mounted. No local filesystem involved.
