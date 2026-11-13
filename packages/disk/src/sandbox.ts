@@ -444,7 +444,13 @@ export class Sandbox {
           ),
         ),
       );
-      socket.sendRequest(request);
+      try {
+        socket.sendRequest(request);
+      } catch (error) {
+        reject(error);
+        // Never sent, so no reply will release the channel.
+        socket.finish();
+      }
     });
   }
 

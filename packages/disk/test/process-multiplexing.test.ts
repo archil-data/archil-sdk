@@ -195,6 +195,23 @@ test("stdin waits for credit while the process is not reading", async () => {
   await processes.disconnect();
 });
 
+test("a kill that fails to send does not keep the idle connection open", async () => {
+  vi.useFakeTimers();
+  const { processes } = setup();
+  const process = await processes.start("sleep");
+  const socket = RuntimeSocket.instances[0];
+  const send = socket.send.bind(socket);
+  socket.send = (data: Uint8Array) => {
+    if (fromBinary(ClientFrameSchema, data).body.case === "kill") throw new Error("send failed");
+    send(data);
+  };
+  await assert.rejects(process.kill(), /send failed/);
+  socket.exit(1);
+  await process.wait();
+  await vi.advanceTimersByTimeAsync(5000);
+  assert.equal(socket.readyState, RuntimeSocket.CLOSED);
+});
+
 test("detach, resize, and kill do not close another channel or reopen the socket", async () => {
   const { processes, post } = setup();
   const [first, second] = await Promise.all([
