@@ -7,11 +7,16 @@ import {
   Sandbox,
   type SandboxMountSpec,
   type SandboxNetwork,
+  type SandboxTimeoutAction,
   type SandboxWire,
   type SandboxWaitOptions,
   sandboxMountWire,
   waitForSandboxStart,
 } from "./sandbox.js";
+
+type CreateSandboxWire = components["schemas"]["CreateSandboxRequest"] & {
+  on_timeout?: SandboxTimeoutAction;
+};
 
 export interface CreateSandboxRequest {
   /** Name for the sandbox. The server generates one when omitted. */
@@ -36,6 +41,13 @@ export interface CreateSandboxRequest {
   maxTtlSeconds?: number;
   /** Seconds without a direct process connection before pausing. Omitted or zero disables idle expiry. */
   idleTtlSeconds?: number;
+  /**
+   * What happens when either TTL runs out: `"pause"` (the default) keeps memory
+   * and processes for resume; `"delete"` deletes the sandbox and its disk, or
+   * leaves it stopped while forks of it exist. Forks inherit it; it cannot be
+   * changed after creation.
+   */
+  onTimeout?: SandboxTimeoutAction;
   /** Maximum concurrently attached exec sessions. Detached processes and one-shot controls do not count. */
   maxConcurrentExecs?: number;
   /** Creation-time network policy. Egress is unrestricted when omitted. */
@@ -108,18 +120,19 @@ export class Sandboxes {
       env: request.env,
       max_ttl_seconds: request.maxTtlSeconds,
       idle_ttl_seconds: request.idleTtlSeconds,
+      on_timeout: request.onTimeout,
       max_concurrent_execs: request.maxConcurrentExecs,
       network: request.network,
       ports: request.ports,
       ...(request.mounts !== undefined && { mounts: request.mounts.map(sandboxMountWire) }),
-    } satisfies Partial<components["schemas"]["CreateSandboxRequest"]>;
+    } satisfies Partial<CreateSandboxWire>;
     const data = await unwrap(
       retryApiRequest(
         () =>
           this._client.POST("/api/sandboxes", {
             params: { query: { wait: options.wait ?? true } },
             // Generated types require defaulted fields; omission lets the server choose them.
-            body: body as components["schemas"]["CreateSandboxRequest"],
+            body: body as CreateSandboxWire,
           }),
         "connect",
       ),

@@ -24,6 +24,7 @@ from ._models import (
     SandboxProcessResult,
     SandboxStatus,
     SandboxTerminal,
+    SandboxTimeoutAction,
 )
 from ._sandbox_process import _SandboxProcess
 from .errors import SandboxStartError, SandboxPauseError
@@ -74,6 +75,10 @@ class _Sandbox:
     @property
     def idle_ttl_seconds(self) -> int:
         return self._data.idle_ttl_seconds
+
+    @property
+    def on_timeout(self) -> SandboxTimeoutAction:
+        return self._data.on_timeout
 
     @property
     def checkpoint(self) -> Optional[str]:

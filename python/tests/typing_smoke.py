@@ -37,6 +37,7 @@ from archil import (
     SandboxProcessOutput,
     SandboxProcessResult,
     SandboxTerminal,
+    SandboxTimeoutAction,
     TokenUser,
     Workspace,
 )
@@ -55,6 +56,7 @@ def sync_usage() -> None:
         vcpu_count=2,
         mem_size_mib=4096,
         idle_ttl_seconds=300,
+        on_timeout="delete",
         base_image="docker:29.7.1-dind",
         network=SandboxNetwork(
             egress=SandboxEgressPolicy(
@@ -109,11 +111,12 @@ def sync_usage() -> None:
     for page in sandbox.list_port_token_pages(page_size=10):
         _token_page: SandboxPortTokenPage = page
     sandbox.delete_port_token(port_token)
-    module_sandbox: Sandbox = archil.create_sandbox(name="trial", idle_ttl_seconds=0, ports=[3000])
+    module_sandbox: Sandbox = archil.create_sandbox(name="trial", idle_ttl_seconds=0, on_timeout="pause", ports=[3000])
     sandbox = sandbox.set_timeout(3600)
     sandbox = sandbox.set_timeout(idle_ttl_seconds=300)
     sandbox = sandbox.set_timeout(3600, idle_ttl_seconds=0)
     _idle_ttl: int = sandbox.idle_ttl_seconds
+    _on_timeout: SandboxTimeoutAction = sandbox.on_timeout
     _module_sandboxes: list[Sandbox] = archil.list_sandboxes()
     module_sandbox = archil.get_sandbox(module_sandbox.id)
     sandbox_result: SandboxProcessResult = sandbox.exec("echo ready", cwd="/workspace")
@@ -182,7 +185,7 @@ def sync_usage() -> None:
 
 async def async_usage() -> None:
     async with Archil(api_key="key-x", region="aws-us-east-1") as client:
-        sandbox = await client.sandboxes.create.aio(name="trial", idle_ttl_seconds=300, ports=[3000])
+        sandbox = await client.sandboxes.create.aio(name="trial", idle_ttl_seconds=300, on_timeout="delete", ports=[3000])
         image: Image = await client.images.build.aio(source="node:24-bookworm")
         image = await client.images.get.aio(image.image_id)
         _hostname: str = await sandbox.expose_port.aio(3000)

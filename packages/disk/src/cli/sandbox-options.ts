@@ -1,4 +1,5 @@
 import type { SandboxProcessStartOptions } from "../sandbox-process.js";
+import type { SandboxTimeoutAction } from "../sandbox.js";
 import type { CreateSandboxRequest } from "../sandboxes.js";
 
 export interface CreateSandboxCliOptions {
@@ -7,6 +8,7 @@ export interface CreateSandboxCliOptions {
   baseImage?: string;
   maxTtlSeconds?: string;
   idleTtlSeconds?: string;
+  onTimeout?: string;
   maxConcurrentProcesses?: string;
   env: string[];
 }
@@ -27,6 +29,11 @@ export function optionalInteger(value: string | undefined, label: string, min: n
     throw new Error(`${label} must be an integer from ${min} to ${max}`);
   }
   return parsed;
+}
+
+function optionalTimeoutAction(value: string | undefined): SandboxTimeoutAction | undefined {
+  if (value === undefined || value === "pause" || value === "delete") return value;
+  throw new Error("On timeout must be 'pause' or 'delete'");
 }
 
 export function parseEnvironment(entries: string[]): Record<string, string> | undefined {
@@ -52,6 +59,7 @@ export function parseCreateSandboxOptions(name: string | undefined, options: Cre
     baseImage: options.baseImage,
     maxTtlSeconds: optionalInteger(options.maxTtlSeconds, "Max TTL", 1, 2_147_483_647),
     idleTtlSeconds: optionalInteger(options.idleTtlSeconds, "Idle TTL", 0, 86_400),
+    onTimeout: optionalTimeoutAction(options.onTimeout),
     maxConcurrentExecs: optionalInteger(options.maxConcurrentProcesses, "Max concurrent processes", 1, 1024),
     env: parseEnvironment(options.env),
   };

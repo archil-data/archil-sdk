@@ -298,6 +298,7 @@ def sandbox_json(status: str = "running", **overrides) -> dict:
         "platform": "amd64",
         "max_ttl_seconds": 3600,
         "idle_ttl_seconds": 30,
+        "on_timeout": "delete",
         "max_concurrent_execs": 4,
         "endpoints": [{"port": 8080, "hostname": "8080.sbx.example.com"}],
         "created_at": NOW,
@@ -626,6 +627,7 @@ def test_create_and_list_sandboxes(archil, router):
         env={"TRIAL": "1"},
         max_ttl_seconds=3600,
         idle_ttl_seconds=30,
+        on_timeout="delete",
         max_concurrent_execs=4,
         ports=[3000, 8080],
         network=SandboxNetwork(
@@ -652,6 +654,7 @@ def test_create_and_list_sandboxes(archil, router):
     assert sandbox.id == "sbx-1"
     assert sandbox.platform == "amd64"
     assert sandbox.idle_ttl_seconds == 30
+    assert sandbox.on_timeout == "delete"
     assert sandbox.image_digest == ""
     assert sandbox.endpoints[0].hostname == "8080.sbx.example.com"
     assert isinstance(sandbox.created_at, datetime)
@@ -664,6 +667,7 @@ def test_create_and_list_sandboxes(archil, router):
         "env": {"TRIAL": "1"},
         "max_ttl_seconds": 3600,
         "idle_ttl_seconds": 30,
+        "on_timeout": "delete",
         "max_concurrent_execs": 4,
         "ports": [3000, 8080],
         "network": network_json,
@@ -1228,6 +1232,20 @@ def test_older_sandbox_response_defaults_idle_ttl_to_disabled(archil, router):
     assert archil.sandboxes.get("sbx-1").idle_ttl_seconds == 0
 
 
+@pytest.mark.parametrize("on_timeout", [None, "pause", "delete"])
+def test_create_serializes_on_timeout(archil, router, on_timeout):
+    router.set(lambda request: ok_envelope(sandbox_json()))
+    archil.sandboxes.create(on_timeout=on_timeout)
+    assert router.requests[-1].json == ({} if on_timeout is None else {"on_timeout": on_timeout})
+
+
+def test_older_sandbox_response_defaults_on_timeout_to_pause(archil, router):
+    data = sandbox_json()
+    del data["on_timeout"]
+    router.set(lambda request: ok_envelope(data))
+    assert archil.sandboxes.get("sbx-1").on_timeout == "pause"
+
+
 @pytest.mark.parametrize("use_async", [False, True], ids=["sync", "async"])
 @pytest.mark.parametrize("body", [
     {"timeout": 86400},
@@ -1363,7 +1381,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
     )
 
     network = SandboxNetwork(egress=SandboxEgressPolicy(default="deny", allow=["github.com"]))
-    assert archil_module.create_sandbox(name="trial", idle_ttl_seconds=0, network=network, ports=[3000], wait=False) is expected
+    assert archil_module.create_sandbox(name="trial", idle_ttl_seconds=0, on_timeout="delete", network=network, ports=[3000], wait=False) is expected
     assert archil_module.list_sandboxes(disk="dsk-1") == [expected]
     assert archil_module.get_sandbox("sbx-1") is expected
     assert calls == [
@@ -1378,6 +1396,7 @@ def test_module_level_sandbox_helpers(monkeypatch):
                 "env": None,
                 "max_ttl_seconds": None,
                 "idle_ttl_seconds": 0,
+                "on_timeout": "delete",
                 "max_concurrent_execs": None,
                 "network": network,
                 "ports": [3000],

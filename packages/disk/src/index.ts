@@ -49,6 +49,7 @@ export type {
   SandboxNetworkAction,
   SandboxResponse,
   SandboxStatus,
+  SandboxTimeoutAction,
   SandboxTimeoutOptions,
   SandboxForkOptions,
   SandboxWaitOptions,
