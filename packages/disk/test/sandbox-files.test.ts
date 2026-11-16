@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "vitest";
 import { SandboxFileTransferError } from "../src/errors.js";
 import {
@@ -163,7 +167,6 @@ test("downloadFile requests bounded ranges and writes binary chunks", async () =
     Array.from(content),
   );
   assert.equal(process.env.ARCHIL_FILE_PATH, "/workspace/result.bin");
-  assert.match(process.env.ARCHIL_FILE_TEMP, /^\/tmp\/\.archil-download-/);
   assert.equal(process.collectOutput, false);
   assert.equal(process.disconnected, true);
 });
@@ -209,4 +212,90 @@ test("file transfer paths must be absolute", async () => {
     sandboxFiles.downloadFile("/", () => {}),
     /absolute file path/,
   );
+});
+
+function runScript(script: string, env: Record<string, string>): ChildProcess {
+  return spawn("sh", ["-c", script], {
+    env: { ...globalThis.process.env, ...env },
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+}
+
+function exitCode(child: ChildProcess): Promise<number | null> {
+  return new Promise((resolve) => child.once("close", resolve));
+}
+
+async function waitForEntry(directory: string, prefix: string): Promise<string> {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const entries = await readdir(directory).catch(() => []);
+    const entry = entries.find((name) => name.startsWith(prefix));
+    if (entry) return join(directory, entry);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`no ${prefix} file appeared in ${directory}`);
+}
+
+async function groupOrOtherBits(path: string): Promise<number> {
+  return (await stat(path)).mode & 0o077;
+}
+
+test("upload keeps its temp file private until the final chmod", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "archil-upload-"));
+  let child: ChildProcess | undefined;
+  try {
+    const target = join(directory, "tests", "hidden.py");
+    child = runScript(sandboxFileCommands.upload, {
+      ARCHIL_FILE_PARENT: join(directory, "tests"),
+      ARCHIL_FILE_TARGET: target,
+      ARCHIL_FILE_MODE: "644",
+    });
+    const exited = exitCode(child);
+    child.stdin?.write("assert solve() == 42\n");
+
+    const temp = await waitForEntry(join(directory, "tests"), ".archil-upload.");
+    assert.equal(await groupOrOtherBits(temp), 0);
+
+    child.stdin?.end();
+    assert.equal(await exited, 0);
+    assert.equal(await readFile(target, "utf8"), "assert solve() == 42\n");
+    assert.equal((await stat(target)).mode & 0o777, 0o644);
+    assert.deepEqual(await readdir(join(directory, "tests")), ["hidden.py"]);
+  } finally {
+    child?.kill("SIGKILL");
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("download chunks never land in a readable temp file, even when killed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "archil-download-"));
+  const temps = await mkdtemp(join(tmpdir(), "archil-download-tmp-"));
+  let child: ChildProcess | undefined;
+  try {
+    const source = join(directory, "answers.txt");
+    await writeFile(source, "secret");
+    child = runScript(sandboxFileCommands.download, {
+      ARCHIL_FILE_PATH: source,
+      TMPDIR: temps,
+    });
+    const exited = exitCode(child);
+    const output: Buffer[] = [];
+    child.stdout?.on("data", (chunk: Buffer) => output.push(chunk));
+
+    const temp = await waitForEntry(temps, ".archil-download.");
+    child.stdin?.write("3\n");
+    while (Buffer.concat(output).toString().trim() !== "3\nsec") {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(await groupOrOtherBits(temp), 0);
+
+    child.kill("SIGKILL");
+    await exited;
+    for (const leftover of await readdir(temps)) {
+      assert.equal(await groupOrOtherBits(join(temps, leftover)), 0);
+    }
+  } finally {
+    child?.kill("SIGKILL");
+    await rm(directory, { recursive: true, force: true });
+    await rm(temps, { recursive: true, force: true });
+  }
 });
