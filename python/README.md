@@ -82,6 +82,19 @@ all_sandboxes = archil.list_sandboxes()
 using_disk = archil.list_sandboxes(disk="dsk-abc123")
 ```
 
+Label sandboxes when you create or fork them, then find them by label or name:
+
+```python
+agent = archil.create_sandbox(labels={"trial": "t-42", "role": "agent"})
+verifier = agent.fork(labels={"trial": "t-42", "role": "verifier"})
+
+trial = archil.list_sandboxes(labels={"trial": "t-42"})
+named = archil.list_sandboxes(name_prefix="harbor-")
+```
+
+A fork keeps its source's labels unless `labels` is given; `{}` clears them.
+`list_sandboxes` follows the server's pages until none remain.
+
 When the region has no capacity, sandbox create, start, resume, and fork back off
 and retry for up to 10 seconds, logging a warning, then raise the 503. Change the
 limit with `Archil(max_throttle_wait=seconds)` or `ARCHIL_MAX_THROTTLE_WAIT`; `0`
