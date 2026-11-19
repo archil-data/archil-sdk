@@ -21,6 +21,8 @@ export interface SandboxProcessOutput {
  * Receives each output chunk in order. Returning a promise holds back that
  * process's output until it settles, so a slow handler paces the process's
  * output stream instead of buffering it.
+ *
+ * @deprecated Iterate the process's `output` instead.
  */
 export type SandboxProcessOutputHandler = (output: SandboxProcessOutput) => void | Promise<void>;
 
@@ -38,7 +40,11 @@ export interface SandboxProcessConnectOptions {
    * closes.
    */
   shared?: boolean;
-  /** Delivers output to a handler; the handle's `output` iterator is then unavailable. */
+  /**
+   * Delivers output to a handler; the handle's `output` iterator is then unavailable.
+   *
+   * @deprecated Iterate the process's `output` instead.
+   */
   onOutput?: SandboxProcessOutputHandler;
   /** Retain decoded stdout and stderr on the handle and result. Defaults to true. */
   collectOutput?: boolean;
@@ -51,7 +57,11 @@ export interface SandboxProcessStartOptions {
   terminal?: boolean | SandboxTerminalOptions;
   env?: Record<string, string>;
   timeoutSeconds?: number;
-  /** Delivers output to a handler; the handle's `output` iterator is then unavailable. */
+  /**
+   * Delivers output to a handler; the handle's `output` iterator is then unavailable.
+   *
+   * @deprecated Iterate the process's `output` instead.
+   */
   onOutput?: SandboxProcessOutputHandler;
   /** Retain decoded stdout and stderr on the handle and result. Defaults to true. */
   collectOutput?: boolean;
