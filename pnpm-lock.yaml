@@ -77,8 +77,8 @@ importers:
   packages/disk:
     dependencies:
       '@archildata/api-types':
-        specifier: ^0.0.81
-        version: 0.0.81
+        specifier: ^0.0.89
+        version: 0.0.89(@bufbuild/protobuf@2.17.0)
       '@bufbuild/protobuf':
         specifier: ^2.16.0
         version: 2.17.0
@@ -366,8 +366,13 @@ packages:
     peerDependencies:
       zod: ^3.23.8
 
-  '@archildata/api-types@0.0.81':
-    resolution: {integrity: sha512-v5POIAOhko0pzVM9kQUvFJj31D3fDo/8kwHgmly0wNT20SepGPGThoB6qOcvUoA3rfiS3PGCkynLNfkoZf/QxQ==}
+  '@archildata/api-types@0.0.89':
+    resolution: {integrity: sha512-ei8kjinQds4ej42htOTVhsFOpwRZ9Vd+v5rNXTpRYlbDWc5CzE4VYFZnxY0qX8vJepqI2Q7xyui84JTDWdXizg==}
+    peerDependencies:
+      '@bufbuild/protobuf': ^2.16.0
+    peerDependenciesMeta:
+      '@bufbuild/protobuf':
+        optional: true
 
   '@archildata/native@0.8.18':
     resolution: {integrity: sha512-/gKLR8H9kbQdULY5wbfGXgsYo4wLr0f4iAsDfNeYA8QZufZH0AQXm/7CfpQTDzcXZ9vgUrQwkXQkCkhPOjx2Sg==}
@@ -2875,7 +2880,9 @@ snapshots:
       zod: 4.4.3
       zod-to-json-schema: 3.25.2(zod@4.4.3)
 
-  '@archildata/api-types@0.0.81': {}
+  '@archildata/api-types@0.0.89(@bufbuild/protobuf@2.17.0)':
+    optionalDependencies:
+      '@bufbuild/protobuf': 2.17.0
 
   '@archildata/native@0.8.18': {}
 
