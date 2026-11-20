@@ -25,6 +25,7 @@ import {
 } from "./sandbox-options.js";
 import { runSandboxShell } from "./sandbox-shell.js";
 import { spinner } from "./spinner.js";
+import { writeOutput, type OutputStream } from "./write-output.js";
 
 export interface SandboxService {
   list(): Promise<Sandbox[]>;
@@ -32,15 +33,12 @@ export interface SandboxService {
   create(request?: CreateSandboxRequest, options?: { wait?: boolean }): Promise<Sandbox>;
 }
 
-interface WritableOutput {
-  write(data: string | Uint8Array): unknown;
-}
 
 interface SandboxCliDependencies {
   version: string;
   createClient(options: ArchilOptions): { sandboxes: SandboxService };
-  stdout?: WritableOutput & { isTTY?: boolean };
-  stderr?: WritableOutput & { isTTY?: boolean };
+  stdout?: OutputStream & { isTTY?: boolean };
+  stderr?: OutputStream & { isTTY?: boolean };
   stdin?: NodeJS.ReadStream;
   signals?: NodeJS.Process;
   confirm?: (question: string) => Promise<boolean>;
@@ -296,10 +294,6 @@ Use -- before the command so its flags are not parsed as sandbox options.
         remote = await sandbox.run(shellCommand, {
           ...runOptions,
           collectOutput: options.output === "json",
-          onOutput: options.output === "json" ? undefined : ({ stream, data }) => {
-            if (stream === "stderr" && data.byteLength > 0) receivedStderr = true;
-            return (stream === "stdout" ? stdout : stderr).write(data);
-          },
         });
         try {
           await remote.closeStdin();
@@ -309,7 +303,16 @@ Use -- before the command so its flags are not parsed as sandbox options.
         signals.on("SIGINT", onSigint);
         signals.on("SIGTERM", onSigterm);
         signals.on("SIGHUP", onSighup);
-        result = await Promise.race([remote.wait(), termination]);
+        const streaming = options.output === "json" ? Promise.resolve() : (async () => {
+          for await (const { stream, data } of remote!.output) {
+            if (stream === "stderr" && data.length) receivedStderr = true;
+            const destination = stream === "stdout" ? stdout : stderr;
+            await writeOutput(destination, data);
+          }
+        })();
+        result = await Promise.race([
+          streaming.then(() => remote!.wait()), termination,
+        ]);
         if (options.output === "json") {
           output(JSON.stringify(result, null, 2));
         } else if (result.status !== "completed" && !receivedStderr) {
@@ -328,6 +331,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
         removeSignalListeners();
         if (remote && !result && !terminationStarted) await remote.kill().catch(() => {});
         await remote?.disconnect().catch(() => {});
+        await sandbox.processes.disconnect();
       }
     });
 

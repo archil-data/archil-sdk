@@ -1,5 +1,6 @@
 import type { SandboxProcess, SandboxProcessResult } from "../sandbox-process.js";
 import type { Sandbox } from "../sandbox.js";
+import { writeOutput } from "./write-output.js";
 
 interface ShellInput {
   isTTY?: boolean;
@@ -16,8 +17,8 @@ interface ShellOutput {
   columns?: number;
   rows?: number;
   write(data: string | Uint8Array): unknown;
-  on(event: "resize", listener: () => void): unknown;
-  off(event: "resize", listener: () => void): unknown;
+  on(event: "resize" | "drain" | "close" | "error", listener: (error?: unknown) => void): unknown;
+  off(event: "resize" | "drain" | "close" | "error", listener: (error?: unknown) => void): unknown;
 }
 
 interface ShellErrorOutput {
@@ -122,13 +123,6 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     remote = await options.sandbox.run("/bin/sh -l", {
       terminal: { cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 },
       collectOutput: false,
-      onOutput: ({ data }) => {
-        try {
-          stdout.write(data);
-        } catch (error) {
-          fail(error);
-        }
-      },
     });
     stdin.setRawMode(true);
     terminalConfigured = true;
@@ -139,7 +133,14 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     stderr.write(`Archil shell process ${remote.id}; Ctrl+] exits\n`);
     stdin.on("data", onInput);
     stdin.resume();
-    result = await Promise.race([remote.wait(), termination, failure]);
+    const streaming = (async () => {
+      for await (const { data } of remote!.output) {
+        await writeOutput(stdout, data);
+      }
+    })();
+    result = await Promise.race([
+      streaming.then(() => remote!.wait()), termination, failure,
+    ]);
     failureSettled = true;
     return result;
   } finally {
@@ -150,5 +151,6 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     stdin.pause();
     if (remote && !result && !terminationRequested) await remote.kill().catch(() => {});
     if (remote) await remote.disconnect().catch(() => {});
+    await options.sandbox.processes.disconnect();
   }
 }

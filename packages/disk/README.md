@@ -165,18 +165,18 @@ console.log(result.stdout);
 
 const terminal = await sandbox.run("codex", {
   terminal: { cols: 120, rows: 40 },
-  onOutput: ({ data }) => process.stdout.write(data),
 });
+// Iteration ends with an error once the handle disconnects.
+void (async () => {
+  for await (const { data } of terminal.output) process.stdout.write(data);
+})().catch(() => {});
 const processId = terminal.id;
 await terminal.sendInput("Review this repository\n");
 await terminal.resize({ cols: 160, rows: 50 });
 const cursor = terminal.cursor;
 await terminal.disconnect();
 
-const resumed = await sandbox.attach(processId, {
-  offset: cursor,
-  onOutput: ({ data }) => process.stdout.write(data),
-});
+const resumed = await sandbox.attach(processId, { offset: cursor });
 await resumed.kill();
 
 await sandbox.start();
@@ -398,11 +398,13 @@ Pass `terminal: true` when the command needs terminal behavior, or provide
 into `stdout`; non-terminal processes keep the streams separate. Disconnecting
 leaves the process running. Reconnect with `sandbox.attach(id)` to
 replay buffered output from the beginning, or pass `{ offset: process.cursor }`
-to continue where the previous connection stopped. `onOutput` receives raw
-bytes with their stream and absolute offset. Call `closeStdin()` to deliver EOF
+to continue where the previous connection stopped. Iterating `output` yields
+raw bytes with their stream and absolute offset; one iterator may consume each
+handle. Call `closeStdin()` to deliver EOF
 to a non-terminal process. `sendInput()` streams large input as 1 MiB WebSocket
-frames. Set `collectOutput: false` to stream through `onOutput` without
-retaining decoded output in the process handle or result. Resize and kill use
+frames. Set `collectOutput: false` to stream through `output` without
+retaining decoded output in the process handle or result. The `onOutput`
+option is deprecated; iterate `output` instead. Resize and kill use
 separate one-shot process controls, so they do not wait behind stdin.
 `kill()` returns after the control is acknowledged; `wait()` observes exit.
 `maxConcurrentExecs` limits attached process sessions; detached processes and

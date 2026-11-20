@@ -47,7 +47,8 @@
     "test:bun": "bun test test/client-pool.test.ts test/client-tls.test.ts test/control-plane-retries.test.ts test/http2-goaway.test.ts"
   },
   "dependencies": {
-    "@archildata/api-types": "^0.0.81",
+    "@archildata/api-types": "^0.0.89",
+    "@bufbuild/protobuf": "^2.16.0",
     "undici": "^8.12.3"
   },
   "peerDependencies": {

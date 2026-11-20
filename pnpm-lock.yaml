@@ -77,8 +77,11 @@ importers:
   packages/disk:
     dependencies:
       '@archildata/api-types':
-        specifier: ^0.0.81
-        version: 0.0.81
+        specifier: ^0.0.89
+        version: 0.0.89(@bufbuild/protobuf@2.17.0)
+      '@bufbuild/protobuf':
+        specifier: ^2.16.0
+        version: 2.17.0
       undici:
         specifier: ^8.12.3
         version: 8.12.3
@@ -225,7 +228,7 @@ importers:
         version: link:../mock
       '@mastra/core':
         specifier: ^1.49.0
-        version: 1.49.0(@cfworker/json-schema@4.1.1)(express@5.2.1)(zod@4.4.3)
+        version: 1.49.0(@bufbuild/protobuf@2.17.0)(@cfworker/json-schema@4.1.1)(express@5.2.1)(zod@4.4.3)
       '@types/node':
         specifier: ^20.19.33
         version: 20.19.43
@@ -363,8 +366,13 @@ packages:
     peerDependencies:
       zod: ^3.23.8
 
-  '@archildata/api-types@0.0.81':
-    resolution: {integrity: sha512-v5POIAOhko0pzVM9kQUvFJj31D3fDo/8kwHgmly0wNT20SepGPGThoB6qOcvUoA3rfiS3PGCkynLNfkoZf/QxQ==}
+  '@archildata/api-types@0.0.89':
+    resolution: {integrity: sha512-ei8kjinQds4ej42htOTVhsFOpwRZ9Vd+v5rNXTpRYlbDWc5CzE4VYFZnxY0qX8vJepqI2Q7xyui84JTDWdXizg==}
+    peerDependencies:
+      '@bufbuild/protobuf': ^2.16.0
+    peerDependenciesMeta:
+      '@bufbuild/protobuf':
+        optional: true
 
   '@archildata/native@0.8.18':
     resolution: {integrity: sha512-/gKLR8H9kbQdULY5wbfGXgsYo4wLr0f4iAsDfNeYA8QZufZH0AQXm/7CfpQTDzcXZ9vgUrQwkXQkCkhPOjx2Sg==}
@@ -394,6 +402,9 @@ packages:
 
   '@borewit/text-codec@0.2.2':
     resolution: {integrity: sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ==}
+
+  '@bufbuild/protobuf@2.17.0':
+    resolution: {integrity: sha512-hcPkSz6D7MiTU/5VBBhK+kxaYDoOdQ6yJRFJ3kS8Nydp+VZXfg1vrpABKPNod8bXMufsVCmiUJVIKFzCzta4uw==}
 
   '@cfworker/json-schema@4.1.1':
     resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
@@ -2785,10 +2796,11 @@ packages:
 
 snapshots:
 
-  '@a2a-js/sdk@0.3.13(express@5.2.1)':
+  '@a2a-js/sdk@0.3.13(@bufbuild/protobuf@2.17.0)(express@5.2.1)':
     dependencies:
       uuid: 11.1.1
     optionalDependencies:
+      '@bufbuild/protobuf': 2.17.0
       express: 5.2.1
 
   '@ai-sdk/gateway@4.0.12(zod@4.4.3)':
@@ -2868,7 +2880,9 @@ snapshots:
       zod: 4.4.3
       zod-to-json-schema: 3.25.2(zod@4.4.3)
 
-  '@archildata/api-types@0.0.81': {}
+  '@archildata/api-types@0.0.89(@bufbuild/protobuf@2.17.0)':
+    optionalDependencies:
+      '@bufbuild/protobuf': 2.17.0
 
   '@archildata/native@0.8.18': {}
 
@@ -2895,6 +2909,8 @@ snapshots:
       '@babel/helper-validator-identifier': 8.0.2
 
   '@borewit/text-codec@0.2.2': {}
+
+  '@bufbuild/protobuf@2.17.0': {}
 
   '@cfworker/json-schema@4.1.1': {}
 
@@ -3190,9 +3206,9 @@ snapshots:
       tinyglobby: 0.2.17
       yaml: 2.9.0
 
-  '@mastra/core@1.49.0(@cfworker/json-schema@4.1.1)(express@5.2.1)(zod@4.4.3)':
+  '@mastra/core@1.49.0(@bufbuild/protobuf@2.17.0)(@cfworker/json-schema@4.1.1)(express@5.2.1)(zod@4.4.3)':
     dependencies:
-      '@a2a-js/sdk': 0.3.13(express@5.2.1)
+      '@a2a-js/sdk': 0.3.13(@bufbuild/protobuf@2.17.0)(express@5.2.1)
       '@ai-sdk/provider-utils-v5': '@ai-sdk/provider-utils@3.0.25(zod@4.4.3)'
       '@ai-sdk/provider-utils-v6': '@ai-sdk/provider-utils@4.0.27(zod@4.4.3)'
       '@ai-sdk/provider-utils-v7': '@ai-sdk/provider-utils@5.0.0(zod@4.4.3)'
