@@ -1,5 +1,13 @@
 # disk
 
+## 1.13.0
+
+### Minor Changes
+
+- e8dc843: Reuse a binary connection for concurrent sandbox processes. Idle connections close after five seconds; `sandbox.processes.disconnect()` closes them explicitly without terminating guest processes. Unread output now pauses the process's output stream instead of disconnecting it, and `sendInput()` waits while a process is not reading its input. Processes expose output as an async iterator, `output`; `onOutput` is deprecated in favor of `output`; it still works and waits for a returned promise before delivering more.
+- af464f1: Label sandboxes: `labels` on `sandboxes.create()` and `fork()`, and a `labels` field on every sandbox. A fork keeps its source's labels unless `labels` is given; `{}` clears them. `sandboxes.list()` filters by `labels`, `name`, and `namePrefix` (`name_prefix` in Python) and now follows the server's pages until none remain.
+- 3dd5c8f: Sandbox creation takes `onTimeout` (`on_timeout` in Python): `"pause"`, the default, or `"delete"`, which deletes the sandbox and its disk instead of pausing it when its hard or idle TTL runs out. Forks inherit it, and `sandbox.onTimeout` (`sandbox.on_timeout`) reads it back, as `"pause"` from control planes that predate it. `sandbox create` takes `--on-timeout pause|delete`.
+
 ## 1.12.1
 
 ### Patch Changes
