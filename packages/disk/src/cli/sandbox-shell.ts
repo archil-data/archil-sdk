@@ -1,5 +1,6 @@
 import type { SandboxProcess, SandboxProcessResult } from "../sandbox-process.js";
 import type { Sandbox } from "../sandbox.js";
+import { writeOutput } from "./write-output.js";
 
 interface ShellInput {
   isTTY?: boolean;
@@ -16,8 +17,8 @@ interface ShellOutput {
   columns?: number;
   rows?: number;
   write(data: string | Uint8Array): unknown;
-  on(event: "resize" | "drain", listener: () => void): unknown;
-  off(event: "resize" | "drain", listener: () => void): unknown;
+  on(event: "resize" | "drain" | "close" | "error", listener: (error?: unknown) => void): unknown;
+  off(event: "resize" | "drain" | "close" | "error", listener: (error?: unknown) => void): unknown;
 }
 
 interface ShellErrorOutput {
@@ -134,10 +135,7 @@ export async function runSandboxShell(options: SandboxShellOptions): Promise<San
     stdin.resume();
     const streaming = (async () => {
       for await (const { data } of remote!.output) {
-        if (stdout.write(data) === false) await new Promise<void>((resolve) => {
-          const drained = () => { stdout.off("drain", drained); resolve(); };
-          stdout.on("drain", drained);
-        });
+        await writeOutput(stdout, data);
       }
     })();
     result = await Promise.race([

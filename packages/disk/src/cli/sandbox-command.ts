@@ -25,6 +25,7 @@ import {
 } from "./sandbox-options.js";
 import { runSandboxShell } from "./sandbox-shell.js";
 import { spinner } from "./spinner.js";
+import { writeOutput, type OutputStream } from "./write-output.js";
 
 export interface SandboxService {
   list(): Promise<Sandbox[]>;
@@ -32,16 +33,12 @@ export interface SandboxService {
   create(request?: CreateSandboxRequest, options?: { wait?: boolean }): Promise<Sandbox>;
 }
 
-interface WritableOutput {
-  write(data: string | Uint8Array): unknown;
-  once?(event: "drain", listener: () => void): unknown;
-}
 
 interface SandboxCliDependencies {
   version: string;
   createClient(options: ArchilOptions): { sandboxes: SandboxService };
-  stdout?: WritableOutput & { isTTY?: boolean };
-  stderr?: WritableOutput & { isTTY?: boolean };
+  stdout?: OutputStream & { isTTY?: boolean };
+  stderr?: OutputStream & { isTTY?: boolean };
   stdin?: NodeJS.ReadStream;
   signals?: NodeJS.Process;
   confirm?: (question: string) => Promise<boolean>;
@@ -310,7 +307,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
           for await (const { stream, data } of remote!.output) {
             if (stream === "stderr" && data.length) receivedStderr = true;
             const destination = stream === "stdout" ? stdout : stderr;
-            if (destination.write(data) === false && destination.once) await new Promise<void>(resolve => destination.once!("drain", resolve));
+            await writeOutput(destination, data);
           }
         })();
         result = await Promise.race([
