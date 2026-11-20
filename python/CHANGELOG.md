@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.0
+
+### Minor Changes
+
+- 3c02ca5: `images.build` takes the size its build prepares sandboxes to start at from a snapshot (`vcpuCount` / `memSizeMiB`; Python `vcpu_count` / `mem_size_mib`, default 1 vCPU / 2048 MiB), and `Image` reports the size sandboxes created from it get.
+
 ## 0.22.0
 
 ### Minor Changes
