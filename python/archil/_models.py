@@ -540,6 +540,8 @@ class Image:
     digest: Optional[str] = None
     canonical_source: Optional[str] = None
     failure_reason: Optional[ImageFailureReason] = None
+    vcpu_count: Optional[int] = None
+    mem_size_mib: Optional[int] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "Image":
@@ -553,6 +555,8 @@ class Image:
             digest=d.get("digest"),
             canonical_source=d.get("canonical_source"),
             failure_reason=d.get("failure_reason"),
+            vcpu_count=d.get("vcpu_count"),
+            mem_size_mib=d.get("mem_size_mib"),
         )
 
 

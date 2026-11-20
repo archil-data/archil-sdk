@@ -18,6 +18,8 @@ function imageWire(status: string, overrides: Record<string, unknown> = {}) {
     status,
     created_at: now,
     updated_at: now,
+    vcpu_count: 1,
+    mem_size_mib: 2048,
     ...overrides,
   };
 }
@@ -60,6 +62,8 @@ test("build retries a transient failure and returns a ready image without pollin
       digest: "sha256:abc",
       canonicalSource: "ghcr.io/acme/app@sha256:abc",
       failureReason: undefined,
+      vcpuCount: 1,
+      memSizeMiB: 2048,
       createdAt: new Date(now),
       updatedAt: new Date(now),
     });
@@ -79,10 +83,19 @@ test("build polls a running build with backoff until it is ready", async () => {
   await vi.advanceTimersByTimeAsync(3_000);
   assert.equal((await building).status, "ready");
   assert.deepEqual(calls, [
-    { method: "POST", options: { body: { source, registry_auth: undefined } }, ms: 0 },
+    { method: "POST", options: { body: { source, registry_auth: undefined, vcpu_count: undefined, mem_size_mib: undefined } }, ms: 0 },
     { method: "GET", options: { params: { path: { image_id: imageId } } }, ms: 1_000 },
     { method: "GET", options: { params: { path: { image_id: imageId } } }, ms: 3_000 },
   ]);
+});
+
+test("build requests the image at a size and returns the size its sandboxes get", async () => {
+  const { calls, images } = fakeImages(imageWire("ready", { vcpu_count: 8, mem_size_mib: 16384 }));
+  const image = await images.build({ source, vcpuCount: 8, memSizeMiB: 16384 });
+  assert.deepEqual([image.vcpuCount, image.memSizeMiB], [8, 16384]);
+  assert.deepEqual(calls[0].options, {
+    body: { source, registry_auth: undefined, vcpu_count: 8, mem_size_mib: 16384 },
+  });
 });
 
 test("build requests an interrupted build again with the same credentials", async () => {
@@ -90,7 +103,7 @@ test("build requests an interrupted build again with the same credentials", asyn
   assert.equal((await images.build({ source, registryAuth })).status, "ready");
   assert.deepEqual(
     calls.map(({ method, options }) => ({ method, options })),
-    Array(2).fill({ method: "POST", options: { body: { source, registry_auth: registryAuth } } }),
+    Array(2).fill({ method: "POST", options: { body: { source, registry_auth: registryAuth, vcpu_count: undefined, mem_size_mib: undefined } } }),
   );
 });
 
