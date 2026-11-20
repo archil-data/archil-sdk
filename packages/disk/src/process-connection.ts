@@ -116,14 +116,19 @@ export class ProcessConnection {
   constructor(private readonly endpoint: () => Promise<ProcessEndpoint>) {}
 
   async open(): Promise<BinaryChannel> {
-    if (this.binary?.canOpen) return this.binary.channel();
-    if (!this.opening) {
-      const opening = this.connect().finally(() => {
-        if (this.opening === opening) this.opening = undefined;
-      });
-      this.opening = opening;
+    for (;;) {
+      if (this.binary?.canOpen) return this.binary.channel();
+      if (!this.opening) {
+        const opening = this.connect().finally(() => {
+          if (this.opening === opening) this.opening = undefined;
+        });
+        this.opening = opening;
+      }
+      // Callers that waited on the same connect may have filled it, or it
+      // may have drained meanwhile; those that find no room open another.
+      const binary = await this.opening;
+      if (binary.canOpen) return binary.channel();
     }
-    return (await this.opening).channel();
   }
 
   private async connect(): Promise<BinaryConnection> {

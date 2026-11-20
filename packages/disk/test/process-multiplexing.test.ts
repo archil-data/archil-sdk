@@ -295,6 +295,17 @@ test("a draining socket finishes existing channels while new work gets a fresh c
   await processes.disconnect();
 });
 
+test("callers waiting on one connect that it cannot hold open another connection", async () => {
+  const { processes, post } = setup();
+  const started = await Promise.all(
+    Array.from({ length: 129 }, (_, index) => processes.start(`process-${index}`)),
+  );
+  assert.equal(started.length, 129);
+  assert.equal(post.mock.calls.length, 2);
+  assert.equal(RuntimeSocket.instances.length, 2);
+  await processes.disconnect();
+});
+
 test("disconnect closes a drained connection that still carries channels", async () => {
   const { processes } = setup();
   const first = await processes.start("long-running");
