@@ -104,6 +104,15 @@ async def test_build_polls_running_build_with_backoff(archil, router, clock):
     assert router.requests[1].path == f"/api/images/{IMAGE_ID}"
 
 
+def test_build_requests_image_at_a_size_and_returns_its_size(archil, router, clock):
+    respond(router, clock, image_json("ready", vcpu_count=8, mem_size_mib=16384))
+
+    image = archil.images.build(source=SOURCE, vcpu_count=8, mem_size_mib=16384)
+
+    assert (image.vcpu_count, image.mem_size_mib) == (8, 16384)
+    assert router.requests[0].json == {"source": SOURCE, "vcpu_count": 8, "mem_size_mib": 16384}
+
+
 def test_build_requests_interrupted_build_again_with_credentials(archil, router, clock):
     respond(router, clock, image_json("failed", failure_reason="interrupted"), image_json("ready"))
 

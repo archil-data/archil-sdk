@@ -31,6 +31,8 @@ class _Images:
         *,
         source: str,
         registry_auth: Optional[RegistryAuth] = None,
+        vcpu_count: Optional[int] = None,
+        mem_size_mib: Optional[int] = None,
         timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     ) -> Image:
         """Build a sandbox image from an OCI reference and wait until it is ready.
@@ -39,13 +41,20 @@ class _Images:
         and joins a build that is already running. A tag is rebuilt on each
         call in case it moved, so call this once and reuse ``image_id``.
         ``registry_auth`` is required for private images on every call; without
-        it ``source`` names the public image. Interrupted builds are requested
-        again up to three times; other failures raise ``ImageBuildError``, and
-        ``TimeoutError`` is raised if the image is not ready within ``timeout``
-        seconds."""
+        it ``source`` names the public image. ``vcpu_count`` and
+        ``mem_size_mib`` (default 1 and 2048) are the size the build prepares
+        sandboxes to start at from a snapshot; each size of a source is its own
+        image, and a sandbox created from it at another size boots cold.
+        Interrupted builds are requested again up to three times; other
+        failures raise ``ImageBuildError``, and ``TimeoutError`` is raised if
+        the image is not ready within ``timeout`` seconds."""
         body: dict = {"source": source}
         if registry_auth is not None:
             body["registry_auth"] = asdict(registry_auth)
+        if vcpu_count is not None:
+            body["vcpu_count"] = vcpu_count
+        if mem_size_mib is not None:
+            body["mem_size_mib"] = mem_size_mib
         deadline = time.monotonic() + timeout
         image = await self._request(body)
         last_request = time.monotonic()

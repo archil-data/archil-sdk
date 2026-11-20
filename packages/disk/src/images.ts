@@ -5,6 +5,7 @@ import { ArchilError, ImageBuildError } from "./errors.js";
 import { retryApiRequest } from "./retry.js";
 
 type ImageWire = components["schemas"]["Image"];
+type CreateImageWire = components["schemas"]["CreateImageRequest"];
 
 export type ImageStatus = components["schemas"]["ImageState"];
 
@@ -22,6 +23,9 @@ export interface Image {
   source: string;
   private: boolean;
   status: ImageStatus;
+  /** Sandboxes created from the image get this size unless they set their own. */
+  vcpuCount: number;
+  memSizeMiB: number;
   /** `sha256:` digest of the last successful build, kept while a tag rebuilds. */
   digest?: string;
   /** `repo@sha256:` reference of the last successful build. */
@@ -40,6 +44,12 @@ export interface BuildImageRequest {
   source: string;
   /** Required for private images on every build request; without it `source` names the public image. */
   registryAuth?: RegistryAuth;
+  /**
+   * Size the build prepares sandboxes to start at from a snapshot; each size of a source is its own image.
+   * Defaults to 1 vCPU and 2048 MiB. A sandbox created from the image at another size boots cold.
+   */
+  vcpuCount?: number;
+  memSizeMiB?: number;
 }
 
 export interface BuildImageOptions {
@@ -62,6 +72,8 @@ function imageFromWire(data: ImageWire): Image {
     digest: data.digest,
     canonicalSource: data.canonical_source,
     failureReason: data.failure_reason,
+    vcpuCount: data.vcpu_count,
+    memSizeMiB: data.mem_size_mib,
     createdAt: new Date(data.created_at),
     updatedAt: new Date(data.updated_at),
   };
@@ -135,7 +147,13 @@ export class Images {
       retryApiRequest(
         () =>
           this._client.POST("/api/images", {
-            body: { source: request.source, registry_auth: request.registryAuth },
+            // Generated types require defaulted fields; omission lets the server choose them.
+            body: {
+              source: request.source,
+              registry_auth: request.registryAuth,
+              vcpu_count: request.vcpuCount,
+              mem_size_mib: request.memSizeMiB,
+            } as CreateImageWire,
           }),
         "transient",
       ),

@@ -241,31 +241,37 @@ class Images:
     get: __get_spec
 
     class __build_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, source: str, registry_auth: archil._models.RegistryAuth | None = None, timeout: float = 1800.0) -> archil._models.Image:
+        def __call__(self, /, *, source: str, registry_auth: archil._models.RegistryAuth | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, timeout: float = 1800.0) -> archil._models.Image:
             """Build a sandbox image from an OCI reference and wait until it is ready.
 
             Returns at once when the image is already built from a digest reference
             and joins a build that is already running. A tag is rebuilt on each
             call in case it moved, so call this once and reuse ``image_id``.
             ``registry_auth`` is required for private images on every call; without
-            it ``source`` names the public image. Interrupted builds are requested
-            again up to three times; other failures raise ``ImageBuildError``, and
-            ``TimeoutError`` is raised if the image is not ready within ``timeout``
-            seconds.
+            it ``source`` names the public image. ``vcpu_count`` and
+            ``mem_size_mib`` (default 1 and 2048) are the size the build prepares
+            sandboxes to start at from a snapshot; each size of a source is its own
+            image, and a sandbox created from it at another size boots cold.
+            Interrupted builds are requested again up to three times; other
+            failures raise ``ImageBuildError``, and ``TimeoutError`` is raised if
+            the image is not ready within ``timeout`` seconds.
             """
             ...
 
-        async def aio(self, /, *, source: str, registry_auth: archil._models.RegistryAuth | None = None, timeout: float = 1800.0) -> archil._models.Image:
+        async def aio(self, /, *, source: str, registry_auth: archil._models.RegistryAuth | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, timeout: float = 1800.0) -> archil._models.Image:
             """Build a sandbox image from an OCI reference and wait until it is ready.
 
             Returns at once when the image is already built from a digest reference
             and joins a build that is already running. A tag is rebuilt on each
             call in case it moved, so call this once and reuse ``image_id``.
             ``registry_auth`` is required for private images on every call; without
-            it ``source`` names the public image. Interrupted builds are requested
-            again up to three times; other failures raise ``ImageBuildError``, and
-            ``TimeoutError`` is raised if the image is not ready within ``timeout``
-            seconds.
+            it ``source`` names the public image. ``vcpu_count`` and
+            ``mem_size_mib`` (default 1 and 2048) are the size the build prepares
+            sandboxes to start at from a snapshot; each size of a source is its own
+            image, and a sandbox created from it at another size boots cold.
+            Interrupted builds are requested again up to three times; other
+            failures raise ``ImageBuildError``, and ``TimeoutError`` is raised if
+            the image is not ready within ``timeout`` seconds.
             """
             ...
 
