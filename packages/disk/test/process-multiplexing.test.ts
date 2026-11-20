@@ -25,10 +25,12 @@ class RuntimeSocket extends EventTarget {
   readonly sent: ClientFrame[] = [];
   constructor(
     readonly url: string,
-    protocol?: string,
+    protocols?: string | string[],
   ) {
     super();
-    this.protocol = RuntimeSocket.ignoreProtocol ? "" : protocol ?? "";
+    const offered = typeof protocols === "string" ? [protocols] : protocols ?? [];
+    // The runtime selects the process protocol; the token is never selected.
+    this.protocol = RuntimeSocket.ignoreProtocol ? "" : offered[0] ?? "";
     RuntimeSocket.instances.push(this);
     queueMicrotask(() => {
       this.readyState = 1;
@@ -102,7 +104,7 @@ function setup() {
   const post = vi.fn(async () => ({
     data: {
       success: true,
-      data: { url: "ws://runtime/connect", expires_at: "2099-01-01" },
+      data: { endpoint: "ws://runtime/connect", token: "signed", expires_at: "2099-01-01" },
     },
     response: new Response(null, { status: 200 }),
   }));

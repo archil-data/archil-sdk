@@ -420,12 +420,7 @@ export class Sandbox {
         "transient",
       ),
     );
-    // Prefer the token in a subprotocol, which keeps it out of request-line
-    // logs; older control planes only return `url`.
-    if (data.endpoint && data.token) {
-      return { url: data.endpoint, token: data.token };
-    }
-    return { url: data.url };
+    return { url: data.endpoint, token: data.token };
   }
 
   private async _control(request: ProcessControlRequest): Promise<void> {

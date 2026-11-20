@@ -36,15 +36,10 @@ async function waitForSocketOpen(socket: WebSocket): Promise<void> {
   });
 }
 
-/**
- * Where to open a process connection. With `token`, the token travels as a
- * subprotocol, which keeps it out of request-line logs; without it, `url`
- * carries the token in its query string, as from control planes that predate
- * `endpoint` and `token`.
- */
+/** Where to open a process connection. The token travels as a subprotocol, which keeps it out of request-line logs. */
 export interface ProcessEndpoint {
   url: string;
-  token?: string;
+  token: string;
 }
 
 async function openProcessSocket(
@@ -56,7 +51,7 @@ async function openProcessSocket(
     try {
       socket = new WebSocket(
         endpoint.url,
-        endpoint.token ? [PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${endpoint.token}`] : PROTOCOL,
+        [PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${endpoint.token}`],
       );
       socket.binaryType = "arraybuffer";
       await waitForSocketOpen(socket);

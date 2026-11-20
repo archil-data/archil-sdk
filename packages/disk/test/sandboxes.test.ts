@@ -1014,7 +1014,7 @@ test.each([undefined, "/workspace/a 'quote' $literal"])("exec forwards cwd=%s an
     POST: async (path: string, options: any) => {
       calls.push({ path, options });
       return ok({
-        url: "wss://sandbox.example/connect?token=signed",
+        endpoint: "wss://sandbox.example/connect", token: "signed",
         expires_at: now,
       });
     },
@@ -1055,7 +1055,7 @@ test.each([undefined, "/workspace/a 'quote' $literal"])("exec forwards cwd=%s an
   );
 });
 
-test("process connections send the token as a subprotocol when the API provides one", async () => {
+test("process connections send the token as a subprotocol, not in the URL", async () => {
   const client = {
     POST: async () =>
       ok({
@@ -1084,7 +1084,7 @@ test.each([
 ])("a process the runtime ends with %s says why", async (code, shared) => {
   const client = {
     POST: async () =>
-      ok({ url: "wss://sandbox.example/connect?token=signed", expires_at: now }),
+      ok({ endpoint: "wss://sandbox.example/connect", token: "signed", expires_at: now }),
   } as unknown as ApiClient;
   vi.stubGlobal("WebSocket", TestWebSocket);
   TestWebSocket.instances = [];
@@ -1159,7 +1159,7 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
     POST: async (path: string, options: any) => {
       calls.push({ path, options });
       return ok({
-        url: "wss://sandbox.example/connect?token=signed",
+        endpoint: "wss://sandbox.example/connect", token: "signed",
         expires_at: now,
       });
     },
@@ -1197,13 +1197,13 @@ test.each(["sandbox", "processes"] as const)("%s API returns a process before ex
   assert.equal(process.id, "0198-process");
   assert.equal(process.cursor, 0);
   assert.equal(process.connected, true);
-  assert.equal(socket.url, "wss://sandbox.example/connect?token=signed");
+  assert.equal(socket.url, "wss://sandbox.example/connect");
   const { command, cwd, terminal, env, timeoutSeconds } = request.body.value;
   assert.deepEqual(
     { command, cwd, terminal, env, timeoutSeconds },
     { command: "echo hello", cwd: "/workspace/app", terminal: undefined, env: { HELLO: "world" }, timeoutSeconds: 10n },
   );
-  assert.deepEqual(socket.protocols, ["archil.connect.v2"]);
+  assert.deepEqual(socket.protocols, ["archil.connect.v2", "archil.token.signed"]);
 
   socket.reply(request.channelId, output("stdout", 0, "hello\n"));
   await vi.waitFor(() => assert.equal(process.cursor, 6));
@@ -1275,7 +1275,7 @@ test("process iterators report a replay gap after retention expires", async () =
   const client = {
     POST: async () =>
       ok({
-        url: "wss://sandbox.example/connect",
+        endpoint: "wss://sandbox.example/connect", token: "signed",
         expires_at: now,
       }),
   } as unknown as ApiClient;
@@ -1307,7 +1307,7 @@ test("a terminal is a process with terminal sizing, input, and kill", async () =
   const client = {
     POST: async () =>
       ok({
-        url: "wss://sandbox.example/connect?token=signed",
+        endpoint: "wss://sandbox.example/connect", token: "signed",
         expires_at: now,
       }),
   } as unknown as ApiClient;
@@ -1363,7 +1363,7 @@ test("process input is streamed as ordered protocol messages", async () => {
   const client = {
     POST: async () =>
       ok({
-        url: "wss://sandbox.example/connect?token=signed",
+        endpoint: "wss://sandbox.example/connect", token: "signed",
         expires_at: now,
       }),
   } as unknown as ApiClient;
@@ -1404,7 +1404,7 @@ test("failed stdin close can be retried", async () => {
   const client = {
     POST: async () =>
       ok({
-        url: "wss://sandbox.example/connect",
+        endpoint: "wss://sandbox.example/connect", token: "signed",
         expires_at: now,
       }),
   } as unknown as ApiClient;
@@ -1433,7 +1433,7 @@ test("process exit closes stdin locally", async () => {
   const client = {
     POST: async () =>
       ok({
-        url: "wss://sandbox.example/connect",
+        endpoint: "wss://sandbox.example/connect", token: "signed",
         expires_at: now,
       }),
   } as unknown as ApiClient;
@@ -1459,7 +1459,7 @@ test("output iterators surface runtime connection errors", async () => {
   const client = {
     POST: async () =>
       ok({
-        url: "wss://sandbox.example/connect",
+        endpoint: "wss://sandbox.example/connect", token: "signed",
         expires_at: now,
       }),
   } as unknown as ApiClient;
@@ -1488,7 +1488,7 @@ test("process output collection can be disabled while streaming", async () => {
   const client = {
     POST: async () =>
       ok({
-        url: "wss://sandbox.example/connect",
+        endpoint: "wss://sandbox.example/connect", token: "signed",
         expires_at: now,
       }),
   } as unknown as ApiClient;
@@ -1523,7 +1523,7 @@ test("process output collection can be disabled while streaming", async () => {
 
 test("process start surfaces runtime rejection", async () => {
   const client = {
-    POST: async () => ok({ url: "wss://sandbox.example/connect", expires_at: now }),
+    POST: async () => ok({ endpoint: "wss://sandbox.example/connect", token: "signed", expires_at: now }),
   } as unknown as ApiClient;
   vi.stubGlobal("WebSocket", TestWebSocket);
   TestWebSocket.instances = [];
