@@ -44,7 +44,7 @@ async function bundleForBrowser(format: BundleFormat, globalName?: string) {
     report: false,
     write: false,
     clean: false,
-    define: { __SDK_VERSION__: JSON.stringify("0-test") },
+    define: { __SDK_VERSION__: JSON.stringify("0-test"), __NODE_BUILD__: "false" },
     deps: {
       alwaysBundle: (id) =>
         id.startsWith("@bufbuild/protobuf") ||
@@ -70,6 +70,10 @@ test("browser bundle contains no Node built-in modules", async () => {
   // also catches a Node built-in sneaking in through a dependency.
   const nodeBuiltin = /['"`]node:(?:module|url|fs|path|crypto|net|stream|os|child_process|http|https)['"`]/;
   assert.ok(!nodeBuiltin.test(code), "bundle references a Node built-in module specifier");
+
+  // undici is Node-only. Only the Node build may import it literally; a literal
+  // here would make browser bundlers try to resolve it.
+  assert.ok(!/import\(\s*['"`]undici/.test(code), "browser bundle imports undici literally");
 
   // The native addon must remain a runtime dynamic import, never statically
   // pulled into the browser bundle.

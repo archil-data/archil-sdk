@@ -16,20 +16,33 @@ const entries = {
   "internal/tools": "src/internal/tools.ts"
 };
 
-export default defineConfig({
-  entry: entries,
-  format: {
-    cjs: {},
-    esm: {
-      entry: {
-        ...entries,
-        cli: "bin/cli.ts",
-        "sandbox-cli": "bin/sandbox-cli.ts",
+export default defineConfig([
+  {
+    entry: entries,
+    format: {
+      cjs: {},
+      esm: {
+        entry: {
+          ...entries,
+          cli: "bin/cli.ts",
+          "sandbox-cli": "bin/sandbox-cli.ts",
+        },
       },
     },
+    dts: {
+      entry: Object.values(entries),
+    },
+    define: { ...define, __NODE_BUILD__: "false" },
   },
-  dts: {
-    entry: Object.values(entries),
+  // Served through the `node` export condition: undici is imported with
+  // literal specifiers so server bundlers and file tracers include it.
+  {
+    entry: entries,
+    outDir: "dist/node",
+    format: ["cjs", "esm"],
+    platform: "node",
+    dts: false,
+    clean: false,
+    define: { ...define, __NODE_BUILD__: "true" },
   },
-  define,
-});
+]);

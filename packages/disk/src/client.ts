@@ -27,16 +27,27 @@ function isNodeRuntime(): boolean {
   return typeof process !== "undefined" && typeof process.versions?.node === "string";
 }
 
+// True only in the build published under the package's `node` export
+// condition (dist/node).
+declare const __NODE_BUILD__: boolean;
+
 // Bun replaces the bare `undici` import with a stub over its own HTTP/1.1
 // fetch but leaves subpath imports alone, so the real package loads from one.
-const undiciSpecifier = isNodeRuntime() && process.versions.bun !== undefined ? "undici/index.js" : "undici";
+const isBun = isNodeRuntime() && process.versions.bun !== undefined;
+const undiciSpecifier = isBun ? "undici/index.js" : "undici";
 
 // Begin resolving the Node transport as soon as the SDK module loads, just as
-// a static Node import would. Keeping the specifier non-literal preserves the
-// browser build, while eager resolution keeps module-loading work out of the
-// first API request's latency.
+// a static Node import would, so module-loading work stays out of the first
+// API request's latency. The Node build uses literal specifiers so server
+// bundlers and file tracers (Vercel, Nitro) ship undici with the app. Every
+// other build keeps the specifier non-literal so browser bundlers never try to
+// resolve the Node-only package.
 const undiciModule = isNodeRuntime()
-  ? import(undiciSpecifier) as Promise<typeof import("undici")>
+  ? (typeof __NODE_BUILD__ !== "undefined" && __NODE_BUILD__
+      ? isBun
+        ? import("undici/index.js")
+        : import("undici")
+      : import(undiciSpecifier)) as Promise<typeof import("undici")>
   : undefined;
 
 type Undici = typeof import("undici");

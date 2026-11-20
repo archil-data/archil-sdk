@@ -21,11 +21,19 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",
+      "node": {
+        "import": "./dist/node/index.mjs",
+        "require": "./dist/node/index.cjs"
+      },
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
     },
     "./internal/tools": {
       "types": "./dist/internal/tools.d.mts",
+      "node": {
+        "import": "./dist/node/internal/tools.mjs",
+        "require": "./dist/node/internal/tools.cjs"
+      },
       "import": "./dist/internal/tools.mjs",
       "require": "./dist/internal/tools.cjs"
     }
