@@ -1,5 +1,15 @@
 # disk
 
+## 1.14.0
+
+### Minor Changes
+
+- 3c02ca5: `images.build` takes the size its build prepares sandboxes to start at from a snapshot (`vcpuCount` / `memSizeMiB`; Python `vcpu_count` / `mem_size_mib`, default 1 vCPU / 2048 MiB), and `Image` reports the size sandboxes created from it get.
+
+### Patch Changes
+
+- e7e73bf: Serve Node a build that imports undici with literal specifiers (under the `node` export condition), so server bundlers and file tracers such as Vercel and Nitro include undici. Browser builds still never reference it.
+
 ## 1.13.0
 
 ### Minor Changes
