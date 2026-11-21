@@ -51,3 +51,40 @@ jobs:
         with:
           version-script: bash .github/scripts/version-packages.sh
           publish-script: bash .github/scripts/publish-node.sh
+
+      - name: Install Syft
+        if: steps.changesets.outputs.published == 'true'
+        id: syft
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+
+      # One SPDX SBOM per published package: the package installed from npm
+      # into an empty project (peer dependencies are the user's, so they are
+      # left out), attached to the package's GitHub release.
+      - name: Generate and attach SBOMs
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYFT: ${{ steps.syft.outputs.cmd }}
+          SYFT_CHECK_FOR_APP_UPDATE: 'false'
+          PUBLISHED_PACKAGES: ${{ steps.changesets.outputs.published-packages }}
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r name version; do
+            env_dir="$RUNNER_TEMP/sbom-env/$name"
+            sbom="$RUNNER_TEMP/$(echo "${name#@}" | tr / -)-$version.spdx.json"
+            mkdir -p "$env_dir"
+            # The registry can take a moment to serve a version it just accepted.
+            for attempt in 1 2 3 4 5; do
+              if npm install --prefix "$env_dir" --ignore-scripts --legacy-peer-deps \
+                --no-audit --no-fund "$name@$version"; then
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                exit 1
+              fi
+              sleep 30
+            done
+            "$SYFT" scan "dir:$env_dir" --source-name "$name" --source-version "$version" \
+              -o "spdx-json=$sbom"
+            gh release upload "npm/$name@$version" "$sbom" --clobber --repo "$GITHUB_REPOSITORY"
+          done < <(jq -r '.[] | "\(.name)\t\(.version)"' <<<"$PUBLISHED_PACKAGES")

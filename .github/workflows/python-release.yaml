@@ -72,6 +72,27 @@ jobs:
         working-directory: python
         run: uv build
 
+      # SBOM for the wheel about to be published: installed into an empty
+      # environment, so it lists the package and the runtime dependencies it
+      # resolves to. The GitHub release step attaches it.
+      - name: Install wheel for SBOM
+        working-directory: python
+        run: |
+          uv venv "$RUNNER_TEMP/sbom-env"
+          uv pip install --python "$RUNNER_TEMP/sbom-env" dist/*.whl
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        env:
+          SYFT_SOURCE_NAME: archil
+          SYFT_SOURCE_VERSION: ${{ needs.version.outputs.version }}
+        with:
+          path: ${{ runner.temp }}/sbom-env
+          format: spdx-json
+          artifact-name: archil-${{ needs.version.outputs.version }}.spdx.json
+          output-file: ${{ runner.temp }}/archil-${{ needs.version.outputs.version }}.spdx.json
+          upload-release-assets: false
+
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -88,4 +109,4 @@ jobs:
             gh release create "$tag" --target "$GITHUB_SHA" \
               --title "archil $VERSION" --generate-notes
           fi
-          gh release upload "$tag" python/dist/* --clobber
+          gh release upload "$tag" python/dist/* "$RUNNER_TEMP/archil-$VERSION.spdx.json" --clobber
