@@ -230,6 +230,25 @@ returns the image's current state. `imageId` cannot be combined with
 `baseImage`, and creating a sandbox from an image without a successful build
 fails with a 409 `ArchilApiError` whose `code` is `image_not_ready`.
 
+Build an image from a Dockerfile instead by passing its text, and the local
+directory its `COPY` and `ADD` read from:
+
+```ts
+import { readFile } from "node:fs/promises";
+
+const image = await client.images.build({
+  dockerfile: await readFile("./Dockerfile", "utf8"),
+  context: ".",
+});
+```
+
+The context is packed without the paths its `.dockerignore` excludes, with
+owners and modification times zeroed, and uploaded only if the same files were
+not uploaded before; it can be up to 512 MiB compressed. The same Dockerfile and
+context return the image already built. A failing step throws `ImageBuildError`
+with `reason` `invalid_source`, and its message ends with the build's output,
+which `latest.buildLog` holds. `context` needs Node.js.
+
 Expose TCP ports publicly when creating a sandbox or later with `exposePort`:
 
 ```ts

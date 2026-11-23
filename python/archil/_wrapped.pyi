@@ -227,7 +227,7 @@ class Disks:
 
 
 class Images:
-    """Account-level sandbox images built from OCI references."""
+    """Account-level sandbox images built from OCI references or Dockerfiles."""
     def __init__(self, transport: archil._http._Transport) -> None:
         ...
 
@@ -241,37 +241,47 @@ class Images:
     get: __get_spec
 
     class __build_spec(typing_extensions.Protocol):
-        def __call__(self, /, *, source: str, registry_auth: archil._models.RegistryAuth | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, timeout: float = 1800.0) -> archil._models.Image:
-            """Build a sandbox image from an OCI reference and wait until it is ready.
+        def __call__(self, /, *, source: str | None = None, dockerfile: str | None = None, context: str | os.PathLike | None = None, registry_auth: archil._models.RegistryAuth | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, timeout: float = 1800.0) -> archil._models.Image:
+            """Build a sandbox image from an OCI reference (``source``) or from the
+            text of a Dockerfile (``dockerfile``), and wait until it is ready.
 
             Returns at once when the image is already built from a digest reference
-            and joins a build that is already running. A tag is rebuilt on each
-            call in case it moved, so call this once and reuse ``image_id``.
-            ``registry_auth`` is required for private images on every call; without
-            it ``source`` names the public image. ``vcpu_count`` and
+            or the same Dockerfile and context, and joins a build that is already
+            running. A tag is rebuilt on each call in case it moved, so call this
+            once and reuse ``image_id``. ``registry_auth`` is required for private
+            images on every call; without it ``source`` names the public image.
+            ``context`` is a local directory that ``COPY`` and ``ADD`` read from: it
+            is packed without the paths its ``.dockerignore`` excludes and uploaded
+            unless the same files were uploaded before. ``vcpu_count`` and
             ``mem_size_mib`` (default 1 and 2048) are the size the build prepares
             sandboxes to start at from a snapshot; each size of a source is its own
             image, and a sandbox created from it at another size boots cold.
             Interrupted builds are requested again up to three times; other
-            failures raise ``ImageBuildError``, and ``TimeoutError`` is raised if
-            the image is not ready within ``timeout`` seconds.
+            failures raise ``ImageBuildError``, whose message ends with a failed
+            Dockerfile build's output, and ``TimeoutError`` is raised if the image
+            is not ready within ``timeout`` seconds.
             """
             ...
 
-        async def aio(self, /, *, source: str, registry_auth: archil._models.RegistryAuth | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, timeout: float = 1800.0) -> archil._models.Image:
-            """Build a sandbox image from an OCI reference and wait until it is ready.
+        async def aio(self, /, *, source: str | None = None, dockerfile: str | None = None, context: str | os.PathLike | None = None, registry_auth: archil._models.RegistryAuth | None = None, vcpu_count: int | None = None, mem_size_mib: int | None = None, timeout: float = 1800.0) -> archil._models.Image:
+            """Build a sandbox image from an OCI reference (``source``) or from the
+            text of a Dockerfile (``dockerfile``), and wait until it is ready.
 
             Returns at once when the image is already built from a digest reference
-            and joins a build that is already running. A tag is rebuilt on each
-            call in case it moved, so call this once and reuse ``image_id``.
-            ``registry_auth`` is required for private images on every call; without
-            it ``source`` names the public image. ``vcpu_count`` and
+            or the same Dockerfile and context, and joins a build that is already
+            running. A tag is rebuilt on each call in case it moved, so call this
+            once and reuse ``image_id``. ``registry_auth`` is required for private
+            images on every call; without it ``source`` names the public image.
+            ``context`` is a local directory that ``COPY`` and ``ADD`` read from: it
+            is packed without the paths its ``.dockerignore`` excludes and uploaded
+            unless the same files were uploaded before. ``vcpu_count`` and
             ``mem_size_mib`` (default 1 and 2048) are the size the build prepares
             sandboxes to start at from a snapshot; each size of a source is its own
             image, and a sandbox created from it at another size boots cold.
             Interrupted builds are requested again up to three times; other
-            failures raise ``ImageBuildError``, and ``TimeoutError`` is raised if
-            the image is not ready within ``timeout`` seconds.
+            failures raise ``ImageBuildError``, whose message ends with a failed
+            Dockerfile build's output, and ``TimeoutError`` is raised if the image
+            is not ready within ``timeout`` seconds.
             """
             ...
 

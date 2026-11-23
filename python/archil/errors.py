@@ -50,7 +50,10 @@ class ImageBuildError(ArchilError):
     """The image build failed; ``reason`` is the server's failure code and latest holds the image."""
 
     def __init__(self, image: Image) -> None:
-        super().__init__(f"Image {image.image_id} build failed: {image.failure_reason}", 409, "IMAGE_BUILD_FAILED")
+        message = f"Image {image.image_id} build failed: {image.failure_reason}"
+        if image.build_log:
+            message += "\n" + "\n".join(image.build_log.splitlines()[-20:])
+        super().__init__(message, 409, "IMAGE_BUILD_FAILED")
         self.reason = image.failure_reason
         self.latest = image
 

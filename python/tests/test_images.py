@@ -167,6 +167,92 @@ def test_build_times_out(archil, router, clock):
     assert [at for _, at in calls] == [0.0, 1.0, 3.0, 7.0, 12.0]
 
 
+DOCKERFILE = "FROM alpine:3\nCOPY main.c /src/\n"
+UPLOAD_URL = "https://archil-contexts.s3.amazonaws.com/contexts/u/ctx.tar.gz?X-Amz-Signature=sig"
+
+
+def context_server(router, *, present: bool, image: dict) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/images/contexts":
+            if present:
+                return ok_envelope({"present": True})
+            return ok_envelope(
+                {"present": False, "upload_url": UPLOAD_URL, "upload_headers": {"x-amz-checksum-sha256": "c3VtCg=="}}
+            )
+        if request.method == "PUT":
+            return httpx.Response(200)
+        return ok_envelope(image)
+
+    router.set(handler)
+
+
+def test_build_from_a_dockerfile_uploads_its_context(archil, router, clock, tmp_path):
+    from archil._build_context import pack_context
+
+    (tmp_path / "main.c").write_text("int main(void) { return 0; }\n")
+    archive, digest = pack_context(tmp_path)
+    context_server(router, present=False, image=image_json("ready"))
+
+    archil.images.build(dockerfile=DOCKERFILE, context=tmp_path)
+
+    context, upload, build = router.requests
+    assert (context.method, context.path, context.json) == (
+        "POST",
+        "/api/images/contexts",
+        {"sha256": digest, "size_bytes": len(archive)},
+    )
+    assert (upload.method, upload.path, upload.content) == ("PUT", "/contexts/u/ctx.tar.gz", archive)
+    assert upload.headers["x-amz-checksum-sha256"] == "c3VtCg=="
+    assert "authorization" not in upload.headers
+    assert (build.method, build.json) == ("POST", {"dockerfile": DOCKERFILE, "context": f"sha256:{digest}"})
+
+
+def test_build_from_a_dockerfile_skips_a_context_already_uploaded(archil, router, clock, tmp_path):
+    (tmp_path / "main.c").write_text("int main(void) { return 0; }\n")
+    context_server(router, present=True, image=image_json("ready"))
+
+    archil.images.build(dockerfile=DOCKERFILE, context=tmp_path, vcpu_count=2)
+
+    assert [(r.method, r.path) for r in router.requests] == [("POST", "/api/images/contexts"), ("POST", "/api/images")]
+    assert router.requests[1].json["vcpu_count"] == 2
+
+
+def test_build_from_a_dockerfile_without_a_context(archil, router, clock):
+    respond(router, clock, image_json("ready"))
+
+    archil.images.build(dockerfile=DOCKERFILE)
+
+    assert [r.json for r in router.requests] == [{"dockerfile": DOCKERFILE}]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"source": SOURCE, "dockerfile": DOCKERFILE},
+        {"source": SOURCE, "context": "."},
+        {"dockerfile": DOCKERFILE, "registry_auth": AUTH},
+    ],
+)
+def test_build_rejects_conflicting_arguments(archil, router, arguments):
+    with pytest.raises(ValueError):
+        archil.images.build(**arguments)
+
+    assert router.requests == []
+
+
+def test_failed_dockerfile_build_raises_with_the_end_of_its_log(archil, router, clock):
+    log = "\n".join(f"#{n} step" for n in range(30)) + "\nERROR: process did not complete successfully: exit code: 3"
+    respond(router, clock, image_json("failed", failure_reason="invalid_source", build_log=log))
+
+    with pytest.raises(ImageBuildError) as caught:
+        archil.images.build(dockerfile=DOCKERFILE)
+
+    assert caught.value.latest.build_log == log
+    assert str(caught.value).endswith("exit code: 3")
+    assert "#10 step" not in str(caught.value)
+
+
 def test_registry_password_is_hidden():
     assert "registry-secret" not in repr(AUTH)
     assert "registry-secret" not in str(AUTH)

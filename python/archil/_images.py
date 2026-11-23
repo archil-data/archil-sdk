@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import asdict
-from typing import Optional
+from typing import Optional, Union
 
+from ._build_context import upload_context
 from ._http import _Transport
 from ._models import Image, RegistryAuth
 from .errors import ImageBuildError
@@ -17,7 +19,7 @@ _MAX_POLL_SECONDS = 5.0
 
 
 class _Images:
-    """Account-level sandbox images built from OCI references."""
+    """Account-level sandbox images built from OCI references or Dockerfiles."""
 
     def __init__(self, transport: _Transport) -> None:
         self._transport = transport
@@ -29,26 +31,41 @@ class _Images:
     async def build(
         self,
         *,
-        source: str,
+        source: Optional[str] = None,
+        dockerfile: Optional[str] = None,
+        context: Optional[Union[str, os.PathLike]] = None,
         registry_auth: Optional[RegistryAuth] = None,
         vcpu_count: Optional[int] = None,
         mem_size_mib: Optional[int] = None,
         timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     ) -> Image:
-        """Build a sandbox image from an OCI reference and wait until it is ready.
+        """Build a sandbox image from an OCI reference (``source``) or from the
+        text of a Dockerfile (``dockerfile``), and wait until it is ready.
 
         Returns at once when the image is already built from a digest reference
-        and joins a build that is already running. A tag is rebuilt on each
-        call in case it moved, so call this once and reuse ``image_id``.
-        ``registry_auth`` is required for private images on every call; without
-        it ``source`` names the public image. ``vcpu_count`` and
+        or the same Dockerfile and context, and joins a build that is already
+        running. A tag is rebuilt on each call in case it moved, so call this
+        once and reuse ``image_id``. ``registry_auth`` is required for private
+        images on every call; without it ``source`` names the public image.
+        ``context`` is a local directory that ``COPY`` and ``ADD`` read from: it
+        is packed without the paths its ``.dockerignore`` excludes and uploaded
+        unless the same files were uploaded before. ``vcpu_count`` and
         ``mem_size_mib`` (default 1 and 2048) are the size the build prepares
         sandboxes to start at from a snapshot; each size of a source is its own
         image, and a sandbox created from it at another size boots cold.
         Interrupted builds are requested again up to three times; other
-        failures raise ``ImageBuildError``, and ``TimeoutError`` is raised if
-        the image is not ready within ``timeout`` seconds."""
-        body: dict = {"source": source}
+        failures raise ``ImageBuildError``, whose message ends with a failed
+        Dockerfile build's output, and ``TimeoutError`` is raised if the image
+        is not ready within ``timeout`` seconds."""
+        if (source is None) == (dockerfile is None):
+            raise ValueError("Pass either source or dockerfile")
+        if context is not None and dockerfile is None:
+            raise ValueError("context applies only to a dockerfile build")
+        if registry_auth is not None and source is None:
+            raise ValueError("registry_auth applies only to a source build")
+        body: dict = {"source": source} if source is not None else {"dockerfile": dockerfile}
+        if context is not None:
+            body["context"] = await upload_context(self._transport, context)
         if registry_auth is not None:
             body["registry_auth"] = asdict(registry_auth)
         if vcpu_count is not None:
