@@ -1,5 +1,5 @@
 import { ProcessOutputBuffer } from "./process-output-buffer.js";
-import { ProcessConnection, type ProcessEndpoint } from "./process-connection.js";
+import { ProcessConnection, openSandboxSocket, type ProcessEndpoint } from "./process-connection.js";
 import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapEmpty, unwrapPage } from "./client.js";
@@ -297,7 +297,7 @@ export class Sandbox {
   constructor(data: SandboxWire, client: ApiClient) {
     this._client = client;
     this._apply(data);
-    this._processConnection = new ProcessConnection(() => this._connectionEndpoint());
+    this._processConnection = new ProcessConnection(() => openSandboxSocket(() => this._connectionEndpoint()));
     this.processes = new SandboxProcesses(this, () => this._processConnection.disconnect());
     this.files = new SandboxFiles(this);
   }

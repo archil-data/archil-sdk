@@ -1,4 +1,22 @@
-import { type ApiClient, type ArchilTlsOptions, createApiClient, unwrap } from "./client.js";
+import type { components } from "@archildata/api-types";
+import { SandboxEgressPolicy_Action } from "@archildata/api-types/process";
+import {
+  type ApiClient,
+  type ArchilTlsOptions,
+  apiKeyAuthorization,
+  createApiClient,
+  openControlPlaneSocket,
+  unwrap,
+} from "./client.js";
+import {
+  type ExecSandbox,
+  PROTOCOL,
+  ProcessConnection,
+  openProcessSocket,
+} from "./process-connection.js";
+import { ProcessOutputBuffer } from "./process-output-buffer.js";
+import type { SandboxEgressPolicy, SandboxNetwork } from "./sandbox.js";
+import { SandboxProcess, type SandboxProcessStartOptions } from "./sandbox-process.js";
 import { Disk } from "./disk.js";
 import { Disks } from "./disks.js";
 import { Images } from "./images.js";
@@ -7,7 +25,7 @@ import { Tokens } from "./tokens.js";
 import { Workspace } from "./workspace.js";
 import { deriveS3BaseUrl, resolveBaseUrl } from "./regions.js";
 import { retryApiRequest } from "./retry.js";
-import { type ExecVmOptions, execVmBody } from "./exec-options.js";
+import { completedExec, type ExecVmOptions, execVmBody, restExecBody } from "./exec-options.js";
 import type { ExecDiskResult } from "./types.js";
 
 export interface ArchilOptions {
@@ -80,6 +98,9 @@ export interface ExecMountSpec {
  */
 export type ExecMount = Disk | string | ExecMountSpec;
 
+/** Execs one control-plane connection runs at once; past it, another opens. */
+const EXEC_MAX_CHANNELS = 32;
+
 export interface ExecOptions extends ExecVmOptions {
   /**
    * Disks to mount, keyed by the relative path under `/mnt/archil` at which
@@ -89,6 +110,23 @@ export interface ExecOptions extends ExecVmOptions {
   disks: Record<string, ExecMount>;
   /** Shell command to run inside the container. */
   command: string;
+  /** Set `true` to stream the command's input and output; see {@link ExecStreamOptions}. */
+  stream?: false;
+}
+
+/**
+ * An exec whose input and output stream while it runs. Takes exec's options,
+ * plus the process options `sandbox.run()` takes.
+ */
+export interface ExecStreamOptions
+  extends Omit<ExecOptions, "disks" | "stream">,
+    Omit<SandboxProcessStartOptions, "onOutput"> {
+  stream: true;
+  /**
+   * Disks to mount, keyed by the relative path under `/mnt/archil`, as for a
+   * waiting exec. Running without any takes the `workspace:exec` permission.
+   */
+  disks?: Record<string, ExecMount>;
 }
 
 /**
@@ -116,6 +154,12 @@ export class Archil {
   readonly tokens: Tokens;
   /** @internal */
   private readonly _client: ApiClient;
+  /** @internal Opens control-plane WebSockets for streamed execs. */
+  private readonly _openExecSocket: () => Promise<WebSocket>;
+  /** @internal Created on the first streamed exec. */
+  private _execConnection?: ProcessConnection;
+  /** @internal */
+  private readonly _execOutput = new ProcessOutputBuffer();
 
   constructor(opts: ArchilOptions = {}) {
     const apiKey = opts.apiKey ?? envVar("ARCHIL_API_KEY");
@@ -146,6 +190,15 @@ export class Archil {
       opts.s3BaseUrl ?? envVar("ARCHIL_S3_BASE_URL") ?? deriveS3BaseUrl(controlBaseUrl);
 
     this._client = client;
+    const authorization = apiKeyAuthorization(apiKey);
+    this._openExecSocket = () =>
+      openControlPlaneSocket({
+        baseUrl: controlBaseUrl,
+        path: "/api/exec/stream",
+        protocols: [PROTOCOL],
+        authorization,
+        tls: opts.tls,
+      });
     this.disks = new Disks(client, region, s3BaseUrl);
     this.images = new Images(client);
     this.sandboxes = new Sandboxes(client);
@@ -157,7 +210,18 @@ export class Archil {
    * each at its own relative path under `/mnt/archil`. Blocks until the
    * command completes and returns its stdout, stderr, exit code, and timing.
    */
-  async exec(opts: ExecOptions): Promise<ExecDiskResult> {
+  exec(opts: ExecOptions): Promise<ExecDiskResult>;
+  /**
+   * Run a command in a fresh VM and stream its input and output, as
+   * `sandbox.run()` does for a sandbox's processes. Resolves once the command
+   * has started; iterate the handle's `output`, send it input, and `wait()` for
+   * its exit. Concurrent and sequential streamed execs share connections.
+   * `kill()` and `disconnect()` both stop the command and its VM.
+   * Requires Node.js or Bun.
+   */
+  exec(opts: ExecStreamOptions): Promise<SandboxProcess>;
+  async exec(opts: ExecOptions | ExecStreamOptions): Promise<ExecDiskResult | SandboxProcess> {
+    if (opts.stream) return this._execStream(opts);
     type ExecDiskWire = {
       disk: string;
       subdirectory?: string;
@@ -186,15 +250,56 @@ export class Archil {
         disks[relPath] = diskIdFromMount(mount);
       }
     }
-    return unwrap<ExecDiskResult>(
-      retryApiRequest(
-        () =>
-          this._client.POST("/api/exec", {
-            body: { ...execVmBody(opts), disks, command: opts.command },
-          }),
-        "connect",
+    return unwrap(
+      completedExec<ExecDiskResult>(
+        retryApiRequest(
+          () =>
+            this._client.POST("/api/exec", {
+              body: restExecBody<components["schemas"]["ExecRequest"]>({ ...execVmBody(opts), disks, command: opts.command }),
+            }),
+          "connect",
+        ),
       ),
     );
+  }
+
+  /** @internal */
+  private async _execStream(opts: ExecStreamOptions): Promise<SandboxProcess> {
+    if (opts.baseImage !== undefined && opts.imageId !== undefined) {
+      throw new Error("baseImage and imageId are mutually exclusive");
+    }
+    this._execConnection ??= new ProcessConnection(
+      () => openProcessSocket(this._openExecSocket),
+      { maxChannels: EXEC_MAX_CHANNELS, server: "The exec endpoint" },
+    );
+    const connection = this._execConnection;
+    const handle: SandboxProcess = new SandboxProcess(
+      "",
+      0,
+      opts.collectOutput ?? true,
+      this._execOutput,
+      () => connection.open(),
+      // An exec ends with its channel, and its endpoint has no resize.
+      (request) => request.type === "kill"
+        ? handle.disconnect()
+        : Promise.reject(new Error("An exec's terminal cannot be resized")),
+    );
+    const terminal =
+      typeof opts.terminal === "object"
+        ? { cols: opts.terminal.cols ?? 80, rows: opts.terminal.rows ?? 24 }
+        : opts.terminal;
+    await handle._connect({
+      type: "exec",
+      start: {
+        command: opts.command,
+        cwd: opts.cwd,
+        terminal,
+        env: opts.env ?? {},
+        timeout_seconds: opts.timeoutSeconds,
+      },
+      sandbox: execSandbox(opts),
+    });
+    return handle;
   }
 
   /**
@@ -207,4 +312,47 @@ export class Archil {
   workspace(mounts: Record<string, ExecMount>): Workspace {
     return new Workspace(this, mounts);
   }
+}
+
+function execSandbox(opts: ExecStreamOptions): ExecSandbox {
+  const sandbox: ExecSandbox = {
+    vcpus: opts.vcpuCount,
+    memoryMib: opts.memSizeMib,
+    mounts: Object.entries(opts.disks ?? {}).map(([relPath, mount]) => {
+      // Where a waiting exec mounts it: under /mnt/archil at its key.
+      const path = relPath === "" ? "/mnt/archil" : `/mnt/archil/${relPath}`;
+      if (!isExecMountSpec(mount)) {
+        return { diskId: diskIdFromMount(mount), path };
+      }
+      return {
+        diskId: diskIdFromMount(mount.disk),
+        path,
+        subdirectory: mount.subdirectory,
+        readOnly: mount.readOnly ?? false,
+        conditional: mount.conditional ?? false,
+        queueMs: mount.queueMs === undefined ? undefined : BigInt(mount.queueMs),
+        checkoutPaths: mount.checkoutPaths ?? [],
+      };
+    }),
+  };
+  if (opts.network?.egress) sandbox.network = { egress: egressPolicy(opts.network.egress) };
+  if (opts.baseImage !== undefined) sandbox.image = { case: "baseImage", value: opts.baseImage };
+  else if (opts.imageId !== undefined) sandbox.image = { case: "imageId", value: opts.imageId };
+  return sandbox;
+}
+
+function egressPolicy(egress: SandboxEgressPolicy) {
+  return {
+    defaultAction: egress.default === "allow" ? SandboxEgressPolicy_Action.ALLOW : SandboxEgressPolicy_Action.DENY,
+    allow: (egress.allow ?? []).map((rule) =>
+      typeof rule === "string"
+        ? { target: rule }
+        : {
+            target: rule.target,
+            transform: rule.transform ? { headers: rule.transform.headers ?? {} } : undefined,
+            forwardUrl: rule.forward_url,
+          }),
+    deny: egress.deny ?? [],
+    drainOnPause: egress.drain_on_pause ?? [],
+  };
 }

@@ -1,5 +1,5 @@
 import { ProcessOutputBuffer } from "./process-output-buffer.js";
-import type { BinaryChannel } from "./process-connection.js";
+import type { BinaryChannel, ExecSandbox } from "./process-connection.js";
 import type { Sandbox } from "./sandbox.js";
 
 export type SandboxProcessStatus =
@@ -75,15 +75,17 @@ export interface SandboxProcessResult {
   stderr: string;
 }
 
+interface ProcessStartRequest {
+  command: string;
+  cwd?: string;
+  terminal?: boolean | { cols: number; rows: number };
+  env: Record<string, string>;
+  timeout_seconds?: number;
+}
+
 type ProcessConnectionRequest =
-  | {
-      type: "start";
-      command: string;
-      cwd?: string;
-      terminal?: boolean | { cols: number; rows: number };
-      env: Record<string, string>;
-      timeout_seconds?: number;
-    }
+  | ({ type: "start" } & ProcessStartRequest)
+  | { type: "exec"; start: ProcessStartRequest; sandbox: ExecSandbox }
   | { type: "attach"; process_id: string; offset: number; shared?: true };
 
 export type ProcessControlRequest =
@@ -271,7 +273,7 @@ export class SandboxProcess {
     this._socket = socket;
     let closed!: () => void;
     this._closed = new Promise<void>((resolve) => { closed = resolve; });
-    const expected = request.type === "start" ? "started" : "attached";
+    const expected = request.type === "attach" ? "attached" : "started";
     let settled = false;
     let resolveReady!: () => void;
     let rejectReady!: (error: Error) => void;
