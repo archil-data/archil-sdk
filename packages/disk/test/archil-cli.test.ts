@@ -191,3 +191,40 @@ test("login warns when environment variables will override the profile it saved"
   assert.match(output, /ARCHIL_API_KEY, ARCHIL_REGION are set in your environment and take precedence over this profile/);
   assert.match(output, /unset ARCHIL_API_KEY ARCHIL_REGION/);
 });
+
+async function loginWith(argv: string[]): Promise<string> {
+  vi.stubEnv("ARCHIL_CONSOLE_URL", "https://console.example.com");
+  for (const variable of ["ARCHIL_API_KEY", "ARCHIL_REGION", "ARCHIL_BASE_URL"]) vi.stubEnv(variable, undefined);
+  let output = "";
+  const stderr = { isTTY: false, write(data: string) { output += data; return true; } };
+  const program = createArchilProgram({
+    version: "test",
+    createClient: () => { throw new Error("unused"); },
+    stderr,
+    validateCredential: async ({ region }) => region!,
+    openUrl: (url) => {
+      const params = new URL(url).searchParams;
+      void fetch(`http://127.0.0.1:${params.get("port")}/callback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://console.example.com" },
+        body: new URLSearchParams({ state: params.get("state")!, apiKey: "key-new", region: "aws-us-east-1", account: "Acme" }),
+      });
+    },
+  });
+  await program.parseAsync(["node", "archil", ...argv, "login"]);
+  return output;
+}
+
+test("ARCHIL_PROFILE that picked the login's own profile isn't reported as an override", async () => {
+  vi.stubEnv("ARCHIL_PROFILE", "work");
+  const output = await loginWith([]);
+  assert.match(output, /as profile work/);
+  assert.doesNotMatch(output, /precedence/);
+});
+
+test("ARCHIL_PROFILE naming a different profile than --profile is reported", async () => {
+  vi.stubEnv("ARCHIL_PROFILE", "work");
+  const output = await loginWith(["--profile", "personal"]);
+  assert.match(output, /as profile personal/);
+  assert.match(output, /ARCHIL_PROFILE is set in your environment and takes precedence over this profile/);
+});
