@@ -243,3 +243,31 @@ test("the tunnel adds the port token to the first request and relays everything 
     await new Promise<void>((resolve) => upstreamServer.close(() => resolve()));
   }
 });
+
+test("a token renewal in flight when the tunnel closes doesn't leave a token behind", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  try {
+    let finishRenewal!: () => void;
+    const created: string[] = [];
+    const sandbox = desktopSandbox({
+      createPortToken: vi.fn(async () => {
+        const id = `tok-${created.length + 1}`;
+        created.push(id);
+        if (created.length === 2) await new Promise<void>((resolve) => { finishRenewal = resolve; });
+        return { id, port: 6080, createdAt: new Date(), hostname: "6080-route.example.archil.app", token: `secret-${id}` };
+      }),
+    });
+    const cli = harness(sandbox);
+    const running = cli.run("desktop", "desk", "--no-open");
+    await vi.waitFor(() => assert.equal(cli.tunnels.length, 1));
+    vi.advanceTimersByTime(11 * 60 * 60 * 1000);
+    await vi.waitFor(() => assert.equal(created.length, 2, "the renewal started"));
+    cli.signals.emit("SIGINT");
+    finishRenewal();
+    await running;
+    const deleted = (sandbox.deletePortToken as ReturnType<typeof vi.fn>).mock.calls.map(([id]) => id).sort();
+    assert.deepEqual(deleted, ["tok-1", "tok-2"], "both the original and the in-flight token are revoked");
+  } finally {
+    vi.useRealTimers();
+  }
+});

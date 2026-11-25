@@ -162,14 +162,24 @@ async function serveTunnel(
 
   // Port tokens expire; swap in a fresh one before this one does.
   let currentAccess = access;
+  let closing = false;
+  let renewing: Promise<void> | undefined;
   const renewal = setInterval(() => {
-    void (async () => {
+    if (renewing) return;
+    renewing = (async () => {
       const next = await sandbox.createPortToken(port, { ttl: TUNNEL_TOKEN_TTL });
+      if (closing) {
+        // The tunnel closed while this token was being made; nothing will use it.
+        await sandbox.deletePortToken(next.id).catch(() => {});
+        return;
+      }
       tunnel.setPortToken(next.token);
       const previous = currentAccess;
       currentAccess = next;
       await sandbox.deletePortToken(previous.id).catch(() => {});
-    })().catch(() => ui.warn("Couldn't renew the tunnel's access token; new connections may fail once it expires."));
+    })()
+      .catch(() => ui.warn("Couldn't renew the tunnel's access token; new connections may fail once it expires."))
+      .finally(() => { renewing = undefined; });
   }, TUNNEL_TOKEN_RENEW_MS);
   renewal.unref?.();
 
@@ -189,9 +199,12 @@ async function serveTunnel(
   } finally {
     clearInterval(ticker);
     clearInterval(renewal);
+    closing = true;
     live.stop();
   }
   const uptime = formatDuration(now() - started);
+  // Let a renewal already in flight finish, so the token it made is revoked below (or by itself).
+  await renewing;
   await tunnel.close();
   await keepalive?.kill().catch(() => {});
   await keepalive?.disconnect().catch(() => {});
