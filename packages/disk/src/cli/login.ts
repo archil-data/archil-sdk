@@ -109,7 +109,12 @@ async function handleCallback(
     respond(response, 400, page("Something went wrong", "The console didn't send a key. Run archil login again."));
     return { error: new Error("The console didn't send an API key") };
   }
-  respond(response, 200, page("You're signed in", "Return to your terminal. You can close this tab.", true));
+  const account = fields.get("account");
+  respond(response, 200, page(
+    "You're signed in",
+    `${account ? `The CLI is now signed in to ${account}. ` : ""}Return to your terminal; you can close this tab.`,
+    true,
+  ));
   return {
     grant: {
       apiKey,
@@ -158,6 +163,8 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
 }
 
+const LOGO = `<svg viewBox="0 0 64 64" width="28" height="28" fill="none" aria-hidden="true"><rect x="1.82" y="1.82" width="60.36" height="60.36" stroke="currentColor" stroke-width="2"/><path transform="translate(-115.998 -166.784)" d="M172.376 222.438L169.116 222.447V207.734C169.116 206.191 167.865 204.939 166.321 204.938H156.427C155.042 204.939 153.762 205.677 153.067 206.876L144.003 222.525L123.625 222.59L150.84 175.562L172.376 175.41V222.438ZM168.961 184.194C168.961 182.71 167.017 182.155 166.233 183.415L156.512 199.038C155.836 200.124 156.617 201.53 157.896 201.53H166.088C167.675 201.53 168.961 200.244 168.961 198.657V184.194Z" fill="currentColor"/></svg>`;
+
 function page(title: string, message: string, success = false): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -165,12 +172,15 @@ function page(title: string, message: string, success = false): string {
 <style>
   :root { color-scheme: light dark; --bg: #fafafa; --fg: #111; --muted: #666; --card: #fff; --border: #e5e5e5; --ok: #16a34a; }
   @media (prefers-color-scheme: dark) { :root { --bg: #0a0a0a; --fg: #ededed; --muted: #a1a1a1; --card: #141414; --border: #262626; --ok: #22c55e; } }
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg); font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif; }
-  main { width: min(420px, calc(100vw - 32px)); padding: 32px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
-  .mark { width: 40px; height: 40px; border-radius: 999px; display: grid; place-items: center; margin-bottom: 16px; background: ${success ? "color-mix(in srgb, var(--ok) 14%, transparent)" : "var(--border)"}; color: ${success ? "var(--ok)" : "var(--muted)"}; font-size: 20px; }
-  h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
-  p { margin: 0; color: var(--muted); }
-  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--fg); font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+  header { padding: 32px 32px 16px; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; letter-spacing: -0.01em; }
+  main { flex: 1; display: flex; justify-content: center; padding: 48px 20px 96px; }
+  section { width: min(560px, 100%); }
+  .mark { width: 40px; height: 40px; border-radius: 999px; display: grid; place-items: center; margin-bottom: 24px; background: ${success ? "color-mix(in srgb, var(--ok) 14%, transparent)" : "color-mix(in srgb, var(--muted) 14%, transparent)"}; color: ${success ? "var(--ok)" : "var(--muted)"}; font-size: 20px; }
+  h1 { margin: 0 0 6px; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+  p { margin: 0; color: var(--muted); font-size: 13px; }
 </style></head>
-<body><main><div class="mark">${success ? "✓" : "!"}</div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></main></body></html>`;
+<body><header>${LOGO}<span>ARCHIL</span></header>
+<main><section><div class="mark">${success ? "✓" : "!"}</div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></section></main></body></html>`;
 }

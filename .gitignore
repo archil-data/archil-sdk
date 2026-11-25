@@ -4,3 +4,4 @@ node_modules/
 python/uv.lock
 # Bundles built by packages/disk/test/user-agent.test.ts
 .user-agent-*/
+.gstack/
