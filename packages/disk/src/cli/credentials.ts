@@ -75,7 +75,7 @@ export async function resolveCliCredentials(
   const apiKey = options.apiKey ?? env.ARCHIL_API_KEY ?? (profile && selected ? await readCredential(selected, env) : undefined);
   const region = options.region ?? env.ARCHIL_REGION ?? profile?.region;
   const baseUrl = options.baseUrl ?? env.ARCHIL_BASE_URL ?? profile?.baseUrl;
-  if (!apiKey) throw new Error("Not signed in: no API key from --api-key, ARCHIL_API_KEY, or a saved profile");
+  if (!apiKey) throw new Error("Missing API key: pass --api-key, set ARCHIL_API_KEY, or run 'profile create'");
   if (!region) throw new Error("Missing region: pass --region, set ARCHIL_REGION, or select a profile");
   return { apiKey: validateApiKey(apiKey), region, baseUrl, profile: selected };
 }

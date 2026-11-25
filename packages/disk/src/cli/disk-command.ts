@@ -23,7 +23,7 @@ const DISK_COMMANDS = ["list", "get", "create", "delete", "exec", "grep", "api-k
  * options on `credentialsFrom`, which is `command` itself for the standalone
  * `disk` CLI and the root program when nested as `archil disk`.
  */
-export function addDiskCommands(command: Command, credentialsFrom: Command): void {
+export function addDiskCommands(command: Command, credentialsFrom: Command, { legacy = false }: { legacy?: boolean } = {}): void {
   const ui = createUi(process.stderr);
   command.hook("preAction", async (_thisCommand, actionCommand) => {
     if (isProfileCommand(actionCommand)) return;
@@ -32,7 +32,7 @@ export function addDiskCommands(command: Command, credentialsFrom: Command): voi
   });
 
   function fail(err: unknown): never {
-    printError(err);
+    printError(err, process.stderr, legacy ? "disk" : "archil", { legacy });
     process.exit(1);
   }
 

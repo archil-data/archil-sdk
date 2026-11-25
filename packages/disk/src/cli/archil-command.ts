@@ -24,7 +24,7 @@ import { addSandboxCommands, openInBrowser, type SandboxCliDependencies } from "
 
 const OWN_COMMANDS = new Set(["disk", "sandbox", "profile", "login", "logout", "whoami", "completion", "help", "__complete"]);
 const GLOBAL_OPTIONS_WITH_VALUES = new Set(["-k", "--api-key", "-r", "--region", "--base-url", "--profile"]);
-const FORWARDED_ENV = "ARCHIL_CLI_FORWARDED";
+const SKIP_ENV = "ARCHIL_CLI_FORWARD_SKIP";
 export const NATIVE_CLIENT_INSTALL = "curl https://archil.com/install | sh";
 
 export function createArchilProgram(dependencies: SandboxCliDependencies): Command {
@@ -81,11 +81,14 @@ export function isNativeCommand(args: string[]): boolean {
 }
 
 /**
- * Finds the native `archil` on PATH, skipping this CLI and any other copy of
- * it (npm installs those as node scripts or symlinks to them).
+ * Finds the native `archil` on PATH. It skips this CLI, other npm copies of it
+ * (node scripts or symlinks to them), and every binary an earlier hop already
+ * tried. Package managers also install this CLI behind wrappers that don't look
+ * like node (pnpm's sh shims, Volta and asdf binaries); if one of those is
+ * picked, it lands back here, skips itself via SKIP_ENV, and moves on.
  */
 export function findNativeClient(env: NodeJS.ProcessEnv, selfPath: string): string | undefined {
-  const self = safeRealpath(selfPath);
+  const skip = new Set([safeRealpath(selfPath), ...skippedPaths(env)]);
   const names = process.platform === "win32" ? ["archil.exe"] : ["archil"];
   for (const directory of (env.PATH ?? "").split(delimiter)) {
     if (!directory) continue;
@@ -97,30 +100,33 @@ export function findNativeClient(env: NodeJS.ProcessEnv, selfPath: string): stri
         continue;
       }
       const resolved = safeRealpath(candidate);
-      if (resolved === self || isNodeScript(resolved)) continue;
+      if (skip.has(resolved) || isNodeScript(resolved)) continue;
       return candidate;
     }
   }
   return undefined;
 }
 
+function skippedPaths(env: NodeJS.ProcessEnv): string[] {
+  return (env[SKIP_ENV] ?? "").split(delimiter).filter(Boolean).map(safeRealpath);
+}
+
 /** Runs the native client with `args` and resolves to the exit code to use. */
 export async function forwardToNativeClient(args: string[], env: NodeJS.ProcessEnv, selfPath: string): Promise<number> {
   const command = firstCommand(args);
-  if (env[FORWARDED_ENV]) {
-    throw new Error(`'archil ${command}' was forwarded back from the Archil client, which doesn't handle it either`);
-  }
   const native = findNativeClient(env, selfPath);
   if (!native) {
     throw new Error(`'archil ${command}' is a command of the Archil client, which isn't installed. Install it with:\n  ${NATIVE_CLIENT_INSTALL}`);
   }
+  // Each hop adds what it tried, so a wrapper that runs this CLI again can't loop.
+  const skip = [...skippedPaths(env), safeRealpath(selfPath), safeRealpath(native)].join(delimiter);
   // The terminal delivers Ctrl-C to the client too; stay alive to report its exit.
   const ignore = () => {};
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
   for (const signal of signals) process.on(signal, ignore);
   try {
     return await new Promise<number>((resolve, reject) => {
-      const child = spawn(native, args, { stdio: "inherit", env: { ...env, [FORWARDED_ENV]: "1" } });
+      const child = spawn(native, args, { stdio: "inherit", env: { ...env, [SKIP_ENV]: skip } });
       child.on("error", reject);
       child.on("exit", (code, signal) => resolve(code ?? (signal ? 128 + (signalNumber(signal) ?? 1) : 1)));
     });
@@ -154,6 +160,24 @@ function isNodeScript(path: string): boolean {
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
+}
+
+/**
+ * Where `archil login` saves a key when no --profile is given: replace the
+ * profile an earlier login made for this endpoint, otherwise use the region's
+ * name, and never overwrite a profile someone created by hand.
+ */
+export function loginProfileName(
+  profiles: Record<string, { region: string; baseUrl?: string; apiKeyId?: string; account?: string }>,
+  region: string,
+  baseUrl: string | undefined,
+): string {
+  const previousLogin = Object.entries(profiles).find(([, profile]) =>
+    profile.apiKeyId !== undefined && profile.region === region && profile.baseUrl === baseUrl);
+  if (previousLogin) return previousLogin[0];
+  let name = region;
+  for (let suffix = 2; profiles[name]; suffix++) name = `${region}-${suffix}`;
+  return name;
 }
 
 function addAccountCommands(program: Command, dependencies: SandboxCliDependencies): void {
@@ -198,7 +222,7 @@ console and run 'archil profile create', or set ARCHIL_API_KEY and ARCHIL_REGION
           validate({ apiKey: grant.apiKey, region: grant.region, baseUrl: grant.baseUrl }), "Key works");
 
         const config = await loadProfiles();
-        const name = global.profile ?? region;
+        const name = global.profile ?? loginProfileName(config.profiles, region, grant.baseUrl);
         await writeProfileCredential(name, grant.apiKey);
         config.profiles[name] = { region, baseUrl: grant.baseUrl, apiKeyId: grant.keyId, account: grant.account };
         config.currentProfile = name;

@@ -57,6 +57,11 @@ export interface SandboxCliDependencies {
   /** argv that runs this CLI (for ssh's ProxyCommand). Defaults to this process's node and script. */
   selfCommand?: string[];
   runSsh?: (args: string[], env: NodeJS.ProcessEnv) => Promise<number>;
+  /**
+   * Data commands print JSON when stdout is piped. Off for the standalone
+   * `sandbox` executable, whose existing scripts expect tables.
+   */
+  jsonWhenPiped?: boolean;
 }
 
 type LifecycleAction = "start" | "pause" | "resume" | "stop" | "fork" | "delete";
@@ -88,8 +93,9 @@ export async function resolveSandbox(service: SandboxService, idOrName: string):
 }
 
 export function openInBrowser(url: string): void {
+  // Not `cmd /c start`: cmd.exe splits the URL at its `&`s.
   const [command, args] = process.platform === "darwin" ? ["open", [url]]
-    : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+    : process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
     : ["xdg-open", [url]];
   spawn(command, args, { stdio: "ignore", detached: true }).on("error", () => {}).unref();
 }
@@ -111,7 +117,8 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
     .version(dependencies.version);
   addGlobalOptions(program);
   addProfileCommands(program, dependencies.validateCredential);
-  addSandboxCommands(program, program, dependencies);
+  // The standalone `sandbox` executable keeps its original output for existing scripts.
+  addSandboxCommands(program, program, { jsonWhenPiped: false, ...dependencies });
   return program;
 }
 
@@ -150,9 +157,9 @@ export function addSandboxCommands(program: Command, credentialsFrom: Command, d
   // forward) stay text so their output can be piped as-is.
   const formatOption = (command: Command, { jsonWhenPiped = true } = {}) => command.option(
     "-o, --output <format>",
-    jsonWhenPiped ? "Output format: table | json (default: table in a terminal, json when piped)" : "Output format: table | json",
+    jsonWhenPiped && dependencies.jsonWhenPiped !== false ? "Output format: table | json (default: table in a terminal, json when piped)" : "Output format: table | json",
     parseOutputFormat,
-    (stdout.isTTY || !jsonWhenPiped ? "table" : "json") as OutputFormat,
+    (stdout.isTTY || !jsonWhenPiped || dependencies.jsonWhenPiped === false ? "table" : "json") as OutputFormat,
   );
   const waitOption = (command: Command) => command.option("--no-wait", "Return after the operation is accepted");
   const confirmDestructive = async (question: string, yes: boolean): Promise<boolean> => {
@@ -191,7 +198,19 @@ export function addSandboxCommands(program: Command, credentialsFrom: Command, d
     const label = request.name ? `Creating ${request.name}` : "Creating sandbox";
     const sandbox = await withSpinner(label, options.wait, () =>
       requireService().create(request, { wait: options.wait }), (created) => `Created ${ui.style.bold(created.name)}`);
-    if (options.desktop) await ui.step("Starting desktop", () => startDesktop(sandbox), "Desktop running");
+    if (options.desktop) {
+      try {
+        await ui.step("Starting desktop", () => startDesktop(sandbox), "Desktop running");
+      } catch (error) {
+        // The sandbox exists and is running (with idle pause off), so say so rather than only failing.
+        output(formatSandbox(sandbox, options.output, tableStyle));
+        const name = commandNames(program).join(" ");
+        ui.warn(`'${sandbox.name}' was created but its desktop didn't start. Retry with ${ui.style.bold(`${name} desktop ${sandbox.name}`)}, or remove it with ${ui.style.bold(`${name} stop ${sandbox.name} && ${name} delete ${sandbox.name}`)}.`);
+        throw error;
+      } finally {
+        await sandbox.processes.disconnect().catch(() => {});
+      }
+    }
     output(formatSandbox(sandbox, options.output, tableStyle));
     if (ui.interactive) {
       const name = commandNames(program).join(" ");

@@ -2,7 +2,7 @@
 // `ssh`, `ssh-proxy`, and `ssh-config`.
 
 import { spawn } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Command } from "./command.js";
@@ -33,8 +33,25 @@ import { formatDuration, type Ui } from "./ui.js";
 import type { OutputStream } from "./write-output.js";
 
 const TUNNEL_TOKEN_TTL = "12h";
-const SSH_CONFIG_START = "# >>> archil sandboxes >>>";
-const SSH_CONFIG_END = "# <<< archil sandboxes <<<";
+const TUNNEL_TOKEN_RENEW_MS = 11 * 60 * 60 * 1000;
+/** The keepalive ends on its own after this, in case the CLI dies without cleaning up. */
+const KEEPALIVE_MAX_SECONDS = 36 * 60 * 60;
+const SSH_INCLUDE_FILE = "archil_config";
+const SSH_INCLUDE_LINE = `Include ~/.ssh/${SSH_INCLUDE_FILE}`;
+/** The block an earlier version of `ssh-config --install` appended. */
+const LEGACY_BLOCK = /# >>> archil sandboxes >>>[\s\S]*?# <<< archil sandboxes <<<\n?/;
+
+/** `config` with the archil Include as its first line, exactly once, and no legacy appended block. */
+export function withArchilInclude(config: string): string {
+  const rest = config
+    .replace(LEGACY_BLOCK, "")
+    .split("\n")
+    .filter((line) => line.trim() !== SSH_INCLUDE_LINE)
+    .join("\n")
+    .replace(/^\n+/, "")
+    .replace(/\n{2,}$/, "\n");
+  return `${SSH_INCLUDE_LINE}\n${rest ? `\n${rest}` : ""}`;
+}
 
 export interface AccessContext {
   program: Command;
@@ -124,7 +141,8 @@ async function serveTunnel(
     try {
       const tunnel = await context.openTunnel(tunnelOptions(requestedLocalPort ?? port))
         .catch((error: NodeJS.ErrnoException) => {
-          if (requestedLocalPort !== undefined || error.code !== "EADDRINUSE") throw error;
+          // Taken, or privileged (ports below 1024 on Linux): use any free port instead.
+          if (requestedLocalPort !== undefined || (error.code !== "EADDRINUSE" && error.code !== "EACCES")) throw error;
           return context.openTunnel(tunnelOptions(0));
         });
       return { access, tunnel };
@@ -133,6 +151,27 @@ async function serveTunnel(
       throw error;
     }
   }, "Private tunnel open");
+
+  // The sandbox's idle timer only runs while it has no process connections,
+  // and tunnel traffic isn't one, so hold a do-nothing process for the tunnel's lifetime.
+  const keepalive = await sandbox.run("exec tail -f /dev/null", { collectOutput: false, timeoutSeconds: KEEPALIVE_MAX_SECONDS })
+    .catch(() => {
+      ui.warn("Couldn't keep the sandbox awake; it may pause after its idle timeout.");
+      return undefined;
+    });
+
+  // Port tokens expire; swap in a fresh one before this one does.
+  let currentAccess = access;
+  const renewal = setInterval(() => {
+    void (async () => {
+      const next = await sandbox.createPortToken(port, { ttl: TUNNEL_TOKEN_TTL });
+      tunnel.setPortToken(next.token);
+      const previous = currentAccess;
+      currentAccess = next;
+      await sandbox.deletePortToken(previous.id).catch(() => {});
+    })().catch(() => ui.warn("Couldn't renew the tunnel's access token; new connections may fail once it expires."));
+  }, TUNNEL_TOKEN_RENEW_MS);
+  renewal.unref?.();
 
   const { url, rows, json } = describe(tunnel.port);
   if (outputFormat === "json") context.output(JSON.stringify(json, null, 2));
@@ -149,11 +188,15 @@ async function serveTunnel(
     await untilInterrupted(signals);
   } finally {
     clearInterval(ticker);
+    clearInterval(renewal);
     live.stop();
   }
   const uptime = formatDuration(now() - started);
   await tunnel.close();
-  await sandbox.deletePortToken(access.id).catch(() => {});
+  await keepalive?.kill().catch(() => {});
+  await keepalive?.disconnect().catch(() => {});
+  await sandbox.deletePortToken(currentAccess.id).catch(() => {});
+  await sandbox.processes.disconnect().catch(() => {});
   ui.success(`Closed tunnel after ${uptime} and revoked its access token`);
 }
 
@@ -192,53 +235,67 @@ the desktop until you run --unshare.
       const localPort = optionalInteger(options.port, "Port", 1, 65_535);
       const sandbox = await context.resolve(target);
       await wakeSandbox(ui, sandbox);
-      const { style } = ui;
-
-      if (options.unshare) {
-        await ui.step(`Unpublishing ${sandbox.name}`, () => unshareDesktop(sandbox), `Unpublished ${sandbox.name}; old links stop working and viewers are disconnected`);
-        if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, url: null, shared: false }, null, 2));
-        else if (!ui.interactive) output(`Unshared '${sandbox.name}'; old links no longer work.`);
-        return;
+      try {
+        await openDesktop(context, sandbox, options, localPort);
+      } finally {
+        // An idle process connection otherwise keeps the CLI alive for a few seconds.
+        await sandbox.processes.disconnect().catch(() => {});
       }
-
-      const token = await ui.step("Starting desktop", () => startDesktop(sandbox), "Desktop running");
-      const deskName = style.bold(sandbox.name);
-      if (options.share) {
-        const url = await ui.step("Publishing desktop", () => shareDesktop(sandbox, token), "Published");
-        if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, url, shared: true }, null, 2));
-        else if (!context.stdout.isTTY || !ui.interactive) output(url);
-        if (ui.interactive) {
-          ui.blank();
-          ui.details([["Desktop", link(ui, url)], ["Sandbox", deskName]]);
-          ui.blank();
-          ui.warn(`Anyone with this link can see and control the desktop. Revoke it with ${style.bold(`${context.commandName} desktop ${sandbox.name} --unshare`)}`);
-        }
-        return;
-      }
-
-      await serveTunnel(
-        context,
-        sandbox,
-        DESKTOP_PORT,
-        localPort,
-        (port) => {
-          const url = `http://localhost:${port}${viewerPath(token)}`;
-          return {
-            url,
-            rows: [
-              ["Desktop", link(ui, url)],
-              ["Sandbox", `${deskName} ${style.dim(`· ${sandbox.vcpuCount} vCPU · ${Math.round(sandbox.memSizeMiB / 1024)} GiB`)}`],
-              ["Access", `private to this machine ${style.dim(`· token expires in ${TUNNEL_TOKEN_TTL}`)}`],
-              ...(options.open ? [["Browser", "opened in your default browser"] as [string, string]] : []),
-            ],
-            json: { id: sandbox.id, name: sandbox.name, url, shared: false },
-          };
-        },
-        (activity) => plural(activity.websockets, "viewer"),
-        options.open,
-        options.output,
-      );
     });
+}
+
+async function openDesktop(
+  context: AccessContext,
+  sandbox: Sandbox,
+  options: { output: OutputFormat; share?: boolean; unshare?: boolean; open: boolean },
+  localPort: number | undefined,
+): Promise<void> {
+  const { ui, output } = context;
+  const { style } = ui;
+  if (options.unshare) {
+    await ui.step(`Unpublishing ${sandbox.name}`, () => unshareDesktop(sandbox), `Unpublished ${sandbox.name}; old links stop working and viewers are disconnected`);
+    if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, url: null, shared: false }, null, 2));
+    else if (!ui.interactive) output(`Unshared '${sandbox.name}'; old links no longer work.`);
+    return;
+  }
+
+  const token = await ui.step("Starting desktop", () => startDesktop(sandbox), "Desktop running");
+  const deskName = style.bold(sandbox.name);
+  if (options.share) {
+    const url = await ui.step("Publishing desktop", () => shareDesktop(sandbox, token), "Published");
+    if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, url, shared: true }, null, 2));
+    else if (!context.stdout.isTTY || !ui.interactive) output(url);
+    if (ui.interactive) {
+      ui.blank();
+      ui.details([["Desktop", link(ui, url)], ["Sandbox", deskName]]);
+      ui.blank();
+      ui.warn(`Anyone with this link can see and control the desktop. Revoke it with ${style.bold(`${context.commandName} desktop ${sandbox.name} --unshare`)}`);
+    }
+    return;
+  }
+
+  await serveTunnel(
+    context,
+    sandbox,
+    DESKTOP_PORT,
+    localPort,
+    (port) => {
+      const url = `http://localhost:${port}${viewerPath(token)}`;
+      return {
+        url,
+        rows: [
+          ["Desktop", link(ui, url)],
+          ["Sandbox", `${deskName} ${style.dim(`· ${sandbox.vcpuCount} vCPU · ${Math.round(sandbox.memSizeMiB / 1024)} GiB`)}`],
+          ["Access", `private to this machine ${style.dim(`· token expires in ${TUNNEL_TOKEN_TTL}`)}`],
+          ...(options.open ? [["Browser", "opened in your default browser"] as [string, string]] : []),
+        ],
+        json: { id: sandbox.id, name: sandbox.name, url, shared: false },
+      };
+    },
+    (activity) => plural(activity.websockets, "viewer"),
+    options.open,
+    options.output,
+  );
 }
 
 function addForwardCommand(context: AccessContext): void {
@@ -338,10 +395,10 @@ the host <sandbox-name>${SSH_HOST_SUFFIX}.
 
   program.command("ssh-config")
     .description("Print (or --install) the ssh config that makes <sandbox>.archil hosts work")
-    .option("--install", "Add the config to ~/.ssh/config (replacing an earlier copy)")
+    .option("--install", "Write ~/.ssh/archil_config and include it from the top of ~/.ssh/config")
     .action(async (options: { install?: boolean }) => {
       await ensureKeyWithProgress(ui);
-      const block = `${SSH_CONFIG_START}\n${sshConfigBlock(proxyArgs())}${SSH_CONFIG_END}\n`;
+      const block = sshConfigBlock(proxyArgs());
       if (context.selfCommand.some((part) => part.includes(`${"/"}_npx${"/"}`))) {
         ui.warn("This config points at a temporary npx copy of the CLI. Install it first so the path stays valid: npm install -g archil");
       }
@@ -349,24 +406,21 @@ the host <sandbox-name>${SSH_HOST_SUFFIX}.
         context.output(block.trimEnd());
         return;
       }
-      const path = join(homedir(), ".ssh", "config");
+      const sshDir = join(homedir(), ".ssh");
+      await mkdir(sshDir, { recursive: true, mode: 0o700 });
+      // ssh_config takes the first value it finds for each option, so the
+      // archil hosts go in their own file, included from the top of the
+      // user's config, ahead of any `Host *` block that would override them.
+      await writeFile(join(sshDir, SSH_INCLUDE_FILE), sshConfigBlock(proxyArgs()), { mode: 0o600 });
+      const path = join(sshDir, "config");
       let existing = "";
       try {
         existing = await readFile(path, "utf8");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      const start = existing.indexOf(SSH_CONFIG_START);
-      const end = existing.indexOf(SSH_CONFIG_END);
-      let updated: string;
-      if (start !== -1 && end > start) {
-        updated = existing.slice(0, start) + block + existing.slice(end + SSH_CONFIG_END.length).replace(/^\n/, "");
-      } else {
-        const separator = existing === "" ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
-        updated = `${existing}${separator}${block}`;
-      }
-      await writeFile(path, updated, { mode: 0o600 });
-      ui.success(`Added ${ui.style.bold(`*${SSH_HOST_SUFFIX}`)} hosts to ${path}`);
+      await writeFile(path, withArchilInclude(existing), { mode: 0o600 });
+      ui.success(`Added ${ui.style.bold(`*${SSH_HOST_SUFFIX}`)} hosts (${join("~/.ssh", SSH_INCLUDE_FILE)}, included at the top of ~/.ssh/config)`);
       ui.blank();
       ui.details([
         ["Shell", `ssh my-sandbox${SSH_HOST_SUFFIX}`],

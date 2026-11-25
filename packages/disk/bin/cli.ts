@@ -13,9 +13,10 @@ const program = new Command()
   .version(pkg.version);
 addGlobalOptions(program);
 addProfileCommands(program);
-addDiskCommands(program, program);
+// The standalone `disk` executable keeps its original output for existing scripts.
+addDiskCommands(program, program, { legacy: true });
 
 program.parseAsync(rewriteDiskExecSugar(process.argv)).catch((err: unknown) => {
-  printError(err, process.stderr, "disk");
+  printError(err, process.stderr, "disk", { legacy: true });
   process.exit(1);
 });

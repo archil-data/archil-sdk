@@ -38,7 +38,9 @@ async function main(argv: string[]): Promise<void> {
     const words = args.slice(1);
     const credentials = credentialOptions(words);
     const candidates = await completeWords(program, words, (source) => completionLookup(source, credentials)).catch(() => []);
-    if (candidates.length > 0) process.stdout.write(`${candidates.join("\n")}\n`);
+    // A sandbox lookup that timed out may still hold the event loop; tab completion
+    // must not wait on it, but must not cut off its own output either.
+    process.stdout.write(candidates.length > 0 ? `${candidates.join("\n")}\n` : "", () => process.exit(0));
     return;
   }
   const commandIndex = firstCommandIndex(args);

@@ -10,4 +10,6 @@ Add the `archil` command, installed by the `archil` package. It covers disks and
 - `archil sandbox forward <id|name> <port>`: a private localhost tunnel for HTTP and WebSocket services.
 - `archil sandbox create --desktop` and `archil sandbox desktop`: VNC desktops opened privately through a tunnel; `--share` and `--unshare` manage a public link.
 - `archil completion bash|zsh|fish`, which completes sandbox names.
-- Progress spinners, live status lines, colored output, and errors with hints. Data commands print JSON when stdout is piped.
+- Progress spinners, live status lines, colored output, and errors with hints. Under `archil`, data commands print JSON when stdout is piped.
+
+The existing `disk` and `sandbox` executables keep their output, error format, and exit codes. They gain the new sandbox subcommands and `create --desktop`, and show spinners only in an interactive terminal.

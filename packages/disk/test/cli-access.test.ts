@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { createArchilProgram } from "../src/cli/archil-command.js";
+import { withArchilInclude } from "../src/cli/sandbox-access.js";
 import {
   cachedSandboxNames,
   completeWords,
@@ -160,13 +161,18 @@ test("ssh-proxy installs openssh-server when the image lacks it", async () => {
   assert.match(cli.stderr.values.join(""), /Installing openssh-server/);
 });
 
-test("ssh-config --install adds one block and replaces it on reinstall", async () => {
+test("ssh-config --install includes the archil hosts ahead of the user's own config", async () => {
   const { sandbox } = sshSandbox();
+  const sshDir = join(directory, ".ssh");
+  await mkdir(sshDir, { recursive: true });
+  const userConfig = "User someone\n\nHost *\n  User alice\n  StrictHostKeyChecking no\n";
+  await writeFile(join(sshDir, "config"), `${userConfig}\n# >>> archil sandboxes >>>\nHost *.archil\n  User root\n# <<< archil sandboxes <<<\n`);
   await program(sandbox).run("sandbox", "ssh-config", "--install");
   await program(sandbox).run("sandbox", "ssh-config", "--install");
-  const config = await readFile(join(directory, ".ssh", "config"), "utf8");
-  assert.equal(config.match(/Host \*\.archil/g)?.length, 1);
-  assert.match(config, /^# >>> archil sandboxes >>>/);
+  const config = await readFile(join(sshDir, "config"), "utf8");
+  assert.equal(config, `Include ~/.ssh/archil_config\n\n${userConfig}`, "one Include first, the user's config untouched, the old appended block gone");
+  assert.match(await readFile(join(sshDir, "archil_config"), "utf8"), /^Host \*\.archil$/m);
+  assert.equal(withArchilInclude(""), "Include ~/.ssh/archil_config\n");
 });
 
 test("completion walks the command tree and fills in sandbox names and option values", async () => {

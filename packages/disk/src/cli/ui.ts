@@ -3,6 +3,8 @@
 // degrades to nothing (steps) or plain text (messages) when the stream isn't
 // a terminal, so piped stdout stays clean and scripts see no escape codes.
 
+import { ArchilApiError } from "../errors.js";
+
 export interface UiStream {
   write(data: string): unknown;
   isTTY?: boolean;
@@ -168,11 +170,21 @@ export function statusStyle(style: Styles, status: string): string {
   }
 }
 
-/** Prints an error as `✗ message`, with a hint for the common fixable cases. */
-export function printError(error: unknown, stream: UiStream = process.stderr, commandName = "archil"): void {
-  const style = styles(colorEnabled(stream));
+/** Prints an error as `✗ message`, with a hint for the common fixable cases (or, with `legacy`, the original `Error (status): message`). */
+export function printError(
+  error: unknown,
+  stream: UiStream = process.stderr,
+  commandName = "archil",
+  { legacy = false }: { legacy?: boolean } = {},
+): void {
   const status = typeof error === "object" && error !== null && "status" in error ? (error as { status?: number }).status : undefined;
   const message = error instanceof Error ? error.message : String(error);
+  if (legacy) {
+    // The `disk` and `sandbox` executables keep their original format; scripts may match on it.
+    stream.write(`${error instanceof ArchilApiError ? `Error (${error.status}): ` : ""}${message}\n`);
+    return;
+  }
+  const style = styles(colorEnabled(stream));
   stream.write(`${style.red("✗")} ${message}${status ? style.dim(` (HTTP ${status})`) : ""}\n`);
   if (status === 401 || status === 403 || /Not signed in|Missing API key|Missing region/.test(message)) {
     stream.write(`  ${style.dim(`Sign in with ${style.bold("archil login")}, or set ARCHIL_API_KEY and ARCHIL_REGION.`)}\n`);

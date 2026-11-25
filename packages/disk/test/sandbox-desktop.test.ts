@@ -24,6 +24,8 @@ afterEach(async () => {
 
 const TOKEN = "ab".repeat(32);
 
+const keepalive = { kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined) };
+
 function desktopSandbox(overrides: Partial<Record<string, unknown>> = {}): Sandbox {
   const sandbox = {
     id: "0198aabb-1234-7abc-8def-0123456789ab",
@@ -47,6 +49,8 @@ function desktopSandbox(overrides: Partial<Record<string, unknown>> = {}): Sandb
     unexposePort: vi.fn(async () => undefined),
     createPortToken: vi.fn(async () => ({ id: "tok-1", port: 6080, createdAt: new Date(), hostname: "6080-route.example.archil.app", token: "secret" })),
     deletePortToken: vi.fn(async () => undefined),
+    run: vi.fn(async () => keepalive),
+    processes: { disconnect: vi.fn(async () => undefined) },
     ...overrides,
   };
   return sandbox as unknown as Sandbox;
@@ -73,7 +77,7 @@ function harness(sandbox: Sandbox, options: { tty?: boolean } = {}) {
     openUrl: (url) => opened.push(url),
     openTunnel: async (options) => {
       tunnels.push(options);
-      return { port: options.localPort || 49_152, close: closeTunnel };
+      return { port: options.localPort || 49_152, setPortToken: () => {}, close: closeTunnel };
     },
   });
   const run = (...args: string[]) => program.parseAsync(["node", "sandbox", "--api-key", "key-test", "--region", "test", ...args]);
@@ -148,9 +152,11 @@ test("desktop wakes a paused sandbox, tunnels privately, and cleans up on Ctrl-C
   assert.equal(cli.stdout.values.join("").trim(), cli.opened[0]);
   assert.equal((sandbox.exposePort as ReturnType<typeof vi.fn>).mock.calls.length, 0);
 
+  assert.deepEqual((sandbox.run as ReturnType<typeof vi.fn>).mock.calls[0]?.[0], "exec tail -f /dev/null", "a keepalive holds off idle pause");
   cli.signals.emit("SIGINT");
   await running;
   assert.equal(cli.closeTunnel.mock.calls.length, 1);
+  assert.ok(keepalive.kill.mock.calls.length >= 1, "the keepalive is stopped");
   assert.deepEqual((sandbox.deletePortToken as ReturnType<typeof vi.fn>).mock.calls, [["tok-1"]]);
   assert.equal(cli.signals.listenerCount("SIGINT"), 0);
 });
@@ -170,7 +176,7 @@ test("desktop falls back to a free port only when the default one is taken", asy
     openTunnel: async ({ localPort }) => {
       ports.push(localPort);
       if (localPort === 6080) throw Object.assign(new Error("in use"), { code: "EADDRINUSE" });
-      return { port: 51_000, close: async () => {} };
+      return { port: 51_000, setPortToken: () => {}, close: async () => {} };
     },
   });
   const running = program.parseAsync(["node", "sandbox", "--api-key", "k", "--region", "r", "desktop", "desk", "--no-open"]);

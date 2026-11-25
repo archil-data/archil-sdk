@@ -23,6 +23,8 @@ export interface PortTunnelActivity {
 export interface PortTunnel {
   /** Local port the tunnel listens on. */
   port: number;
+  /** Use `token` for connections opened from now on (existing ones stay authenticated). */
+  setPortToken(token: string): void;
   close(): Promise<void>;
 }
 
@@ -40,6 +42,7 @@ export interface PortTunnelOptions {
 export async function openPortTunnel(options: PortTunnelOptions): Promise<PortTunnel> {
   const connectUpstream = options.connectUpstream
     ?? ((hostname: string) => tlsConnect({ host: hostname, port: 443, servername: hostname }));
+  let portToken = options.portToken;
   const sockets = new Set<Socket>();
   const websockets = new Set<Socket>();
   const report = () => options.onActivity?.({ connections: sockets.size, websockets: websockets.size });
@@ -51,7 +54,7 @@ export async function openPortTunnel(options: PortTunnelOptions): Promise<PortTu
       websockets.delete(client);
       report();
     });
-    relay(client, () => connectUpstream(options.hostname), options.portToken, (head) => {
+    relay(client, () => connectUpstream(options.hostname), portToken, (head) => {
       if (UPGRADE.test(head.toString("latin1"))) {
         websockets.add(client);
         report();
@@ -61,6 +64,7 @@ export async function openPortTunnel(options: PortTunnelOptions): Promise<PortTu
   await listen(server, options.localPort);
   return {
     port: (server.address() as { port: number }).port,
+    setPortToken: (token) => { portToken = token; },
     close: () => new Promise<void>((resolve) => {
       for (const socket of sockets) socket.destroy();
       server.close(() => resolve());

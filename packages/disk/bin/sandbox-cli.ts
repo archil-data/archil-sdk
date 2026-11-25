@@ -7,7 +7,7 @@ import { createSandboxProgram } from "../src/cli/sandbox-command.js";
 const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
 
 function fail(error: unknown): never {
-  printError(error, process.stderr, "sandbox");
+  printError(error, process.stderr, "sandbox", { legacy: true });
   process.exit(1);
 }
 
