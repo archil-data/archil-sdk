@@ -67,3 +67,20 @@ test("the session times out", async () => {
   const session = await startLoginSession({ console: CONSOLE, timeoutMs: 20 });
   await assert.rejects(session.grant, /Timed out/);
 });
+
+test("an HTTPS console's callback arrives with Origin: null and is accepted", async () => {
+  // Browsers send `Origin: null` for a form POST from an HTTPS page to http://127.0.0.1.
+  const session = await startLoginSession({ console: "https://console.example.com" });
+  const { callback, state } = callbackOf(session.url);
+  const approved = await post(callback, { state, apiKey: "key-abc", region: "aws-us-east-1" }, "null");
+  assert.equal(approved.status, 200);
+  assert.equal((await session.grant).apiKey, "key-abc");
+});
+
+test("a foreign origin is still turned away even with Origin: null allowed", async () => {
+  const session = await startLoginSession({ console: CONSOLE });
+  const { callback, state } = callbackOf(session.url);
+  assert.equal((await post(callback, { state, apiKey: "key-x", region: "r" }, "https://evil.example")).status, 403);
+  session.close();
+  await assert.rejects(session.grant, /cancelled/);
+});
