@@ -242,7 +242,14 @@ export async function forwardPort(sandbox: Sandbox, port: number, options: Forwa
     let failures = 0;
     while (!closing) {
       try {
-        keepalive = await sandbox.run("exec tail -f /dev/null", { collectOutput: false, timeoutSeconds: KEEPALIVE_MAX_SECONDS });
+        const started = await sandbox.run("exec tail -f /dev/null", { collectOutput: false, timeoutSeconds: KEEPALIVE_MAX_SECONDS });
+        if (closing) {
+          // close() ran while this was starting and couldn't see it; stop it here.
+          await started.kill().catch(() => {});
+          await started.disconnect().catch(() => {});
+          break;
+        }
+        keepalive = started;
         if (failures > 0) warn("The sandbox is being kept awake again.");
         failures = 0;
         await keepalive.wait();

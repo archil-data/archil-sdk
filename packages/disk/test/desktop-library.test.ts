@@ -175,3 +175,19 @@ test("forwardPort.close leaves the sandbox's other process connections alone", a
   await forwarded.close();
   assert.equal(raw.processes.disconnect.mock.calls.length, 0);
 });
+
+test("closing while the keepalive is still starting stops it and doesn't hang", async () => {
+  const { sandbox, raw } = fakeSandbox(desktopUp);
+  let finishStart!: () => void;
+  const late = { wait: vi.fn(() => new Promise<void>(() => {})), kill: vi.fn(async () => {}), disconnect: vi.fn(async () => {}) };
+  raw.run.mockImplementationOnce(() => new Promise((resolve) => { finishStart = () => resolve(late as never); }));
+  const forwarded = await forwardPort(sandbox, 8080, {
+    openTunnel: async () => ({ port: 50_126, setPortToken: () => {}, close: async () => {} }),
+  });
+  const closing = forwarded.close();
+  finishStart();
+  await closing;
+  assert.equal(late.kill.mock.calls.length, 1, "the keepalive that finished starting after close is stopped");
+  assert.equal(late.wait.mock.calls.length, 0);
+  assert.deepEqual(raw.deletePortToken.mock.calls, [["tok-1"]]);
+});
