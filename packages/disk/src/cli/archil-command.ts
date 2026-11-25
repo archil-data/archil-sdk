@@ -241,6 +241,12 @@ console and run 'archil profile create', or set ARCHIL_API_KEY and ARCHIL_REGION
         ui.success(`Signed in${grant.account ? ` to ${style.bold(grant.account)}` : ""} as profile ${style.bold(name)} ${style.dim(`(now the default${where})`)}`);
         ui.blank();
         ui.details([["Try", "archil sandbox create my-desk --desktop"], ["", "archil sandbox list"]]);
+        const overriding = ["ARCHIL_API_KEY", "ARCHIL_REGION", "ARCHIL_BASE_URL", "ARCHIL_PROFILE"].filter((name) => process.env[name]);
+        if (overriding.length > 0) {
+          ui.blank();
+          ui.warn(`${overriding.join(", ")} ${overriding.length === 1 ? "is" : "are"} set in your environment and ${overriding.length === 1 ? "takes" : "take"} precedence over this profile.`);
+          ui.details([["Fix", `unset ${overriding.join(" ")}  ${style.dim("(and remove it from your shell profile)")}`]]);
+        }
       } finally {
         signals.off("SIGINT", cancel);
         session.close();

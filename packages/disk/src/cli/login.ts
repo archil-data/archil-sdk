@@ -49,8 +49,12 @@ export async function startLoginSession(options: { console?: string; timeoutMs?:
     if (finished) return;
     finished = true;
     clearTimeout(timer);
-    // Let the browser receive its page before the listener goes away.
-    setTimeout(() => server.close(), 100).unref();
+    // Let the browser receive its page before the listener goes away. Browsers
+    // hold idle keep-alive sockets open, which would keep this process alive.
+    setTimeout(() => {
+      server.close();
+      server.closeAllConnections();
+    }, 100).unref();
     if (outcome.grant) settle.resolve(outcome.grant);
     else settle.reject(outcome.error!);
   };
@@ -159,6 +163,7 @@ function respond(response: ServerResponse, status: number, html: string): void {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
+    Connection: "close",
   });
   response.end(html);
 }
