@@ -9,14 +9,8 @@ import type { Command } from "./command.js";
 import type { Sandbox } from "../sandbox.js";
 import type { OutputFormat } from "./sandbox-output.js";
 import { optionalInteger } from "./sandbox-options.js";
-import {
-  DESKTOP_PORT,
-  shareDesktop,
-  startDesktop,
-  unshareDesktop,
-  viewerPath,
-} from "./sandbox-desktop.js";
-import type { PortTunnel, PortTunnelActivity, PortTunnelOptions } from "./port-tunnel.js";
+import { DESKTOP_PORT, desktopViewerPath } from "../sandbox-desktop.js";
+import { forwardPort, type PortTunnel, type PortTunnelActivity, type PortTunnelOptions } from "../tunnel.js";
 import {
   ensureSshKey,
   prepareSandboxSsh,
@@ -32,10 +26,6 @@ import {
 import { formatDuration, type Ui } from "./ui.js";
 import type { OutputStream } from "./write-output.js";
 
-const TUNNEL_TOKEN_TTL = "12h";
-const TUNNEL_TOKEN_RENEW_MS = 11 * 60 * 60 * 1000;
-/** The keepalive ends on its own after this, in case the CLI dies without cleaning up. */
-const KEEPALIVE_MAX_SECONDS = 36 * 60 * 60;
 const SSH_INCLUDE_FILE = "archil_config";
 const SSH_INCLUDE_LINE = `Include ~/.ssh/${SSH_INCLUDE_FILE}`;
 /** The block an earlier version of `ssh-config --install` appended. */
@@ -106,8 +96,8 @@ function untilInterrupted(signals: NodeJS.Process): Promise<void> {
 }
 
 /**
- * Opens a private tunnel to `port`, prints `summary`, shows a live status line
- * until Ctrl-C, then closes the tunnel and revokes its token.
+ * Forwards `port` privately, prints `describe`'s summary, shows a live status
+ * line until Ctrl-C, then closes the forward (which revokes its token).
  */
 async function serveTunnel(
   context: AccessContext,
@@ -127,63 +117,17 @@ async function serveTunnel(
   const statusLine = () =>
     `${style.green("●")} ${style.bold("Live")}  ${status(activity)} ${style.dim("·")} up ${formatDuration(now() - started)} ${style.dim("· Ctrl-C to stop")}`;
 
-  const { access, tunnel } = await ui.step("Opening private tunnel", async () => {
-    const access = await sandbox.createPortToken(port, { ttl: TUNNEL_TOKEN_TTL });
-    const tunnelOptions = (localPort: number): PortTunnelOptions => ({
-      hostname: access.hostname,
-      portToken: access.token,
-      localPort,
-      onActivity: (next) => {
-        activity = next;
-        live?.update(statusLine());
-      },
-    });
-    try {
-      const tunnel = await context.openTunnel(tunnelOptions(requestedLocalPort ?? port))
-        .catch((error: NodeJS.ErrnoException) => {
-          // Taken, or privileged (ports below 1024 on Linux): use any free port instead.
-          if (requestedLocalPort !== undefined || (error.code !== "EADDRINUSE" && error.code !== "EACCES")) throw error;
-          return context.openTunnel(tunnelOptions(0));
-        });
-      return { access, tunnel };
-    } catch (error) {
-      await sandbox.deletePortToken(access.id).catch(() => {});
-      throw error;
-    }
-  }, "Private tunnel open");
+  const forwarded = await ui.step("Opening private tunnel", () => forwardPort(sandbox, port, {
+    localPort: requestedLocalPort,
+    openTunnel: context.openTunnel,
+    onActivity: (next) => {
+      activity = next;
+      live?.update(statusLine());
+    },
+    onWarning: (message) => ui.warn(message),
+  }), "Private tunnel open");
 
-  // The sandbox's idle timer only runs while it has no process connections,
-  // and tunnel traffic isn't one, so hold a do-nothing process for the tunnel's lifetime.
-  const keepalive = await sandbox.run("exec tail -f /dev/null", { collectOutput: false, timeoutSeconds: KEEPALIVE_MAX_SECONDS })
-    .catch(() => {
-      ui.warn("Couldn't keep the sandbox awake; it may pause after its idle timeout.");
-      return undefined;
-    });
-
-  // Port tokens expire; swap in a fresh one before this one does.
-  let currentAccess = access;
-  let closing = false;
-  let renewing: Promise<void> | undefined;
-  const renewal = setInterval(() => {
-    if (renewing) return;
-    renewing = (async () => {
-      const next = await sandbox.createPortToken(port, { ttl: TUNNEL_TOKEN_TTL });
-      if (closing) {
-        // The tunnel closed while this token was being made; nothing will use it.
-        await sandbox.deletePortToken(next.id).catch(() => {});
-        return;
-      }
-      tunnel.setPortToken(next.token);
-      const previous = currentAccess;
-      currentAccess = next;
-      await sandbox.deletePortToken(previous.id).catch(() => {});
-    })()
-      .catch(() => ui.warn("Couldn't renew the tunnel's access token; new connections may fail once it expires."))
-      .finally(() => { renewing = undefined; });
-  }, TUNNEL_TOKEN_RENEW_MS);
-  renewal.unref?.();
-
-  const { url, rows, json } = describe(tunnel.port);
+  const { url, rows, json } = describe(forwarded.localPort);
   if (outputFormat === "json") context.output(JSON.stringify(json, null, 2));
   else if (!context.stdout.isTTY || !ui.interactive) context.output(url);
   if (ui.interactive) {
@@ -198,18 +142,10 @@ async function serveTunnel(
     await untilInterrupted(signals);
   } finally {
     clearInterval(ticker);
-    clearInterval(renewal);
-    closing = true;
     live.stop();
   }
   const uptime = formatDuration(now() - started);
-  // Let a renewal already in flight finish, so the token it made is revoked below (or by itself).
-  await renewing;
-  await tunnel.close();
-  await keepalive?.kill().catch(() => {});
-  await keepalive?.disconnect().catch(() => {});
-  await sandbox.deletePortToken(currentAccess.id).catch(() => {});
-  await sandbox.processes.disconnect().catch(() => {});
+  await forwarded.close();
   ui.success(`Closed tunnel after ${uptime} and revoked its access token`);
 }
 
@@ -266,16 +202,16 @@ async function openDesktop(
   const { ui, output } = context;
   const { style } = ui;
   if (options.unshare) {
-    await ui.step(`Unpublishing ${sandbox.name}`, () => unshareDesktop(sandbox), `Unpublished ${sandbox.name}; old links stop working and viewers are disconnected`);
+    await ui.step(`Unpublishing ${sandbox.name}`, () => sandbox.desktop.unshare(), `Unpublished ${sandbox.name}; old links stop working and viewers are disconnected`);
     if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, url: null, shared: false }, null, 2));
     else if (!ui.interactive) output(`Unshared '${sandbox.name}'; old links no longer work.`);
     return;
   }
 
-  const token = await ui.step("Starting desktop", () => startDesktop(sandbox), "Desktop running");
+  const { token } = await ui.step("Starting desktop", () => sandbox.desktop.start(), "Desktop running");
   const deskName = style.bold(sandbox.name);
   if (options.share) {
-    const url = await ui.step("Publishing desktop", () => shareDesktop(sandbox, token), "Published");
+    const url = await ui.step("Publishing desktop", () => sandbox.desktop.share(), "Published");
     if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, url, shared: true }, null, 2));
     else if (!context.stdout.isTTY || !ui.interactive) output(url);
     if (ui.interactive) {
@@ -293,13 +229,13 @@ async function openDesktop(
     DESKTOP_PORT,
     localPort,
     (port) => {
-      const url = `http://localhost:${port}${viewerPath(token)}`;
+      const url = `http://localhost:${port}${desktopViewerPath(token)}`;
       return {
         url,
         rows: [
           ["Desktop", link(ui, url)],
           ["Sandbox", `${deskName} ${style.dim(`· ${sandbox.vcpuCount} vCPU · ${Math.round(sandbox.memSizeMiB / 1024)} GiB`)}`],
-          ["Access", `private to this machine ${style.dim(`· token expires in ${TUNNEL_TOKEN_TTL}`)}`],
+          ["Access", `private to this machine ${style.dim("· the sandbox stays awake while this runs")}`],
           ...(options.open ? [["Browser", "opened in your default browser"] as [string, string]] : []),
         ],
         json: { id: sandbox.id, name: sandbox.name, url, shared: false },
@@ -344,7 +280,7 @@ Examples:
             url,
             rows: [
               ["Forwarding", `${link(ui, url)} ${style.dim("→")} ${style.bold(sandbox.name)}:${port}`],
-              ["Access", `private to this machine ${style.dim(`· HTTP and WebSocket only · token expires in ${TUNNEL_TOKEN_TTL}`)}`],
+              ["Access", `private to this machine ${style.dim("· HTTP and WebSocket only · the sandbox stays awake while this runs")}`],
             ],
             json: { id: sandbox.id, name: sandbox.name, port, url },
           };

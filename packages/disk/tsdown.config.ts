@@ -13,7 +13,9 @@ const { version } = JSON.parse(
 const define = { __SDK_VERSION__: JSON.stringify(version) };
 const entries = {
   index: "src/index.ts",
-  "internal/tools": "src/internal/tools.ts"
+  "internal/tools": "src/internal/tools.ts",
+  // Node.js only: uses node:net and node:tls.
+  tunnel: "src/tunnel.ts",
 };
 
 export default defineConfig([

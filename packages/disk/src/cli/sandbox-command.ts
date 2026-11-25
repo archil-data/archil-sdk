@@ -25,9 +25,9 @@ import {
   validateSandboxName,
   type CreateSandboxCliOptions,
 } from "./sandbox-options.js";
-import { startDesktop } from "./sandbox-desktop.js";
+
 import { addAccessCommands, runSshProcess, wakeSandbox } from "./sandbox-access.js";
-import { openPortTunnel, type PortTunnel, type PortTunnelOptions } from "./port-tunnel.js";
+import { openPortTunnel, type PortTunnel, type PortTunnelOptions } from "../tunnel.js";
 import { runSandboxShell } from "./sandbox-shell.js";
 import { colorEnabled, createUi, styles } from "./ui.js";
 import { writeOutput, type OutputStream } from "./write-output.js";
@@ -200,7 +200,7 @@ export function addSandboxCommands(program: Command, credentialsFrom: Command, d
       requireService().create(request, { wait: options.wait }), (created) => `Created ${ui.style.bold(created.name)}`);
     if (options.desktop) {
       try {
-        await ui.step("Starting desktop", () => startDesktop(sandbox), "Desktop running");
+        await ui.step("Starting desktop", () => sandbox.desktop.start(), "Desktop running");
       } catch (error) {
         // The sandbox exists and is running (with idle pause off), so say so rather than only failing.
         output(formatSandbox(sandbox, options.output, tableStyle));

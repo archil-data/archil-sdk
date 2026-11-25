@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import type { Sandbox } from "../src/sandbox.js";
 import { createSandboxProgram, type SandboxService } from "../src/cli/sandbox-command.js";
-import { DESKTOP_IMAGE, DESKTOP_MAX_TTL_SECONDS } from "../src/cli/sandbox-desktop.js";
-import { addRequestHeader, openPortTunnel, type PortTunnelOptions } from "../src/cli/port-tunnel.js";
+import { DESKTOP_IMAGE, DESKTOP_MAX_TTL_SECONDS, SandboxDesktop } from "../src/sandbox-desktop.js";
+import { addRequestHeader, openPortTunnel, type PortTunnelOptions } from "../src/tunnel.js";
 
 let configDirectory: string;
 
@@ -53,7 +53,7 @@ function desktopSandbox(overrides: Partial<Record<string, unknown>> = {}): Sandb
     processes: { disconnect: vi.fn(async () => undefined) },
     ...overrides,
   };
-  return sandbox as unknown as Sandbox;
+  return Object.assign(sandbox, { desktop: new SandboxDesktop(sandbox as unknown as Sandbox) }) as unknown as Sandbox;
 }
 
 function harness(sandbox: Sandbox, options: { tty?: boolean } = {}) {

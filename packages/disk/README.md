@@ -355,6 +355,45 @@ a duration up to `"8760h"` (365 days). `listPortTokens` follows all pages (its
 Public ports bypass token authentication. Revocation and expiry deny new
 connections with HTTP 401; existing connections remain open.
 
+Sandboxes can run a full Linux desktop (Ubuntu with XFCE and Firefox). Create one with
+`desktop: true`, which picks the desktop image, 2 vCPUs, 4 GiB, no idle expiry (viewer
+traffic doesn't count as activity), and a 4-hour session cap unless you set them:
+
+```ts
+const desk = await client.sandboxes.create({ name: "agent-desk", desktop: true });
+await desk.desktop.start();                  // idempotent; returns { token }
+
+const link = await desk.desktop.share();     // public viewer URL; anyone with it controls the desktop
+await desk.desktop.unshare();                // revokes every link and disconnects viewers
+
+// Drive it like a computer-use agent
+const png = await desk.desktop.screenshot(); // Uint8Array (PNG)
+const { width, height } = await desk.desktop.size();
+await desk.desktop.launch(["firefox", "https://example.com"]);
+await desk.desktop.click(640, 400);           // { button: "right", double: true } also work
+await desk.desktop.type("hello");
+await desk.desktop.key("ctrl+l");             // xdotool key names: Return, ctrl+shift+t, alt+F4
+await desk.desktop.scroll("down", 5);
+```
+
+Each call runs one command in the sandbox, so it works wherever the SDK does. A fork shares
+its parent's viewer token; call `fork.desktop.token({ rotate: true })` before sharing it.
+
+To view a desktop privately, or reach any HTTP port without exposing it, use `disk/tunnel`
+(Node.js only). It serves the port on localhost with a short-lived access token that renews
+itself, and keeps the sandbox awake until you close it:
+
+```ts
+import { forwardPort, openDesktopTunnel } from "disk/tunnel";
+
+const viewer = await openDesktopTunnel(desk);  // localhost:6080, or any free port
+console.log(viewer.viewerUrl);                 // open in a browser on this machine
+await viewer.close();
+
+const app = await forwardPort(desk, 3000);     // http://localhost:3000 → port 3000 in the sandbox
+await app.close();
+```
+
 Archil disks can be mounted inside the sandbox at creation. They are mounted on every
 boot and persist across stop/start and pause/resume. A sandbox with mounts must be stopped
 before it is forked; the fork inherits them:

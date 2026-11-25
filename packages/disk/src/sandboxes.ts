@@ -2,6 +2,7 @@ import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { unwrap, unwrapPage } from "./client.js";
 import { retryApiRequest } from "./retry.js";
+import { DESKTOP_IMAGE, DESKTOP_MAX_TTL_SECONDS, DESKTOP_MEMORY_MIB, DESKTOP_VCPUS } from "./sandbox-desktop.js";
 import type { Disk } from "./disk.js";
 import {
   Sandbox,
@@ -39,6 +40,12 @@ export interface CreateSandboxRequest {
   baseImage?: string;
   /** Ready image from `images.build()`. Cannot be combined with `baseImage`. */
   imageId?: string;
+  /**
+   * Create a desktop sandbox: unless set here, uses the desktop image, 2 vCPUs,
+   * 4 GiB, no idle expiry (viewer traffic doesn't count as activity), and a
+   * 4-hour session cap. Start it with `sandbox.desktop.start()`.
+   */
+  desktop?: boolean;
   env?: Record<string, string>;
   maxTtlSeconds?: number;
   /** Seconds without a direct process connection before pausing. Omitted or zero disables idle expiry. */
@@ -185,6 +192,16 @@ export class Sandboxes {
     request: CreateSandboxRequest = {},
     options: SandboxWaitOptions = {},
   ): Promise<Sandbox> {
+    if (request.desktop) {
+      request = {
+        ...(request.imageId === undefined && { baseImage: DESKTOP_IMAGE }),
+        vcpuCount: DESKTOP_VCPUS,
+        memSizeMiB: DESKTOP_MEMORY_MIB,
+        idleTtlSeconds: 0,
+        maxTtlSeconds: DESKTOP_MAX_TTL_SECONDS,
+        ...Object.fromEntries(Object.entries(request).filter(([, value]) => value !== undefined)),
+      };
+    }
     const body = {
       name: request.name,
       vcpu_count: request.vcpuCount,

@@ -37,6 +37,15 @@
       "import": "./dist/internal/tools.mjs",
       "require": "./dist/internal/tools.cjs"
     },
+    "./tunnel": {
+      "types": "./dist/tunnel.d.mts",
+      "node": {
+        "import": "./dist/node/tunnel.mjs",
+        "require": "./dist/node/tunnel.cjs"
+      },
+      "import": "./dist/tunnel.mjs",
+      "require": "./dist/tunnel.cjs"
+    },
     "./archil-cli": "./dist/archil-cli.mjs"
   },
   "bin": {

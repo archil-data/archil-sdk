@@ -454,6 +454,29 @@ test.each([undefined, 0, 30])("sandbox creation serializes idle TTL %s", async (
   assert.deepEqual(JSON.parse(request.body), idleTtlSeconds === undefined ? {} : { idle_ttl_seconds: idleTtlSeconds });
 });
 
+test("desktop sandboxes get the desktop image, sizing, and timeouts unless overridden", async () => {
+  const control = await origin(() => json({ success: true, data: sandboxWire("running") }));
+  const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });
+  await new Sandboxes(client).create({ name: "desk", desktop: true });
+  await new Sandboxes(client).create({ desktop: true, vcpuCount: 8, idleTtlSeconds: 600, baseImage: "ghcr.io/acme/desk:1" });
+  await new Sandboxes(client).create({ desktop: true, imageId: "img-1" });
+  const [defaults, overridden, fromImage] = control.requests.map((request) => JSON.parse(request.body));
+  assert.deepEqual(defaults, {
+    name: "desk",
+    base_image: "ghcr.io/archil-data/sandbox-desktop:latest",
+    vcpu_count: 2,
+    mem_size_mib: 4096,
+    idle_ttl_seconds: 0,
+    max_ttl_seconds: 14_400,
+  });
+  assert.equal(overridden.vcpu_count, 8);
+  assert.equal(overridden.idle_ttl_seconds, 600);
+  assert.equal(overridden.base_image, "ghcr.io/acme/desk:1");
+  assert.equal(fromImage.image_id, "img-1");
+  assert.equal(fromImage.base_image, undefined, "imageId is never combined with the default image");
+  assert.ok(!("desktop" in defaults), "desktop is a client-side preset, not a wire field");
+});
+
 test.each([undefined, "pause", "delete"] as const)("sandbox creation serializes onTimeout %s", async (onTimeout) => {
   const control = await origin(() => json({ success: true, data: sandboxWire("running") }));
   const client = createApiClient({ apiKey: "test", region: "aws-us-east-1", baseUrl: control.url });

@@ -32,6 +32,17 @@ export { Sandboxes } from "./sandboxes.js";
 export type { CreateSandboxRequest, ListSandboxesOptions } from "./sandboxes.js";
 
 export { Sandbox } from "./sandbox.js";
+export {
+  DESKTOP_IMAGE,
+  DESKTOP_MAX_TTL_SECONDS,
+  DESKTOP_MEMORY_MIB,
+  DESKTOP_PORT,
+  DESKTOP_VCPUS,
+  DesktopNotInstalledError,
+  SandboxDesktop,
+  desktopViewerPath,
+} from "./sandbox-desktop.js";
+export type { DesktopMouseButton, DesktopScrollDirection } from "./sandbox-desktop.js";
 export type {
   SandboxEndpoint,
   SandboxPortToken,

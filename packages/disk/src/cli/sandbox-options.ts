@@ -1,7 +1,7 @@
 import type { SandboxProcessStartOptions } from "../sandbox-process.js";
 import type { SandboxTimeoutAction } from "../sandbox.js";
 import type { CreateSandboxRequest } from "../sandboxes.js";
-import { DESKTOP_IMAGE, DESKTOP_MAX_TTL_SECONDS, DESKTOP_MEMORY_MIB, DESKTOP_VCPUS } from "./sandbox-desktop.js";
+import { DESKTOP_IMAGE, DESKTOP_MAX_TTL_SECONDS, DESKTOP_MEMORY_MIB, DESKTOP_VCPUS } from "../sandbox-desktop.js";
 
 const DEFAULT_IMAGE = "ubuntu:26.04";
 
