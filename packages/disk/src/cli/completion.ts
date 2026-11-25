@@ -84,18 +84,54 @@ export async function completeWords(root: Command, words: string[], lookup: Comp
   return [];
 }
 
-/** Sandbox names for completion, cached briefly so repeated tabs don't hit the API. */
-export async function cachedSandboxNames(list: () => Promise<string[]>, now = Date.now()): Promise<string[]> {
+export interface CompletionCredentials {
+  apiKey?: string;
+  region?: string;
+  baseUrl?: string;
+  profile?: string;
+}
+
+const GLOBAL_OPTION_NAMES: Record<string, keyof CompletionCredentials> = {
+  "-k": "apiKey",
+  "--api-key": "apiKey",
+  "-r": "region",
+  "--region": "region",
+  "--base-url": "baseUrl",
+  "--profile": "profile",
+};
+
+/** Global credential options typed on the command line being completed, so lookups use the same account. */
+export function credentialOptions(words: string[]): CompletionCredentials {
+  const options: CompletionCredentials = {};
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index]!;
+    if (word === "--") break;
+    const [flag, inline] = word.includes("=") ? [word.slice(0, word.indexOf("=")), word.slice(word.indexOf("=") + 1)] : [word, undefined];
+    const key = GLOBAL_OPTION_NAMES[flag!];
+    if (!key) continue;
+    const value = inline ?? words[index + 1];
+    if (inline === undefined) index++;
+    if (value) options[key] = value;
+  }
+  return options;
+}
+
+/**
+ * Sandbox names for completion, cached briefly so repeated tabs don't hit the
+ * API. The cache is keyed by account (`cacheKey`) so switching profiles never
+ * suggests another account's sandboxes.
+ */
+export async function cachedSandboxNames(cacheKey: string, list: () => Promise<string[]>, now = Date.now()): Promise<string[]> {
   const path = join(diskConfigDir(), "completion-cache.json");
   try {
-    const cached = JSON.parse(await readFile(path, "utf8")) as { at: number; sandboxes: string[] };
-    if (now - cached.at < SANDBOX_NAME_CACHE_MS) return cached.sandboxes;
+    const cached = JSON.parse(await readFile(path, "utf8")) as { key: string; at: number; sandboxes: string[] };
+    if (cached.key === cacheKey && now - cached.at < SANDBOX_NAME_CACHE_MS) return cached.sandboxes;
   } catch {
     // No usable cache.
   }
   const sandboxes = [...new Set(await list())];
   await mkdir(diskConfigDir(), { recursive: true }).catch(() => {});
-  await writeFile(path, JSON.stringify({ at: now, sandboxes }), { mode: 0o600 }).catch(() => {});
+  await writeFile(path, JSON.stringify({ key: cacheKey, at: now, sandboxes }), { mode: 0o600 }).catch(() => {});
   return sandboxes;
 }
 

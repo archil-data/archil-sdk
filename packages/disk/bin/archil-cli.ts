@@ -5,7 +5,14 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { createArchilProgram, firstCommandIndex, forwardToNativeClient, isNativeCommand } from "../src/cli/archil-command.js";
 import { rewriteDiskExecSugar } from "../src/cli/disk-command.js";
-import { cachedSandboxNames, completeWords, type CompletionSource } from "../src/cli/completion.js";
+import { createHash } from "node:crypto";
+import {
+  cachedSandboxNames,
+  completeWords,
+  credentialOptions,
+  type CompletionCredentials,
+  type CompletionSource,
+} from "../src/cli/completion.js";
 import { resolveCliCredentials } from "../src/cli/credentials.js";
 import { loadProfiles } from "../src/cli/profiles.js";
 import { Archil } from "../src/index.js";
@@ -28,7 +35,9 @@ async function main(argv: string[]): Promise<void> {
     createClient: (options) => new Archil(options),
   });
   if (args[0] === "__complete") {
-    const candidates = await completeWords(program, args.slice(1), completionLookup).catch(() => []);
+    const words = args.slice(1);
+    const credentials = credentialOptions(words);
+    const candidates = await completeWords(program, words, (source) => completionLookup(source, credentials)).catch(() => []);
     if (candidates.length > 0) process.stdout.write(`${candidates.join("\n")}\n`);
     return;
   }
@@ -37,12 +46,15 @@ async function main(argv: string[]): Promise<void> {
   await program.parseAsync(isDisk ? rewriteDiskExecSugar(argv, commandIndex + 3) : argv);
 }
 
-async function completionLookup(source: CompletionSource): Promise<string[]> {
+async function completionLookup(source: CompletionSource, options: CompletionCredentials): Promise<string[]> {
   const profiles = await loadProfiles();
   if (source === "profiles") return Object.keys(profiles.profiles);
-  return cachedSandboxNames(async () => {
-    const client = new Archil(await resolveCliCredentials({}, profiles));
-    const listing = client.sandboxes.list();
+  const credentials = await resolveCliCredentials(options, profiles);
+  const account = createHash("sha256")
+    .update([credentials.apiKey, credentials.region, credentials.baseUrl ?? ""].join("\n"))
+    .digest("hex");
+  return cachedSandboxNames(account, async () => {
+    const listing = new Archil(credentials).sandboxes.list();
     const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out")), 3000).unref());
     return (await Promise.race([listing, timeout])).map((sandbox) => sandbox.name);
   });

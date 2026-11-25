@@ -6,7 +6,13 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { createArchilProgram } from "../src/cli/archil-command.js";
-import { completeWords, completionScript, type CompletionSource } from "../src/cli/completion.js";
+import {
+  cachedSandboxNames,
+  completeWords,
+  completionScript,
+  credentialOptions,
+  type CompletionSource,
+} from "../src/cli/completion.js";
 import {
   rememberHostKey,
   sshConfigBlock,
@@ -178,6 +184,21 @@ test("completion walks the command tree and fills in sandbox names and option va
   assert.deepEqual(await completeWords(root, ["disk", "get", ""], lookup), []);
   for (const shell of ["bash", "zsh", "fish"]) assert.match(completionScript(shell), /archil __complete/);
   assert.throws(() => completionScript("tcsh"), /bash, zsh, or fish/);
+});
+
+test("completion uses the account typed on the line and caches per account", async () => {
+  assert.deepEqual(credentialOptions(["--profile", "prod", "sandbox", "desktop", ""]), { profile: "prod" });
+  assert.deepEqual(credentialOptions(["-r", "aws-us-east-1", "--api-key=key-1", "sandbox", "ssh", "d"]), { region: "aws-us-east-1", apiKey: "key-1" });
+  assert.deepEqual(credentialOptions(["sandbox", "run", "dev", "--", "--profile", "x"]), {});
+
+  const listA = vi.fn(async () => ["a1", "a1", "a2"]);
+  const listB = vi.fn(async () => ["b1"]);
+  assert.deepEqual(await cachedSandboxNames("account-a", listA, 1_000), ["a1", "a2"]);
+  assert.deepEqual(await cachedSandboxNames("account-a", listA, 2_000), ["a1", "a2"]);
+  assert.equal(listA.mock.calls.length, 1, "a fresh cache for the same account is reused");
+  assert.deepEqual(await cachedSandboxNames("account-b", listB, 3_000), ["b1"], "another account never sees cached names");
+  assert.deepEqual(await cachedSandboxNames("account-b", listB, 30_000), ["b1"]);
+  assert.equal(listB.mock.calls.length, 2, "the cache expires");
 });
 
 test("the UI stays silent without a terminal and formats durations", async () => {
