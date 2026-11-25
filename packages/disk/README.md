@@ -16,13 +16,23 @@ The `archil` command manages disks and sandboxes. Run it with `npx archil`, or i
 it with `npm install -g archil`:
 
 ```bash
-# Authenticate (or use a saved profile; see below)
-export ARCHIL_API_KEY=key-...
-export ARCHIL_REGION=aws-us-east-1
+npx archil login                       # sign in through your browser
+npx archil sandbox create dev
+npx archil sandbox ssh dev             # real SSH, no ports opened
+npx archil sandbox forward dev 3000    # http://localhost:3000, privately
+npx archil disk list
+```
 
+`archil login` opens the Archil console, where you approve access for this machine. The
+console creates an API key named "CLI on <hostname>" and hands it back to the CLI, which
+saves it as the default profile. `archil whoami` shows which account and profile commands
+use, and `archil logout` removes the saved key. To revoke the key itself, delete it under
+API Keys in the console. In CI or on machines without a browser, set `ARCHIL_API_KEY` and
+`ARCHIL_REGION`, or save a key with `archil profile create`.
+
+```bash
 # Disks. `create` prints a one-time disk token you'll need to mount the disk.
 npx archil disk create my-disk
-npx archil disk list
 npx archil disk get dsk-abc123
 npx archil disk dsk-abc123 exec "ls -la /mnt"   # runs in a container with the disk mounted
 npx archil disk delete dsk-abc123
@@ -30,6 +40,7 @@ npx archil disk api-keys create ci-bot
 
 # Sandboxes
 npx archil sandbox create dev --vcpu-count 4 --mem-size-mib 8192 --env NODE_ENV=development
+npx archil sandbox list
 npx archil sandbox shell dev
 npx archil sandbox run dev -- sh -c 'echo "$NODE_ENV"'
 npx archil sandbox pause dev
@@ -37,10 +48,12 @@ npx archil sandbox fork dev agent-task
 npx archil sandbox delete dev
 ```
 
-`list` and `get` print tables by default; pass `-o json` to pipe into `jq`. Sandbox
-commands accept an exact ID or a unique name. Lifecycle commands wait by default; use
-`--no-wait` to return once accepted. Starting a paused sandbox discards its memory
-snapshot and prompts unless `--yes` is passed. In a shell, `Ctrl+]` is the emergency escape.
+In a terminal, commands show progress and print tables. When stdout is piped, `list`,
+`get`, `create`, and the lifecycle commands print JSON instead; pass `-o table` or
+`-o json` to choose. Sandbox commands accept an exact ID or a unique name. Lifecycle
+commands wait by default; use `--no-wait` to return once accepted. Starting a paused
+sandbox discards its memory snapshot and prompts unless `--yes` is passed. In a shell,
+`Ctrl+]` is the emergency escape. `NO_COLOR` turns colors off.
 
 Mount commands (`archil mount`, `archil unmount`, ...) belong to the native
 [Archil client](https://docs.archil.com) (`curl https://archil.com/install | sh`), which is
@@ -51,6 +64,48 @@ When the client comes first on your `PATH`, run `npx archil disk ...` and
 The `disk` and `sandbox` executables in this package still work and take the same
 commands as `archil disk` and `archil sandbox`. Note that `npx sandbox` runs an unrelated
 npm package, so use `npx archil sandbox`.
+
+### SSH
+
+`archil sandbox ssh` is real OpenSSH. The connection runs over the Archil API instead of an
+open port: ssh's `ProxyCommand` runs `archil sandbox ssh-proxy`. That command wakes the
+sandbox if it's paused and installs `openssh-server` the first time if the image doesn't
+have it. It authorizes the CLI's own key (`~/.ssh/archil_ed25519`) and pins the sandbox's
+host key, which it fetches over the API, so there's no trust-on-first-use prompt.
+
+```bash
+npx archil sandbox ssh dev
+npx archil sandbox ssh dev -- uname -a
+npx archil sandbox ssh dev -- -L 5432:localhost:5432    # any ssh option
+```
+
+To use scp, rsync, and editor remotes, add the `*.archil` hosts to `~/.ssh/config` once:
+
+```bash
+archil sandbox ssh-config --install
+ssh dev.archil
+scp ./data.csv dev.archil:/root/
+rsync -a ./src/ dev.archil:/root/src/
+```
+
+In VS Code or Cursor, choose **Remote-SSH: Connect to Host...** and enter `dev.archil`.
+The config runs the installed CLI by its full path, so install it globally first
+(`npm install -g archil`).
+
+### Forwarding ports
+
+`archil sandbox forward dev 3000` serves the sandbox's port 3000 on
+`http://localhost:3000` until you press Ctrl-C. The port stays private: the tunnel
+authenticates with a short-lived port token, and nothing is exposed publicly. It carries
+HTTP and WebSockets. For other protocols, such as databases, use `ssh -L`.
+
+### Shell completion
+
+```bash
+source <(archil completion zsh)    # in ~/.zshrc; also bash and fish
+```
+
+Completion covers commands, options, profile names, and your sandbox names.
 
 ### Desktops
 
@@ -69,7 +124,7 @@ private: it gets a short-lived port token and serves the desktop on `localhost` 
 press Ctrl-C. `--share` exposes it on a public HTTPS hostname. Anyone with that link can see
 and control the desktop until you run `--unshare`.
 
-`--desktop` starts from `ghcr.io/archil-data/sandbox-desktop` and turns off the idle
+`--desktop` starts from `ghcr.io/archil-data/sandbox-desktop` with 2 vCPUs and 4 GiB, and turns off the idle
 timeout, because viewer traffic doesn't count as sandbox activity. Sessions are capped at
 4 hours instead; override that with `--max-ttl-seconds`. To add your own software, build
 an image `FROM` that one and pass it with `--base-image`. See
@@ -77,7 +132,7 @@ an image `FROM` that one and pass it with `--base-image`. See
 
 ### Profiles
 
-Instead of environment variables, save named profiles:
+`archil login` saves a profile for you. To manage profiles by hand:
 
 ```bash
 npx archil profile create --profile test-yellow --region aws-us-east-1

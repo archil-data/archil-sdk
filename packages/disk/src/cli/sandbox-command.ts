@@ -87,7 +87,7 @@ export async function resolveSandbox(service: SandboxService, idOrName: string):
   return byName[0]!;
 }
 
-function openInBrowser(url: string): void {
+export function openInBrowser(url: string): void {
   const [command, args] = process.platform === "darwin" ? ["open", [url]]
     : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
     : ["xdg-open", [url]];

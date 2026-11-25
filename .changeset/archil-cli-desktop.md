@@ -3,4 +3,11 @@
 "archil": minor
 ---
 
-Add the `archil` command (`npx archil disk ...`, `npx archil sandbox ...`), installed by the `archil` package. It passes commands it doesn't own, such as `mount`, through to the native Archil client. Add VNC desktops to the sandbox CLI: `sandbox create --desktop` starts one, and `sandbox desktop <id|name>` opens it privately through a localhost tunnel. `--share` prints a public link and `--unshare` revokes it. The `disk` and `sandbox` executables are unchanged.
+Add the `archil` command, installed by the `archil` package. It covers disks and sandboxes (`archil disk ...`, `archil sandbox ...`) and passes commands it doesn't own, such as `mount`, through to the native Archil client.
+
+- `archil login`, `logout`, and `whoami`: sign in through the console in your browser; the API key is saved as a profile.
+- `archil sandbox ssh`, `ssh-proxy`, and `ssh-config --install`: real OpenSSH over the Archil API with no open port. scp, rsync, `-L`, and editor remotes work against `<sandbox>.archil` hosts.
+- `archil sandbox forward <id|name> <port>`: a private localhost tunnel for HTTP and WebSocket services.
+- `archil sandbox create --desktop` and `archil sandbox desktop`: VNC desktops opened privately through a tunnel; `--share` and `--unshare` manage a public link.
+- `archil completion bash|zsh|fish`, which completes sandbox names.
+- Progress spinners, live status lines, colored output, and errors with hints. Data commands print JSON when stdout is piped.

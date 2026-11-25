@@ -174,7 +174,7 @@ export function printError(error: unknown, stream: UiStream = process.stderr, co
   const status = typeof error === "object" && error !== null && "status" in error ? (error as { status?: number }).status : undefined;
   const message = error instanceof Error ? error.message : String(error);
   stream.write(`${style.red("✗")} ${message}${status ? style.dim(` (HTTP ${status})`) : ""}\n`);
-  if (status === 401 || status === 403 || /Missing API key|Missing region/.test(message)) {
+  if (status === 401 || status === 403 || /Not signed in|Missing API key|Missing region/.test(message)) {
     stream.write(`  ${style.dim(`Sign in with ${style.bold("archil login")}, or set ARCHIL_API_KEY and ARCHIL_REGION.`)}\n`);
   } else if (/^error: (unknown|missing|too many|option)/.test(message)) {
     stream.write(`  ${style.dim(`See ${style.bold(`${commandName} --help`)}.`)}\n`);

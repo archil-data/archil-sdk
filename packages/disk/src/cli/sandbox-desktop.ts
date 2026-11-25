@@ -7,6 +7,9 @@ import type { Sandbox } from "../sandbox.js";
 
 export const DESKTOP_IMAGE = "ghcr.io/archil-data/sandbox-desktop:latest";
 export const DESKTOP_PORT = 6080;
+/** A browser on the desktop is sluggish below this. */
+export const DESKTOP_VCPUS = 2;
+export const DESKTOP_MEMORY_MIB = 4096;
 /** Session cap for desktops. Viewer traffic doesn't count as activity, so they run with idle expiry off. */
 export const DESKTOP_MAX_TTL_SECONDS = 4 * 60 * 60;
 

@@ -88,6 +88,8 @@ test("create --desktop picks the desktop image and timeouts, then starts the des
   assert.equal(request.baseImage, DESKTOP_IMAGE);
   assert.equal(request.idleTtlSeconds, 0);
   assert.equal(request.maxTtlSeconds, DESKTOP_MAX_TTL_SECONDS);
+  assert.equal(request.vcpuCount, 2);
+  assert.equal(request.memSizeMiB, 4096);
   assert.deepEqual((sandbox.exec as ReturnType<typeof vi.fn>).mock.calls.map(([command]) => command), ["desktopctl up"]);
   assert.match(cli.stderr.values.join(""), /sandbox desktop desk/);
 
@@ -102,6 +104,7 @@ test("create --desktop picks the desktop image and timeouts, then starts the des
   const plainRequest = (plain.service.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
   assert.equal(plainRequest.baseImage, "ubuntu:26.04");
   assert.equal(plainRequest.idleTtlSeconds, undefined);
+  assert.equal(plainRequest.vcpuCount, undefined);
 
   await assert.rejects(harness(desktopSandbox()).run("create", "desk", "--desktop", "--no-wait"), /remove --no-wait/);
 });

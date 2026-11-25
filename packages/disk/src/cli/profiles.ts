@@ -5,6 +5,10 @@ import { profileConfigPath } from "./config-paths.js";
 export interface DiskProfile {
   region: string;
   baseUrl?: string;
+  /** Set by `archil login`: the id of the key it created, so `logout` can point at it. */
+  apiKeyId?: string;
+  /** Set by `archil login`: the account the key belongs to, for display. */
+  account?: string;
 }
 
 export interface ProfileConfig {

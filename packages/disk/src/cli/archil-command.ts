@@ -12,12 +12,17 @@ import { spawn } from "node:child_process";
 import { accessSync, closeSync, constants, openSync, readSync, realpathSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { Command } from "./command.js";
-import { addGlobalOptions, addProfileCommands } from "./common.js";
+import { addGlobalOptions, addProfileCommands, type CliGlobalOptions } from "./common.js";
+import { validateCredentialAndResolveRegion } from "./credential-validation.js";
+import { deleteProfileCredential, resolveCliCredentials, writeProfileCredential } from "./credentials.js";
+import { consoleUrl, LoginDeniedError, startLoginSession } from "./login.js";
+import { deleteProfile, loadProfiles, saveProfiles } from "./profiles.js";
+import { createUi } from "./ui.js";
 import { completionScript } from "./completion.js";
 import { addDiskCommands } from "./disk-command.js";
-import { addSandboxCommands, type SandboxCliDependencies } from "./sandbox-command.js";
+import { addSandboxCommands, openInBrowser, type SandboxCliDependencies } from "./sandbox-command.js";
 
-const OWN_COMMANDS = new Set(["disk", "sandbox", "profile", "completion", "help", "__complete"]);
+const OWN_COMMANDS = new Set(["disk", "sandbox", "profile", "login", "logout", "whoami", "completion", "help", "__complete"]);
 const GLOBAL_OPTIONS_WITH_VALUES = new Set(["-k", "--api-key", "-r", "--region", "--base-url", "--profile"]);
 const FORWARDED_ENV = "ARCHIL_CLI_FORWARDED";
 export const NATIVE_CLIENT_INSTALL = "curl https://archil.com/install | sh";
@@ -33,6 +38,7 @@ client and are passed through to it. Install it with:
   ${NATIVE_CLIENT_INSTALL}
 `);
   addGlobalOptions(program);
+  addAccountCommands(program, dependencies);
   addProfileCommands(program, dependencies.validateCredential);
   addDiskCommands(program.command("disk").description("Create, inspect, and run commands against disks"), program);
   addSandboxCommands(program.command("sandbox").description("Create and manage persistent sandboxes"), program, dependencies);
@@ -148,4 +154,103 @@ function isNodeScript(path: string): boolean {
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
+}
+
+function addAccountCommands(program: Command, dependencies: SandboxCliDependencies): void {
+  const stderr = dependencies.stderr ?? process.stderr;
+  const signals = dependencies.signals ?? process;
+  const ui = createUi(stderr);
+  const { style } = ui;
+  const validate = dependencies.validateCredential ?? validateCredentialAndResolveRegion;
+
+  program.command("login")
+    .description("Sign in through your browser and save the key as a profile")
+    .option("--no-browser", "Print the sign-in link instead of opening a browser")
+    .addHelpText("after", `
+Opens the Archil console, where you approve access for this machine. The
+console creates an API key named "CLI on <hostname>" and hands it back to this
+command, which saves it as a profile (named after its region unless you pass
+--profile) and makes that profile the default.
+
+Without a browser on this machine (CI, a remote shell), create a key in the
+console and run 'archil profile create', or set ARCHIL_API_KEY and ARCHIL_REGION.
+`)
+    .action(async (options: { browser: boolean }) => {
+      const global = program.opts<CliGlobalOptions>();
+      const session = await startLoginSession();
+      const cancel = () => session.close();
+      signals.once("SIGINT", cancel);
+      try {
+        if (options.browser) {
+          (dependencies.openUrl ?? openInBrowser)(session.url);
+          ui.info("Opened the Archil console in your browser to approve this sign-in.");
+          ui.details([["Link", style.dim(session.url)]]);
+        } else {
+          ui.info("Open this link in a browser on this machine to approve the sign-in:");
+          stderr.write(`\n  ${style.cyan(style.underline(session.url))}\n\n`);
+        }
+        const grant = await ui.step("Waiting for approval in the browser", () => session.grant, "Approved in the browser")
+          .catch((error: unknown) => {
+            if (error instanceof LoginDeniedError) throw new Error("Sign-in was cancelled in the browser; nothing was saved");
+            throw error;
+          });
+        const region = await ui.step("Checking the new key", () =>
+          validate({ apiKey: grant.apiKey, region: grant.region, baseUrl: grant.baseUrl }), "Key works");
+
+        const config = await loadProfiles();
+        const name = global.profile ?? region;
+        await writeProfileCredential(name, grant.apiKey);
+        config.profiles[name] = { region, baseUrl: grant.baseUrl, apiKeyId: grant.keyId, account: grant.account };
+        config.currentProfile = name;
+        await saveProfiles(config);
+
+        const where = name === region ? "" : `, ${region}`;
+        ui.success(`Signed in${grant.account ? ` to ${style.bold(grant.account)}` : ""} as profile ${style.bold(name)} ${style.dim(`(now the default${where})`)}`);
+        ui.blank();
+        ui.details([["Try", "archil sandbox create my-desk --desktop"], ["", "archil sandbox list"]]);
+      } finally {
+        signals.off("SIGINT", cancel);
+        session.close();
+      }
+    });
+
+  program.command("logout")
+    .description("Delete the current profile and its saved key from this machine")
+    .action(async () => {
+      const global = program.opts<CliGlobalOptions>();
+      const config = await loadProfiles();
+      const name = global.profile ?? process.env.ARCHIL_PROFILE ?? config.currentProfile;
+      const profile = name ? config.profiles[name] : undefined;
+      if (!name || !profile) {
+        ui.info("No profile is signed in.");
+      } else {
+        await deleteProfileCredential(name);
+        await deleteProfile(name);
+        ui.success(`Signed out of ${style.bold(name)}; its key is no longer saved on this machine`);
+        // API keys can't revoke themselves; only a signed-in console session can.
+        if (profile.apiKeyId) {
+          ui.info(`The key still works until you revoke it: ${style.cyan(style.underline(`${consoleUrl()}/api-keys`))}`);
+        }
+      }
+      if (process.env.ARCHIL_API_KEY) ui.warn("ARCHIL_API_KEY is still set in your environment, so commands keep using it.");
+    });
+
+  program.command("whoami")
+    .description("Show which account and profile commands use, and check the credentials")
+    .action(async () => {
+      const global = program.opts<CliGlobalOptions>();
+      const config = await loadProfiles();
+      const credentials = await resolveCliCredentials(global, config);
+      const profile = credentials.profile ? config.profiles[credentials.profile] : undefined;
+      const fromEnvironment = Boolean(global.apiKey ?? process.env.ARCHIL_API_KEY);
+      await ui.step("Checking credentials", () => validate(credentials), "Credentials work");
+      ui.blank();
+      ui.details([
+        ...(profile?.account ? [["Account", style.bold(profile.account)] as [string, string]] : []),
+        ["Profile", fromEnvironment ? style.dim("none (ARCHIL_API_KEY)") : credentials.profile ?? style.dim("none")],
+        ["Region", credentials.region],
+        ...(credentials.baseUrl ? [["Endpoint", credentials.baseUrl] as [string, string]] : []),
+        ["Key", `…${credentials.apiKey.slice(-4)}`],
+      ]);
+    });
 }
