@@ -1,0 +1,386 @@
+import { Command } from "./command.js";
+import { isProfileCommand, resolveProgramCredentials } from "./common.js";
+import { renderTable } from "./output.js";
+import { optionalInteger } from "./sandbox-options.js";
+import {
+  ArchilApiError,
+  configure,
+  createApiKey,
+  createDisk,
+  deleteApiKey,
+  getDisk,
+  listApiKeys,
+  listDisks,
+} from "../index.js";
+import type { CreateDiskRequest, MountResponse, AuthorizedUser, ConnectedClient } from "../types.js";
+import type { Disk } from "../disk.js";
+
+const DISK_COMMANDS = ["list", "get", "create", "delete", "exec", "grep", "api-keys", "profile", "help"];
+
+/**
+ * Adds the disk commands to `command`. Credentials come from the global
+ * options on `credentialsFrom`, which is `command` itself for the standalone
+ * `disk` CLI and the root program when nested as `archil disk`.
+ */
+export function addDiskCommands(command: Command, credentialsFrom: Command): void {
+  command.hook("preAction", async (_thisCommand, actionCommand) => {
+    if (isProfileCommand(actionCommand)) return;
+    const resolved = await resolveProgramCredentials(credentialsFrom);
+    configure({ apiKey: resolved.apiKey, region: resolved.region, baseUrl: resolved.baseUrl });
+  });
+
+  function fail(err: unknown): never {
+    if (err instanceof ArchilApiError) {
+      console.error(`Error (${err.status}): ${err.message}`);
+    } else {
+      console.error(err instanceof Error ? err.message : String(err));
+    }
+    process.exit(1);
+  }
+
+  function isDiskId(s: string): boolean {
+    return /^(dsk-|fs-)[0-9a-fA-F]+$/.test(s);
+  }
+
+  async function resolveDisk(idOrName: string): Promise<Disk> {
+    if (isDiskId(idOrName)) {
+      return getDisk(idOrName);
+    }
+    const matches = await listDisks({ name: idOrName });
+    if (matches.length === 0) {
+      throw new ArchilApiError(`No disk found with name '${idOrName}'`, 404);
+    }
+    if (matches.length > 1) {
+      throw new ArchilApiError(
+        `Multiple disks match name '${idOrName}' — pass a disk id (dsk-...) instead`,
+        400,
+      );
+    }
+    return matches[0];
+  }
+
+  function formatBytes(n: number | undefined): string | undefined {
+    if (n === undefined || n === null) return undefined;
+    if (n < 1024) return `${n} B`;
+    const units = ["KB", "MB", "GB", "TB", "PB"];
+    let v = n / 1024;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024;
+      i++;
+    }
+    return `${v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2)} ${units[i]}`;
+  }
+
+  function section(title: string, body: string): void {
+    console.log("");
+    console.log(title);
+    console.log(body);
+  }
+
+  function printDisk(d: Disk): void {
+    console.log(`${d.organization}/${d.name}  (${d.id})`);
+
+    const kv: Array<[string, string | undefined]> = [
+      ["status", d.status],
+      ["provider", d.provider],
+      ["region", d.region],
+      ["created", d.createdAt],
+      ["last accessed", d.lastAccessed],
+      ["active data", formatBytes(d.activeDataBytes)],
+      ["total data", formatBytes(d.totalDataBytes)],
+      ["monthly usage", d.monthlyUsage],
+    ];
+    const visible = kv
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => [k, String(v)]);
+    console.log("");
+    console.log(renderTable(visible));
+
+    if (d.mounts && d.mounts.length > 0) {
+      const rows = (d.mounts as MountResponse[]).map((m) => [
+        m.type ?? "?",
+        m.name ?? m.path ?? "",
+        m.accessMode ?? "",
+      ]);
+      section("Mounts", renderTable(rows, ["type", "location", "mode"]));
+    }
+
+    if (d.authorizedUsers && d.authorizedUsers.length > 0) {
+      const rows = (d.authorizedUsers as AuthorizedUser[]).map((u) => {
+        if (u.type === "token") {
+          return ["token", u.nickname ?? "(no name)", u.tokenSuffix ? `-${u.tokenSuffix}` : ""];
+        }
+        return [u.type ?? "?", u.identifier ?? u.principal ?? "", ""];
+      });
+      section("Authorized users", renderTable(rows, ["type", "name / identifier", "suffix"]));
+    }
+
+    if (d.connectedClients && d.connectedClients.length > 0) {
+      const rows = (d.connectedClients as ConnectedClient[]).map((c) => [
+        c.id ?? "",
+        c.ipAddress ?? "",
+        c.connectedAt ?? "",
+      ]);
+      section("Connected clients", renderTable(rows, ["id", "ip", "connected at"]));
+    }
+  }
+
+  command
+    .command("list")
+    .description("List disks in the current region")
+    .option("--limit <n>", "Maximum number of disks to return", (v) => parseInt(v, 10))
+    .option("-o, --output <format>", "Output format: table | json", "table")
+    .action(async (opts: { limit?: number; output: string }) => {
+      try {
+        const disks = await listDisks({ limit: opts.limit });
+        if (opts.output === "json") {
+          console.log(JSON.stringify(disks, null, 2));
+          return;
+        }
+        if (disks.length === 0) {
+          console.log("No disks found.");
+          return;
+        }
+        const rows = disks.map((d) => [d.id, `${d.organization}/${d.name}`, d.status]);
+        console.log(renderTable(rows, ["id", "name", "status"]));
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  command
+    .command("get <id|name>")
+    .description("Show details for a disk (accepts a disk id or name)")
+    .option("-o, --output <format>", "Output format: table | json", "table")
+    .action(async (idOrName: string, opts: { output: string }) => {
+      try {
+        const d = await resolveDisk(idOrName);
+        if (opts.output === "json") {
+          console.log(JSON.stringify(d, null, 2));
+        } else {
+          printDisk(d);
+        }
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  command
+    .command("create <name>")
+    .description("Create a new disk")
+    .action(async (name: string) => {
+      try {
+        const result = await createDisk({ name } as CreateDiskRequest);
+        console.log(`Created disk ${result.disk.organization}/${result.disk.name}`);
+        console.log(`  id:     ${result.disk.id}`);
+        console.log(`  status: ${result.disk.status}`);
+        if (result.token) {
+          console.log("");
+          console.log("Disk token (save this — it cannot be retrieved again):");
+          console.log(`  ${result.token}`);
+          if (result.tokenIdentifier) {
+            console.log(`  identifier: ${result.tokenIdentifier}`);
+          }
+        }
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  command
+    .command("delete <id|name>")
+    .description("Delete a disk (accepts a disk id or name)")
+    .action(async (idOrName: string) => {
+      try {
+        const d = await resolveDisk(idOrName);
+        await d.delete();
+        console.log(`Deleted ${d.organization}/${d.name} (${d.id})`);
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  command
+    .command("exec <id|name> <command...>")
+    .description("Run a command in a container with the disk mounted, return stdout/stderr/exit code (accepts a disk id or name)")
+    .action(async (idOrName: string, cmd: string[]) => {
+      try {
+        const d = await resolveDisk(idOrName);
+        const result = await d.exec(cmd.join(" "));
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  command
+    .command("grep <pattern> <target>")
+    .description(
+      "Constant-time parallel server-side grep across a disk. <target> is " +
+        "<id|name>[/<path>] — the path after the first '/' is the directory to " +
+        "search (defaults to the disk root). Accepts a disk id or name.",
+    )
+    .option("--no-recursive", "Search only the given directory, not its subdirectories (recursive is the default)")
+    .option("--max-duration <seconds>", "Wall-clock deadline for the whole search")
+    .option("--concurrency <n>", "Max parallel grep workers (clamped to fleet capacity)")
+    .option("--max-results <n>", "Stop once this many matches are collected")
+    .option("-i, --ignore-case", "Match case-insensitively")
+    .option("-U, --multiline", "Let matches span lines")
+    .option("-g, --glob <glob>", "Include files matching the glob, or exclude with a leading ! (repeatable)", (value, previous: string[]) => [...previous, value], [])
+    .option("-t, --type <type>", "Only search files of this type, e.g. py (repeatable)", (value, previous: string[]) => [...previous, value], [])
+    .option("-T, --type-not <type>", "Skip files of this type (repeatable)", (value, previous: string[]) => [...previous, value], [])
+    .option("-A, --after-context <n>", "Lines of context after each match (max 10)")
+    .option("-B, --before-context <n>", "Lines of context before each match (max 10)")
+    .option("-C, --context <n>", "Lines of context before and after each match (max 10)")
+    .option("-o, --output <format>", "Output format: text | json", "text")
+    .action(
+      async (
+        pattern: string,
+        target: string,
+        opts: {
+          recursive?: boolean;
+          maxDuration?: string;
+          concurrency?: string;
+          maxResults?: string;
+          ignoreCase?: boolean;
+          multiline?: boolean;
+          glob: string[];
+          type: string[];
+          typeNot: string[];
+          afterContext?: string;
+          beforeContext?: string;
+          context?: string;
+          output: string;
+        },
+      ) => {
+        try {
+          // The control plane's limits, checked before resolving the disk.
+          const context = optionalInteger(opts.context, "Context", 0, 10);
+          const contextBefore = optionalInteger(opts.beforeContext, "Before context", 0, 10) ?? context;
+          const contextAfter = optionalInteger(opts.afterContext, "After context", 0, 10) ?? context;
+          const maxDurationSeconds = optionalInteger(opts.maxDuration, "Max duration", 1, 30);
+          const concurrency = optionalInteger(opts.concurrency, "Concurrency", 1, 100);
+          const maxResults = optionalInteger(opts.maxResults, "Max results", 1, 10_000);
+          const slash = target.indexOf("/");
+          const idOrName = slash === -1 ? target : target.slice(0, slash);
+          const directory = slash === -1 ? "" : target.slice(slash + 1);
+          const d = await resolveDisk(idOrName);
+          const res = await d.grep({
+            directory,
+            pattern,
+            recursive: opts.recursive !== false,
+            maxDurationSeconds,
+            concurrency,
+            maxResults,
+            ignoreCase: opts.ignoreCase,
+            multiline: opts.multiline,
+            globs: opts.glob,
+            types: opts.type,
+            typesNot: opts.typeNot,
+            contextBefore,
+            contextAfter,
+          });
+          if (opts.output === "json") {
+            console.log(JSON.stringify(res, null, 2));
+          } else {
+            if (res.groups) {
+              res.groups.forEach((g, i) => {
+                if (i > 0) console.log("--");
+                for (const l of g.lines) {
+                  const sep = l.match ? ":" : "-";
+                  console.log(`${g.file}${sep}${l.line}${sep}${l.text}`);
+                }
+              });
+            } else {
+              for (const m of res.matches) {
+                // A multiline match's text holds every line it covers.
+                m.text.split("\n").forEach((text, k) => console.log(`${m.file}:${m.line + k}:${text}`));
+              }
+            }
+            // grep-style: matches on stdout, run summary on stderr.
+            console.error(
+              `${res.matches.length} match${res.matches.length === 1 ? "" : "es"} · ` +
+                `${res.filesScanned} files scanned · ${res.containersDispatched} containers · ` +
+                `${res.durationMs}ms · ${res.stoppedReason}`,
+            );
+            if (res.stoppedReason !== "completed") {
+              console.error(
+                `warning: search did not complete (${res.stoppedReason}); results may be partial`,
+              );
+            }
+          }
+          // grep exit-code convention: 0 = matches found, 1 = none.
+          process.exit(res.matches.length > 0 ? 0 : 1);
+        } catch (err) {
+          fail(err);
+        }
+      },
+    );
+
+  const keys = command.command("api-keys").description("Manage Archil API keys (account-level credentials)");
+
+  keys
+    .command("list")
+    .description("List API keys")
+    .option("--limit <n>", "Maximum number of keys to return", (v) => parseInt(v, 10))
+    .action(async (opts: { limit?: number }) => {
+      try {
+        const ks = await listApiKeys({ limit: opts.limit });
+        if (ks.length === 0) {
+          console.log("No API keys found.");
+          return;
+        }
+        for (const k of ks) {
+          console.log(`${k.id ?? "-"}\t${k.name ?? "-"}\t${k.createdAt ?? ""}`);
+        }
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  keys
+    .command("create <name>")
+    .description("Create a new API key (the key value is shown once)")
+    .option("--description <description>", "Optional description")
+    .action(async (name: string, opts: { description?: string }) => {
+      try {
+        const k = await createApiKey({ name, description: opts.description });
+        console.log(`Created API key ${name} (${k.id ?? "?"})`);
+        if (k.token) {
+          console.log("");
+          console.log("API key value (save this — it cannot be retrieved again):");
+          console.log(`  ${k.token}`);
+        }
+      } catch (err) {
+        fail(err);
+      }
+    });
+
+  keys
+    .command("delete <id>")
+    .description("Delete an API key")
+    .action(async (id: string) => {
+      try {
+        await deleteApiKey(id);
+        console.log(`Deleted API key ${id}`);
+      } catch (err) {
+        fail(err);
+      }
+    });
+}
+
+/**
+ * Rewrites the `<id> exec <cmd...>` sugar into `exec <id> <cmd...>`. `start` is
+ * the index in `argv` of the first argument after the disk command itself.
+ */
+export function rewriteDiskExecSugar(argv: string[], start = 2): string[] {
+  const head = argv[start];
+  const next = argv[start + 1];
+  if (head && next === "exec" && !DISK_COMMANDS.includes(head) && !head.startsWith("-")) {
+    return [...argv.slice(0, start), "exec", head, ...argv.slice(start + 2)];
+  }
+  return argv;
+}

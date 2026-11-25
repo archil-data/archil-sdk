@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { Command } from "./command.js";
 import type { ArchilOptions } from "../archil.js";
@@ -18,11 +19,22 @@ import {
   type OutputFormat,
 } from "./sandbox-output.js";
 import {
+  optionalInteger,
   parseCreateSandboxOptions,
   parseRunOptions,
   validateSandboxName,
   type CreateSandboxCliOptions,
 } from "./sandbox-options.js";
+import {
+  DESKTOP_PORT,
+  openDesktopTunnel,
+  shareDesktop,
+  startDesktop,
+  unshareDesktop,
+  viewerPath,
+  type DesktopTunnel,
+  type DesktopTunnelOptions,
+} from "./sandbox-desktop.js";
 import { runSandboxShell } from "./sandbox-shell.js";
 import { spinner } from "./spinner.js";
 import { writeOutput, type OutputStream } from "./write-output.js";
@@ -34,7 +46,7 @@ export interface SandboxService {
 }
 
 
-interface SandboxCliDependencies {
+export interface SandboxCliDependencies {
   version: string;
   createClient(options: ArchilOptions): { sandboxes: SandboxService };
   stdout?: OutputStream & { isTTY?: boolean };
@@ -47,6 +59,8 @@ interface SandboxCliDependencies {
   sleep?: (milliseconds: number) => Promise<void>;
   validateCredential?: ProfileCredentialValidator;
   forceExit?: (signal: NodeJS.Signals) => void;
+  openUrl?: (url: string) => void;
+  openTunnel?: (options: DesktopTunnelOptions) => Promise<DesktopTunnel>;
 }
 
 type LifecycleAction = "start" | "pause" | "resume" | "stop" | "fork" | "delete";
@@ -77,11 +91,49 @@ export async function resolveSandbox(service: SandboxService, idOrName: string):
   return byName[0]!;
 }
 
+function openInBrowser(url: string): void {
+  const [command, args] = process.platform === "darwin" ? ["open", [url]]
+    : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+    : ["xdg-open", [url]];
+  spawn(command, args, { stdio: "ignore", detached: true }).on("error", () => {}).unref();
+}
+
+function commandPath(command: Command): string {
+  const names: string[] = [];
+  for (let current: Command | undefined = command; current; current = current.parent) names.unshift(current.name());
+  return names.join(" ");
+}
+
+/** Resumes a paused sandbox or cold-starts a stopped one; the desktop services come back on their own. */
+async function wakeSandbox(sandbox: Sandbox): Promise<void> {
+  if (sandbox.status === "paused") await sandbox.resume();
+  else if (sandbox.status === "stopped" || sandbox.status === "exited" || sandbox.status === "failed") await sandbox.start();
+  if (sandbox.status !== "running") {
+    throw new Error(`Sandbox '${sandbox.name}' is ${sandbox.status}; wait for it to settle and try again`);
+  }
+}
+
 function resultExitCode(result: SandboxProcessResult): number {
   return result.exitCode ?? (result.status === "completed" ? 0 : 1);
 }
 
 export function createSandboxProgram(dependencies: SandboxCliDependencies): Command {
+  const program = new Command()
+    .name("sandbox")
+    .description("Manage Archil sandboxes from the command line")
+    .version(dependencies.version);
+  addGlobalOptions(program);
+  addProfileCommands(program, dependencies.validateCredential);
+  addSandboxCommands(program, program, dependencies);
+  return program;
+}
+
+/**
+ * Adds the sandbox commands to `program`. Credentials come from the global
+ * options on `credentialsFrom`, which is `program` itself for the standalone
+ * `sandbox` CLI and the root program when nested as `archil sandbox`.
+ */
+export function addSandboxCommands(program: Command, credentialsFrom: Command, dependencies: SandboxCliDependencies): void {
   const stdout = dependencies.stdout ?? process.stdout;
   const stderr = dependencies.stderr ?? process.stderr;
   const stdin = dependencies.stdin ?? process.stdin;
@@ -91,17 +143,11 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   const now = dependencies.now ?? Date.now;
   const sleep = dependencies.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let service: SandboxService | undefined;
-  const program = new Command()
-    .name("sandbox")
-    .description("Manage Archil sandboxes from the command line")
-    .version(dependencies.version)
-    .hook("preAction", async (_thisCommand, actionCommand) => {
-      if (isProfileCommand(actionCommand)) return;
-      const credentials = await resolveProgramCredentials(program);
-      service = dependencies.createClient(credentials).sandboxes;
-    });
-  addGlobalOptions(program);
-  addProfileCommands(program, dependencies.validateCredential);
+  program.hook("preAction", async (_thisCommand, actionCommand) => {
+    if (isProfileCommand(actionCommand)) return;
+    const credentials = await resolveProgramCredentials(credentialsFrom);
+    service = dependencies.createClient(credentials).sandboxes;
+  });
 
   const output = (value: string) => stdout.write(`${value}\n`);
   const withSpinner = async <T>(label: string, enabled: boolean, operation: () => Promise<T>): Promise<T> => {
@@ -148,17 +194,85 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   const create = waitOption(formatOption(program.command("create [name]").description("Create a sandbox")))
     .option("--vcpu-count <count>", "Virtual CPU count (1-32)")
     .option("--mem-size-mib <mib>", "Memory in MiB (256-65536)")
-    .option("--base-image <image>", "Public OCI image", "ubuntu:26.04")
+    .option("--desktop", "Start a VNC desktop you can open with the desktop command")
+    .option("--base-image <image>", "Public OCI image (default: ubuntu:26.04, or the desktop image with --desktop)")
     .option("--max-ttl-seconds <seconds>", "Maximum sandbox lifetime")
     .option("--idle-ttl-seconds <seconds>", "Seconds without a process connection before pausing (0 disables)")
     .option("--on-timeout <pause|delete>", "Pause (default) or delete the sandbox when a TTL runs out")
     .option("--max-concurrent-processes <count>", "Maximum attached processes")
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], []);
   create.action(async (name: string | undefined, options: CreateSandboxCliOptions & { output: OutputFormat; wait: boolean }) => {
+    if (options.desktop && !options.wait) throw new Error("--desktop waits for the sandbox to start; remove --no-wait");
+    const request = parseCreateSandboxOptions(name, options);
     const sandbox = await withSpinner("Creating sandbox", options.wait, () =>
-      requireService().create(parseCreateSandboxOptions(name, options), { wait: options.wait }));
+      requireService().create(request, { wait: options.wait }));
+    if (options.desktop) await withSpinner("Starting desktop", true, () => startDesktop(sandbox));
     output(formatSandbox(sandbox, options.output));
+    if (options.desktop && options.output === "table") {
+      stderr.write(`\nOpen the desktop with: ${commandPath(program)} desktop ${sandbox.name}\n`);
+    }
   });
+
+  const openUrl = dependencies.openUrl ?? openInBrowser;
+  const openTunnel = dependencies.openTunnel ?? openDesktopTunnel;
+  formatOption(program.command("desktop <id|name>")
+    .description("Open a sandbox's VNC desktop in your browser")
+    .addHelpText("after", `
+By default the desktop stays private: a short-lived Archil port token and a
+tunnel on localhost carry the connection, and the command runs until Ctrl-C.
+--share instead publishes a public link that anyone can use to see and control
+the desktop until you run --unshare.
+`))
+    .option("--share", "Print a public viewer link instead of opening a private tunnel")
+    .option("--unshare", "Remove the public link, invalidate old links, and disconnect viewers")
+    .option("--port <port>", "Local tunnel port (default: 6080, or any free port if it is taken)")
+    .option("--no-open", "Print the URL without opening a browser")
+    .action(async (target: string, options: { output: OutputFormat; share?: boolean; unshare?: boolean; port?: string; open: boolean }) => {
+      if (options.share && options.unshare) throw new Error("Pass either --share or --unshare, not both");
+      const localPort = optionalInteger(options.port, "Port", 1, 65_535);
+      const sandbox = await resolveSandbox(requireService(), target);
+      await withSpinner(`Waking '${sandbox.name}'`, sandbox.status !== "running", () => wakeSandbox(sandbox));
+      const result = (url: string | undefined, shared: boolean) => options.output === "json"
+        ? output(JSON.stringify({ id: sandbox.id, name: sandbox.name, url: url ?? null, shared }, null, 2))
+        : output(url ?? `Unshared '${sandbox.name}'; old links no longer work.`);
+
+      if (options.unshare) {
+        await unshareDesktop(sandbox);
+        result(undefined, false);
+        return;
+      }
+      const token = await withSpinner("Starting desktop", true, () => startDesktop(sandbox));
+      if (options.share) {
+        result(await shareDesktop(sandbox, token), true);
+        return;
+      }
+
+      const access = await sandbox.createPortToken(DESKTOP_PORT, { ttl: "12h" });
+      let tunnel: DesktopTunnel;
+      try {
+        tunnel = await openTunnel({ hostname: access.hostname, portToken: access.token, localPort: localPort ?? DESKTOP_PORT })
+          .catch((error: NodeJS.ErrnoException) => {
+            if (localPort !== undefined || error.code !== "EADDRINUSE") throw error;
+            return openTunnel({ hostname: access.hostname, portToken: access.token, localPort: 0 });
+          });
+      } catch (error) {
+        await sandbox.deletePortToken(access.id).catch(() => {});
+        throw error;
+      }
+      const url = `http://localhost:${tunnel.port}${viewerPath(token)}`;
+      result(url, false);
+      if (options.output === "table") stderr.write("Press Ctrl-C to close the desktop tunnel.\n");
+      if (options.open) openUrl(url);
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) signals.off(signal, done);
+          resolve();
+        };
+        for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) signals.on(signal, done);
+      });
+      await tunnel.close();
+      await sandbox.deletePortToken(access.id).catch(() => {});
+    });
 
   const addLifecycleCommand = (action: Exclude<LifecycleAction, "fork" | "delete">) => {
     const command = waitOption(formatOption(program.command(`${action} <id|name>`).description(`${action[0]!.toUpperCase()}${action.slice(1)} a sandbox`)));
@@ -345,6 +459,4 @@ Use -- before the command so its flags are not parsed as sandbox options.
       if (options.output === "json") output(JSON.stringify(result, null, 2));
       setExitCode(resultExitCode(result));
     });
-
-  return program;
 }

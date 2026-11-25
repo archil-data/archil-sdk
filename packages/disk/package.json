@@ -36,7 +36,8 @@
       },
       "import": "./dist/internal/tools.mjs",
       "require": "./dist/internal/tools.cjs"
-    }
+    },
+    "./archil-cli": "./dist/archil-cli.mjs"
   },
   "bin": {
     "disk": "./dist/cli.mjs",

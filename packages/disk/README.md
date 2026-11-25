@@ -12,63 +12,81 @@ npm install disk
 
 ## CLI
 
+The `archil` command manages disks and sandboxes. Run it with `npx archil`, or install
+it with `npm install -g archil`:
+
 ```bash
-# Authenticate
+# Authenticate (or use a saved profile; see below)
 export ARCHIL_API_KEY=key-...
 export ARCHIL_REGION=aws-us-east-1
 
-# Create a disk — the response includes a one-time disk token you'll need to mount it
-npx disk create my-disk
+# Disks. `create` prints a one-time disk token you'll need to mount the disk.
+npx archil disk create my-disk
+npx archil disk list
+npx archil disk get dsk-abc123
+npx archil disk dsk-abc123 exec "ls -la /mnt"   # runs in a container with the disk mounted
+npx archil disk delete dsk-abc123
+npx archil disk api-keys create ci-bot
 
-# List and inspect
-npx disk list
-npx disk get dsk-abc123
-
-# Run a command against the disk's contents — Archil spins up a container with the disk
-# mounted, runs the command, and returns stdout/stderr/exit code.
-npx disk dsk-abc123 exec "ls -la /mnt"
-
-# Delete
-npx disk delete dsk-abc123
-
-# Manage account-level API keys
-npx disk api-keys list
-npx disk api-keys create ci-bot
-npx disk api-keys delete key-abc123
+# Sandboxes
+npx archil sandbox create dev --vcpu-count 4 --mem-size-mib 8192 --env NODE_ENV=development
+npx archil sandbox shell dev
+npx archil sandbox run dev -- sh -c 'echo "$NODE_ENV"'
+npx archil sandbox pause dev
+npx archil sandbox fork dev agent-task
+npx archil sandbox delete dev
 ```
 
-`list` and `get` pretty-print tables by default; pass `-o json` to pipe into `jq`. Credentials come from `ARCHIL_API_KEY` / `ARCHIL_REGION`, or `--api-key` / `--region` / `--base-url` flags.
+`list` and `get` print tables by default; pass `-o json` to pipe into `jq`. Sandbox
+commands accept an exact ID or a unique name. Lifecycle commands wait by default; use
+`--no-wait` to return once accepted. Starting a paused sandbox discards its memory
+snapshot and prompts unless `--yes` is passed. In a shell, `Ctrl+]` is the emergency escape.
+
+Mount commands (`archil mount`, `archil unmount`, ...) belong to the native
+[Archil client](https://docs.archil.com) (`curl https://archil.com/install | sh`), which is
+also called `archil`. This CLI passes any command it doesn't own through to that client.
+When the client comes first on your `PATH`, run `npx archil disk ...` and
+`npx archil sandbox ...` instead.
+
+The `disk` and `sandbox` executables in this package still work and take the same
+commands as `archil disk` and `archil sandbox`. Note that `npx sandbox` runs an unrelated
+npm package, so use `npx archil sandbox`.
+
+### Desktops
+
+A sandbox can run a full Linux desktop (Ubuntu with XFCE and Firefox) that you open in your
+browser:
+
+```bash
+npx archil sandbox create my-desk --desktop
+npx archil sandbox desktop my-desk            # opens it in your browser, privately
+npx archil sandbox desktop my-desk --share    # prints a public link instead
+npx archil sandbox desktop my-desk --unshare  # invalidates links and disconnects viewers
+```
+
+`desktop` resumes the sandbox if it's paused or stopped. By default it keeps the desktop
+private: it gets a short-lived port token and serves the desktop on `localhost` until you
+press Ctrl-C. `--share` exposes it on a public HTTPS hostname. Anyone with that link can see
+and control the desktop until you run `--unshare`.
+
+`--desktop` starts from `ghcr.io/archil-data/sandbox-desktop` and turns off the idle
+timeout, because viewer traffic doesn't count as sandbox activity. Sessions are capped at
+4 hours instead; override that with `--max-ttl-seconds`. To add your own software, build
+an image `FROM` that one and pass it with `--base-image`. See
+[archil-data/sandbox-desktop](https://github.com/archil-data/sandbox-desktop).
 
 ### Profiles
 
-`disk` and `sandbox` share named profiles:
+Instead of environment variables, save named profiles:
 
 ```bash
-npx disk profile create --profile test-yellow --region aws-us-east-1
-npx sandbox profile use test-yellow
-npx sandbox list
+npx archil profile create --profile test-yellow --region aws-us-east-1
+npx archil profile use test-yellow
+npx archil sandbox list
 ```
 
-`profile create` securely prompts for the API key. Flags override environment variables, which override the selected profile. The library API does not read profiles.
-
-### Sandbox CLI
-
-The `sandbox` executable manages persistent sandboxes:
-
-```bash
-npx sandbox list
-npx sandbox create dev --vcpu-count 4 --mem-size-mib 8192 --env NODE_ENV=development
-npx sandbox pause dev
-npx sandbox resume dev --no-wait
-npx sandbox wait dev --status running --timeout 60
-npx sandbox fork dev agent-task
-npx sandbox run dev -- sh -c 'echo "$NODE_ENV"'
-npx sandbox shell dev
-npx sandbox stop dev
-npx sandbox delete dev
-```
-
-Commands accept an exact ID or unique name. Lifecycle commands wait by default; use `--no-wait` to return once accepted. Use `-o json` for structured output. Starting a paused sandbox discards its memory snapshot and prompts unless `--yes` is passed. In a shell, `Ctrl+]` is the emergency escape.
+`profile create` securely prompts for the API key. Flags override environment variables,
+which override the selected profile. The library API does not read profiles.
 
 ## Library
 

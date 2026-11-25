@@ -26,6 +26,7 @@ export default defineConfig([
           ...entries,
           cli: "bin/cli.ts",
           "sandbox-cli": "bin/sandbox-cli.ts",
+          "archil-cli": "bin/archil-cli.ts",
         },
       },
     },
