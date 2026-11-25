@@ -1,6 +1,9 @@
 import type { SandboxProcessStartOptions } from "../sandbox-process.js";
 import type { SandboxTimeoutAction } from "../sandbox.js";
 import type { CreateSandboxRequest } from "../sandboxes.js";
+import { DESKTOP_IMAGE, DESKTOP_MAX_TTL_SECONDS, DESKTOP_MEMORY_MIB, DESKTOP_VCPUS } from "../sandbox-desktop.js";
+
+const DEFAULT_IMAGE = "ubuntu:26.04";
 
 export interface CreateSandboxCliOptions {
   vcpuCount?: string;
@@ -11,6 +14,7 @@ export interface CreateSandboxCliOptions {
   onTimeout?: string;
   maxConcurrentProcesses?: string;
   env: string[];
+  desktop?: boolean;
 }
 
 export function validateSandboxName(name: string | undefined): string | undefined {
@@ -52,13 +56,17 @@ export function parseEnvironment(entries: string[]): Record<string, string> | un
 }
 
 export function parseCreateSandboxOptions(name: string | undefined, options: CreateSandboxCliOptions): CreateSandboxRequest {
+  const desktop = options.desktop ?? false;
   return {
     name: validateSandboxName(name),
-    vcpuCount: optionalInteger(options.vcpuCount, "CPU count", 1, 32),
-    memSizeMiB: optionalInteger(options.memSizeMib, "Memory", 256, 65_536),
-    baseImage: options.baseImage,
-    maxTtlSeconds: optionalInteger(options.maxTtlSeconds, "Max TTL", 1, 2_147_483_647),
-    idleTtlSeconds: optionalInteger(options.idleTtlSeconds, "Idle TTL", 0, 86_400),
+    vcpuCount: optionalInteger(options.vcpuCount, "CPU count", 1, 32) ?? (desktop ? DESKTOP_VCPUS : undefined),
+    memSizeMiB: optionalInteger(options.memSizeMib, "Memory", 256, 65_536) ?? (desktop ? DESKTOP_MEMORY_MIB : undefined),
+    baseImage: options.baseImage ?? (desktop ? DESKTOP_IMAGE : DEFAULT_IMAGE),
+    maxTtlSeconds: optionalInteger(options.maxTtlSeconds, "Max TTL", 1, 2_147_483_647)
+      ?? (desktop ? DESKTOP_MAX_TTL_SECONDS : undefined),
+    // Viewer traffic doesn't count as activity, so an idle timeout would pause
+    // a desktop while someone is using it.
+    idleTtlSeconds: optionalInteger(options.idleTtlSeconds, "Idle TTL", 0, 86_400) ?? (desktop ? 0 : undefined),
     onTimeout: optionalTimeoutAction(options.onTimeout),
     maxConcurrentExecs: optionalInteger(options.maxConcurrentProcesses, "Max concurrent processes", 1, 1024),
     env: parseEnvironment(options.env),

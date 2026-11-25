@@ -157,7 +157,7 @@ test("create validates options, maps repeated values, and dispatches no-wait", a
   assert.equal(parseCreateSandboxOptions("ok", { env: [] }).onTimeout, undefined);
 
   const cli = harness([]);
-  await cli.run("create", "agent-task", "--vcpu-count", "4", "--mem-size-mib", "512", "--idle-ttl-seconds", "0", "--on-timeout", "delete", "--env", "A=b", "--no-wait");
+  await cli.run("create", "agent-task", "--vcpu-count", "4", "--mem-size-mib", "512", "--idle-ttl-seconds", "0", "--on-timeout", "delete", "--env", "A=b", "--no-wait", "-o", "table");
   const create = cli.service.create as ReturnType<typeof vi.fn>;
   assert.equal(create.mock.calls[0]![0].name, "agent-task");
   assert.equal(create.mock.calls[0]![0].memSizeMiB, 512);

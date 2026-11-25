@@ -1,3 +1,4 @@
+import { SandboxDesktop } from "./sandbox-desktop.js";
 import { ProcessOutputBuffer } from "./process-output-buffer.js";
 import { ProcessConnection, type ProcessEndpoint } from "./process-connection.js";
 import type { components } from "@archildata/api-types";
@@ -287,6 +288,8 @@ export class Sandbox {
   /** @deprecated Use run() and attach(). Removed in the next version. */
   readonly processes: SandboxProcesses;
   readonly files: SandboxFiles;
+  /** The sandbox's Linux desktop, for sandboxes created with `desktop: true`. */
+  readonly desktop: SandboxDesktop;
 
   /** @internal */
   private readonly _client: ApiClient;
@@ -300,6 +303,7 @@ export class Sandbox {
     this._processConnection = new ProcessConnection(() => this._connectionEndpoint());
     this.processes = new SandboxProcesses(this, () => this._processConnection.disconnect());
     this.files = new SandboxFiles(this);
+    this.desktop = new SandboxDesktop(this);
   }
 
   /** @internal Overwrite this sandbox's fields in place from a fresh wire snapshot. */

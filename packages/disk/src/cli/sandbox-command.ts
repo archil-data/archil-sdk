@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { Command } from "./command.js";
 import type { ArchilOptions } from "../archil.js";
@@ -18,13 +19,17 @@ import {
   type OutputFormat,
 } from "./sandbox-output.js";
 import {
+  optionalInteger,
   parseCreateSandboxOptions,
   parseRunOptions,
   validateSandboxName,
   type CreateSandboxCliOptions,
 } from "./sandbox-options.js";
+
+import { addAccessCommands, runSshProcess, wakeSandbox } from "./sandbox-access.js";
+import { openPortTunnel, type PortTunnel, type PortTunnelOptions } from "../tunnel.js";
 import { runSandboxShell } from "./sandbox-shell.js";
-import { spinner } from "./spinner.js";
+import { colorEnabled, createUi, styles } from "./ui.js";
 import { writeOutput, type OutputStream } from "./write-output.js";
 
 export interface SandboxService {
@@ -34,7 +39,7 @@ export interface SandboxService {
 }
 
 
-interface SandboxCliDependencies {
+export interface SandboxCliDependencies {
   version: string;
   createClient(options: ArchilOptions): { sandboxes: SandboxService };
   stdout?: OutputStream & { isTTY?: boolean };
@@ -47,6 +52,16 @@ interface SandboxCliDependencies {
   sleep?: (milliseconds: number) => Promise<void>;
   validateCredential?: ProfileCredentialValidator;
   forceExit?: (signal: NodeJS.Signals) => void;
+  openUrl?: (url: string) => void;
+  openTunnel?: (options: PortTunnelOptions) => Promise<PortTunnel>;
+  /** argv that runs this CLI (for ssh's ProxyCommand). Defaults to this process's node and script. */
+  selfCommand?: string[];
+  runSsh?: (args: string[], env: NodeJS.ProcessEnv) => Promise<number>;
+  /**
+   * Data commands print JSON when stdout is piped. Off for the standalone
+   * `sandbox` executable, whose existing scripts expect tables.
+   */
+  jsonWhenPiped?: boolean;
 }
 
 type LifecycleAction = "start" | "pause" | "resume" | "stop" | "fork" | "delete";
@@ -77,11 +92,42 @@ export async function resolveSandbox(service: SandboxService, idOrName: string):
   return byName[0]!;
 }
 
+export function openInBrowser(url: string): void {
+  // Not `cmd /c start`: cmd.exe splits the URL at its `&`s.
+  const [command, args] = process.platform === "darwin" ? ["open", [url]]
+    : process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
+    : ["xdg-open", [url]];
+  spawn(command, args, { stdio: "ignore", detached: true }).on("error", () => {}).unref();
+}
+
+function commandNames(command: Command): string[] {
+  const names: string[] = [];
+  for (let current: Command | undefined = command; current; current = current.parent) names.unshift(current.name());
+  return names;
+}
+
 function resultExitCode(result: SandboxProcessResult): number {
   return result.exitCode ?? (result.status === "completed" ? 0 : 1);
 }
 
 export function createSandboxProgram(dependencies: SandboxCliDependencies): Command {
+  const program = new Command()
+    .name("sandbox")
+    .description("Manage Archil sandboxes from the command line")
+    .version(dependencies.version);
+  addGlobalOptions(program);
+  addProfileCommands(program, dependencies.validateCredential);
+  // The standalone `sandbox` executable keeps its original output for existing scripts.
+  addSandboxCommands(program, program, { jsonWhenPiped: false, ...dependencies });
+  return program;
+}
+
+/**
+ * Adds the sandbox commands to `program`. Credentials come from the global
+ * options on `credentialsFrom`, which is `program` itself for the standalone
+ * `sandbox` CLI and the root program when nested as `archil sandbox`.
+ */
+export function addSandboxCommands(program: Command, credentialsFrom: Command, dependencies: SandboxCliDependencies): void {
   const stdout = dependencies.stdout ?? process.stdout;
   const stderr = dependencies.stderr ?? process.stderr;
   const stdin = dependencies.stdin ?? process.stdin;
@@ -91,38 +137,30 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   const now = dependencies.now ?? Date.now;
   const sleep = dependencies.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let service: SandboxService | undefined;
-  const program = new Command()
-    .name("sandbox")
-    .description("Manage Archil sandboxes from the command line")
-    .version(dependencies.version)
-    .hook("preAction", async (_thisCommand, actionCommand) => {
-      if (isProfileCommand(actionCommand)) return;
-      const credentials = await resolveProgramCredentials(program);
-      service = dependencies.createClient(credentials).sandboxes;
-    });
-  addGlobalOptions(program);
-  addProfileCommands(program, dependencies.validateCredential);
+  let credentials: Awaited<ReturnType<typeof resolveProgramCredentials>> | undefined;
+  program.hook("preAction", async (_thisCommand, actionCommand) => {
+    if (isProfileCommand(actionCommand)) return;
+    credentials = await resolveProgramCredentials(credentialsFrom);
+    service = dependencies.createClient(credentials).sandboxes;
+  });
 
+  const ui = createUi(stderr, { now });
+  // The standalone `sandbox` executable never colored its tables; keep it that way even under FORCE_COLOR.
+  const tableStyle = styles(dependencies.jsonWhenPiped !== false && colorEnabled(stdout));
   const output = (value: string) => stdout.write(`${value}\n`);
-  const withSpinner = async <T>(label: string, enabled: boolean, operation: () => Promise<T>): Promise<T> => {
-    if (!enabled || !stderr.isTTY) return operation();
-    const progress = spinner(stderr);
-    progress.start(label);
-    try {
-      return await operation();
-    } finally {
-      progress.clear();
-    }
-  };
+  const withSpinner = async <T>(label: string, enabled: boolean, operation: () => Promise<T>, done?: string | ((result: T) => string)): Promise<T> =>
+    enabled ? ui.step(label, operation, done) : operation();
   const requireService = () => {
     if (!service) throw new Error("Sandbox client was not configured");
     return service;
   };
-  const formatOption = (command: Command) => command.option(
+  // Data commands print JSON when piped; streaming commands (run, desktop,
+  // forward) stay text so their output can be piped as-is.
+  const formatOption = (command: Command, { jsonWhenPiped = true } = {}) => command.option(
     "-o, --output <format>",
-    "Output format: table | json",
+    jsonWhenPiped && dependencies.jsonWhenPiped !== false ? "Output format: table | json (default: table in a terminal, json when piped)" : "Output format: table | json",
     parseOutputFormat,
-    "table" as OutputFormat,
+    (stdout.isTTY || !jsonWhenPiped || dependencies.jsonWhenPiped === false ? "table" : "json") as OutputFormat,
   );
   const waitOption = (command: Command) => command.option("--no-wait", "Return after the operation is accepted");
   const confirmDestructive = async (question: string, yes: boolean): Promise<boolean> => {
@@ -138,26 +176,77 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
   };
 
   formatOption(program.command("list").description("List sandboxes")).action(async (options: { output: OutputFormat }) => {
-    output(formatSandboxList(await requireService().list(), options.output));
+    output(formatSandboxList(await requireService().list(), options.output, tableStyle));
   });
 
   formatOption(program.command("get <id|name>").description("Show sandbox details")).action(async (target: string, options: { output: OutputFormat }) => {
-    output(formatSandbox(await resolveSandbox(requireService(), target), options.output));
+    output(formatSandbox(await resolveSandbox(requireService(), target), options.output, tableStyle));
   });
 
   const create = waitOption(formatOption(program.command("create [name]").description("Create a sandbox")))
     .option("--vcpu-count <count>", "Virtual CPU count (1-32)")
     .option("--mem-size-mib <mib>", "Memory in MiB (256-65536)")
-    .option("--base-image <image>", "Public OCI image", "ubuntu:26.04")
+    .option("--desktop", "Start a VNC desktop you can open with the desktop command")
+    .option("--base-image <image>", "Public OCI image (default: ubuntu:26.04, or the desktop image with --desktop)")
     .option("--max-ttl-seconds <seconds>", "Maximum sandbox lifetime")
     .option("--idle-ttl-seconds <seconds>", "Seconds without a process connection before pausing (0 disables)")
     .option("--on-timeout <pause|delete>", "Pause (default) or delete the sandbox when a TTL runs out")
     .option("--max-concurrent-processes <count>", "Maximum attached processes")
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], []);
   create.action(async (name: string | undefined, options: CreateSandboxCliOptions & { output: OutputFormat; wait: boolean }) => {
-    const sandbox = await withSpinner("Creating sandbox", options.wait, () =>
-      requireService().create(parseCreateSandboxOptions(name, options), { wait: options.wait }));
-    output(formatSandbox(sandbox, options.output));
+    if (options.desktop && !options.wait) throw new Error("--desktop waits for the sandbox to start; remove --no-wait");
+    const request = parseCreateSandboxOptions(name, options);
+    const label = request.name ? `Creating ${request.name}` : "Creating sandbox";
+    const sandbox = await withSpinner(label, options.wait, () =>
+      requireService().create(request, { wait: options.wait }), (created) => `Created ${ui.style.bold(created.name)}`);
+    if (options.desktop) {
+      try {
+        await ui.step("Starting desktop", () => sandbox.desktop.start(), "Desktop running");
+      } catch (error) {
+        // The sandbox exists and is running (with idle pause off), so say so rather than only failing.
+        output(formatSandbox(sandbox, options.output, tableStyle));
+        const name = commandNames(program).join(" ");
+        ui.warn(`'${sandbox.name}' was created but its desktop didn't start. Retry with ${ui.style.bold(`${name} desktop ${sandbox.name}`)}, or remove it with ${ui.style.bold(`${name} stop ${sandbox.name} && ${name} delete ${sandbox.name}`)}.`);
+        throw error;
+      } finally {
+        await sandbox.processes.disconnect().catch(() => {});
+      }
+    }
+    output(formatSandbox(sandbox, options.output, tableStyle));
+    if (ui.interactive) {
+      const name = commandNames(program).join(" ");
+      ui.blank();
+      ui.info(options.desktop
+        ? `Open the desktop: ${ui.style.bold(`${name} desktop ${sandbox.name}`)}`
+        : `Open a shell: ${ui.style.bold(`${name} shell ${sandbox.name}`)}`);
+    }
+  });
+
+  addAccessCommands({
+    program,
+    ui,
+    stdout,
+    stderr,
+    stdin,
+    signals,
+    now,
+    output,
+    formatOption: (command) => formatOption(command, { jsonWhenPiped: false }),
+    resolve: (target) => resolveSandbox(requireService(), target),
+    credentials: () => {
+      if (!credentials) throw new Error("Sandbox client was not configured");
+      return credentials;
+    },
+    openUrl: dependencies.openUrl ?? openInBrowser,
+    openTunnel: dependencies.openTunnel ?? openPortTunnel,
+    get selfCommand() {
+      return dependencies.selfCommand ?? [process.execPath, process.argv[1]!, ...commandNames(program).slice(1)];
+    },
+    get commandName() {
+      return commandNames(program).join(" ");
+    },
+    setExitCode,
+    runSsh: dependencies.runSsh ?? runSshProcess,
   });
 
   const addLifecycleCommand = (action: Exclude<LifecycleAction, "fork" | "delete">) => {
@@ -179,8 +268,14 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
         resume: "Resuming sandbox",
         stop: "Stopping sandbox",
       };
-      await withSpinner(labels[action], options.wait, () => sandbox[action]({ wait: options.wait }));
-      output(formatSandbox(sandbox, options.output));
+      const done: Record<Exclude<LifecycleAction, "fork" | "delete">, string> = {
+        start: "Started",
+        pause: "Paused",
+        resume: "Resumed",
+        stop: "Stopped",
+      };
+      await withSpinner(`${labels[action]} ${sandbox.name}`, options.wait, () => sandbox[action]({ wait: options.wait }), `${done[action]} ${ui.style.bold(sandbox.name)}`);
+      output(formatSandbox(sandbox, options.output, tableStyle));
     });
   };
   addLifecycleCommand("start");
@@ -194,9 +289,9 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
       if (!SANDBOX_ACTIONS[sandbox.status].includes("fork")) {
         throw new Error(`Cannot fork sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       }
-      const fork = await withSpinner("Forking sandbox", options.wait, () =>
-        sandbox.fork({ name: validateSandboxName(name), wait: options.wait }));
-      output(formatSandbox(fork, options.output));
+      const fork = await withSpinner(`Forking ${sandbox.name}`, options.wait, () =>
+        sandbox.fork({ name: validateSandboxName(name), wait: options.wait }), (forked) => `Forked ${ui.style.bold(sandbox.name)} into ${ui.style.bold(forked.name)}`);
+      output(formatSandbox(fork, options.output, tableStyle));
     },
   );
 
@@ -206,7 +301,7 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
       if (!SANDBOX_ACTIONS[sandbox.status].includes("delete")) {
         throw new Error(`Cannot delete sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       }
-      await withSpinner("Deleting sandbox", true, () => sandbox.delete());
+      await withSpinner(`Deleting ${sandbox.name}`, true, () => sandbox.delete(), `Deleted ${ui.style.bold(sandbox.name)}`);
       if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, deleted: true }, null, 2));
       else output(`Deleted '${sandbox.name}' (${sandbox.id}).`);
     });
@@ -238,7 +333,7 @@ export function createSandboxProgram(dependencies: SandboxCliDependencies): Comm
           await sandbox.refresh();
         }
       });
-      output(formatSandbox(sandbox, options.output));
+      output(formatSandbox(sandbox, options.output, tableStyle));
     });
 
   formatOption(program.command("run <id|name> <command...>")
@@ -249,7 +344,7 @@ Examples:
   sandbox run my-sandbox -- sh -c 'echo "$HOME"'
 
 Use -- before the command so its flags are not parsed as sandbox options.
-`))
+`), { jsonWhenPiped: false })
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], [])
     .option("--timeout <seconds>", "Command timeout in seconds")
     .action(async (target: string, command: string[], options: { env: string[]; timeout?: string; output: OutputFormat }) => {
@@ -336,7 +431,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
     });
 
   formatOption(program.command("shell <id|name>")
-    .description("Open an interactive shell in a running sandbox"))
+    .description("Open an interactive shell in a running sandbox"), { jsonWhenPiped: false })
     .action(async (target: string, options: { output: OutputFormat }) => {
       const sandbox = await resolveSandbox(requireService(), target);
       if (sandbox.status !== "running") throw new Error(`Cannot open a shell in sandbox '${sandbox.name}' while it is ${sandbox.status}`);
@@ -345,6 +440,4 @@ Use -- before the command so its flags are not parsed as sandbox options.
       if (options.output === "json") output(JSON.stringify(result, null, 2));
       setExitCode(resultExitCode(result));
     });
-
-  return program;
 }

@@ -12,63 +12,136 @@ npm install disk
 
 ## CLI
 
+The `archil` command manages disks and sandboxes. Run it with `npx archil`, or install
+it with `npm install -g archil`:
+
 ```bash
-# Authenticate
-export ARCHIL_API_KEY=key-...
-export ARCHIL_REGION=aws-us-east-1
-
-# Create a disk — the response includes a one-time disk token you'll need to mount it
-npx disk create my-disk
-
-# List and inspect
-npx disk list
-npx disk get dsk-abc123
-
-# Run a command against the disk's contents — Archil spins up a container with the disk
-# mounted, runs the command, and returns stdout/stderr/exit code.
-npx disk dsk-abc123 exec "ls -la /mnt"
-
-# Delete
-npx disk delete dsk-abc123
-
-# Manage account-level API keys
-npx disk api-keys list
-npx disk api-keys create ci-bot
-npx disk api-keys delete key-abc123
+npx archil login                       # sign in through your browser
+npx archil sandbox create dev
+npx archil sandbox ssh dev             # real SSH, no ports opened
+npx archil sandbox forward dev 3000    # http://localhost:3000, privately
+npx archil disk list
 ```
 
-`list` and `get` pretty-print tables by default; pass `-o json` to pipe into `jq`. Credentials come from `ARCHIL_API_KEY` / `ARCHIL_REGION`, or `--api-key` / `--region` / `--base-url` flags.
+`archil login` opens the Archil console, where you approve access for this machine. The
+console creates an API key named "CLI on <hostname>" and hands it back to the CLI, which
+saves it as the default profile. `archil whoami` shows which account and profile commands
+use, and `archil logout` removes the saved key. To revoke the key itself, delete it under
+API Keys in the console. In CI or on machines without a browser, set `ARCHIL_API_KEY` and
+`ARCHIL_REGION`, or save a key with `archil profile create`.
+
+```bash
+# Disks. `create` prints a one-time disk token you'll need to mount the disk.
+npx archil disk create my-disk
+npx archil disk get dsk-abc123
+npx archil disk dsk-abc123 exec "ls -la /mnt"   # runs in a container with the disk mounted
+npx archil disk delete dsk-abc123
+npx archil disk api-keys create ci-bot
+
+# Sandboxes
+npx archil sandbox create dev --vcpu-count 4 --mem-size-mib 8192 --env NODE_ENV=development
+npx archil sandbox list
+npx archil sandbox shell dev
+npx archil sandbox run dev -- sh -c 'echo "$NODE_ENV"'
+npx archil sandbox pause dev
+npx archil sandbox fork dev agent-task
+npx archil sandbox delete dev
+```
+
+In a terminal, commands show progress and print tables. When stdout is piped, `list`,
+`get`, `create`, and the lifecycle commands print JSON instead; pass `-o table` or
+`-o json` to choose. Sandbox commands accept an exact ID or a unique name. Lifecycle
+commands wait by default; use `--no-wait` to return once accepted. Starting a paused
+sandbox discards its memory snapshot and prompts unless `--yes` is passed. In a shell,
+`Ctrl+]` is the emergency escape. `NO_COLOR` turns colors off.
+
+Mount commands (`archil mount`, `archil unmount`, ...) belong to the native
+[Archil client](https://docs.archil.com) (`curl https://archil.com/install | sh`), which is
+also called `archil`. This CLI passes any command it doesn't own through to that client.
+When the client comes first on your `PATH`, run `npx archil disk ...` and
+`npx archil sandbox ...` instead.
+
+The `disk` and `sandbox` executables in this package still work and take the same
+commands as `archil disk` and `archil sandbox`. Note that `npx sandbox` runs an unrelated
+npm package, so use `npx archil sandbox`.
+
+### SSH
+
+`archil sandbox ssh` is real OpenSSH. The connection runs over the Archil API instead of an
+open port: ssh's `ProxyCommand` runs `archil sandbox ssh-proxy`. That command wakes the
+sandbox if it's paused and installs `openssh-server` the first time if the image doesn't
+have it. It authorizes the CLI's own key (`~/.ssh/archil_ed25519`) and pins the sandbox's
+host key, which it fetches over the API, so there's no trust-on-first-use prompt.
+
+```bash
+npx archil sandbox ssh dev
+npx archil sandbox ssh dev -- uname -a
+npx archil sandbox ssh dev -- -L 5432:localhost:5432    # any ssh option
+```
+
+To use scp, rsync, and editor remotes, add the `*.archil` hosts to `~/.ssh/config` once:
+
+```bash
+archil sandbox ssh-config --install
+ssh dev.archil
+scp ./data.csv dev.archil:/root/
+rsync -a ./src/ dev.archil:/root/src/
+```
+
+In VS Code or Cursor, choose **Remote-SSH: Connect to Host...** and enter `dev.archil`.
+The config runs the installed CLI by its full path, so install it globally first
+(`npm install -g archil`).
+
+### Forwarding ports
+
+`archil sandbox forward dev 3000` serves the sandbox's port 3000 on
+`http://localhost:3000` until you press Ctrl-C. The port stays private: the tunnel
+authenticates with a short-lived port token, and nothing is exposed publicly. It carries
+HTTP and WebSockets. For other protocols, such as databases, use `ssh -L`.
+
+### Shell completion
+
+```bash
+source <(archil completion zsh)    # in ~/.zshrc; also bash and fish
+```
+
+Completion covers commands, options, profile names, and your sandbox names.
+
+### Desktops
+
+A sandbox can run a full Linux desktop (Ubuntu with XFCE and Firefox) that you open in your
+browser:
+
+```bash
+npx archil sandbox create my-desk --desktop
+npx archil sandbox desktop my-desk            # opens it in your browser, privately
+npx archil sandbox desktop my-desk --share    # prints a public link instead
+npx archil sandbox desktop my-desk --unshare  # invalidates links and disconnects viewers
+```
+
+`desktop` resumes the sandbox if it's paused or stopped. By default it keeps the desktop
+private: it gets a short-lived port token and serves the desktop on `localhost` until you
+press Ctrl-C. `--share` exposes it on a public HTTPS hostname. Anyone with that link can see
+and control the desktop until you run `--unshare`.
+
+`--desktop` starts from `ghcr.io/archil-data/sandbox-desktop` with 2 vCPUs and 4 GiB, and turns off the idle
+timeout, because viewer traffic doesn't count as sandbox activity. Sessions are capped at
+4 hours instead; override that with `--max-ttl-seconds`. To add your own software, build
+an image `FROM` that one and pass it with `--base-image`. See
+[archil-data/sandbox-desktop](https://github.com/archil-data/sandbox-desktop).
 
 ### Profiles
 
-`disk` and `sandbox` share named profiles:
+`archil login` saves a profile for you. To manage profiles by hand:
 
 ```bash
-npx disk profile create --profile test-yellow --region aws-us-east-1
-npx sandbox profile use test-yellow
-npx sandbox list
+npx archil profile create --profile test-yellow --region aws-us-east-1
+npx archil profile use test-yellow
+npx archil sandbox list
 ```
 
-`profile create` securely prompts for the API key. Flags override environment variables, which override the selected profile. The library API does not read profiles.
-
-### Sandbox CLI
-
-The `sandbox` executable manages persistent sandboxes:
-
-```bash
-npx sandbox list
-npx sandbox create dev --vcpu-count 4 --mem-size-mib 8192 --env NODE_ENV=development
-npx sandbox pause dev
-npx sandbox resume dev --no-wait
-npx sandbox wait dev --status running --timeout 60
-npx sandbox fork dev agent-task
-npx sandbox run dev -- sh -c 'echo "$NODE_ENV"'
-npx sandbox shell dev
-npx sandbox stop dev
-npx sandbox delete dev
-```
-
-Commands accept an exact ID or unique name. Lifecycle commands wait by default; use `--no-wait` to return once accepted. Use `-o json` for structured output. Starting a paused sandbox discards its memory snapshot and prompts unless `--yes` is passed. In a shell, `Ctrl+]` is the emergency escape.
+`profile create` securely prompts for the API key. Flags override environment variables,
+which override the selected profile. The library API does not read profiles.
 
 ## Library
 
@@ -281,6 +354,45 @@ a duration up to `"8760h"` (365 days). `listPortTokens` follows all pages (its
 `limit` caps the total); `listPortTokensPage` returns `nextCursor` for pagination.
 Public ports bypass token authentication. Revocation and expiry deny new
 connections with HTTP 401; existing connections remain open.
+
+Sandboxes can run a full Linux desktop (Ubuntu with XFCE and Firefox). Create one with
+`desktop: true`, which picks the desktop image, 2 vCPUs, 4 GiB, no idle expiry (viewer
+traffic doesn't count as activity), and a 4-hour session cap unless you set them:
+
+```ts
+const desk = await client.sandboxes.create({ name: "agent-desk", desktop: true });
+await desk.desktop.start();                  // idempotent; returns { token }
+
+const link = await desk.desktop.share();     // public viewer URL; anyone with it controls the desktop
+await desk.desktop.unshare();                // revokes every link and disconnects viewers
+
+// Drive it like a computer-use agent
+const png = await desk.desktop.screenshot(); // Uint8Array (PNG)
+const { width, height } = await desk.desktop.size();
+await desk.desktop.launch(["firefox", "https://example.com"]);
+await desk.desktop.click(640, 400);           // { button: "right", double: true } also work
+await desk.desktop.type("hello");
+await desk.desktop.key("ctrl+l");             // xdotool key names: Return, ctrl+shift+t, alt+F4
+await desk.desktop.scroll("down", 5);
+```
+
+Each call runs one command in the sandbox, so it works wherever the SDK does. A fork shares
+its parent's viewer token; call `fork.desktop.token({ rotate: true })` before sharing it.
+
+To view a desktop privately, or reach any HTTP port without exposing it, use `disk/tunnel`
+(Node.js only). It serves the port on localhost with a short-lived access token that renews
+itself, and keeps the sandbox awake until you close it:
+
+```ts
+import { forwardPort, openDesktopTunnel } from "disk/tunnel";
+
+const viewer = await openDesktopTunnel(desk);  // localhost:6080, or any free port
+console.log(viewer.viewerUrl);                 // open in a browser on this machine
+await viewer.close();
+
+const app = await forwardPort(desk, 3000);     // http://localhost:3000 → port 3000 in the sandbox
+await app.close();
+```
 
 Archil disks can be mounted inside the sandbox at creation. They are mounted on every
 boot and persist across stop/start and pause/resume. A sandbox with mounts must be stopped
