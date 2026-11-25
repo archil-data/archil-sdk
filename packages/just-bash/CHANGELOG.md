@@ -1,5 +1,12 @@
 # @archildata/just-bash
 
+## 0.8.45
+
+### Patch Changes
+
+- Updated dependencies [5ff2d85]
+  - disk@1.15.0
+
 ## 0.8.44
 
 ### Patch Changes
