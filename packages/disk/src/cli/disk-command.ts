@@ -2,6 +2,7 @@ import { Command } from "./command.js";
 import { isProfileCommand, resolveProgramCredentials } from "./common.js";
 import { renderTable } from "./output.js";
 import { optionalInteger } from "./sandbox-options.js";
+import { createUi, printError } from "./ui.js";
 import {
   ArchilApiError,
   configure,
@@ -23,6 +24,7 @@ const DISK_COMMANDS = ["list", "get", "create", "delete", "exec", "grep", "api-k
  * `disk` CLI and the root program when nested as `archil disk`.
  */
 export function addDiskCommands(command: Command, credentialsFrom: Command): void {
+  const ui = createUi(process.stderr);
   command.hook("preAction", async (_thisCommand, actionCommand) => {
     if (isProfileCommand(actionCommand)) return;
     const resolved = await resolveProgramCredentials(credentialsFrom);
@@ -30,11 +32,7 @@ export function addDiskCommands(command: Command, credentialsFrom: Command): voi
   });
 
   function fail(err: unknown): never {
-    if (err instanceof ArchilApiError) {
-      console.error(`Error (${err.status}): ${err.message}`);
-    } else {
-      console.error(err instanceof Error ? err.message : String(err));
-    }
+    printError(err);
     process.exit(1);
   }
 
@@ -133,7 +131,7 @@ export function addDiskCommands(command: Command, credentialsFrom: Command): voi
     .option("-o, --output <format>", "Output format: table | json", "table")
     .action(async (opts: { limit?: number; output: string }) => {
       try {
-        const disks = await listDisks({ limit: opts.limit });
+        const disks = await ui.step("Loading disks", () => listDisks({ limit: opts.limit }), (found) => `Found ${found.length} disk${found.length === 1 ? "" : "s"}`);
         if (opts.output === "json") {
           console.log(JSON.stringify(disks, null, 2));
           return;
@@ -155,7 +153,7 @@ export function addDiskCommands(command: Command, credentialsFrom: Command): voi
     .option("-o, --output <format>", "Output format: table | json", "table")
     .action(async (idOrName: string, opts: { output: string }) => {
       try {
-        const d = await resolveDisk(idOrName);
+        const d = await ui.step(`Loading ${idOrName}`, () => resolveDisk(idOrName), (disk) => `Loaded ${disk.name}`);
         if (opts.output === "json") {
           console.log(JSON.stringify(d, null, 2));
         } else {
@@ -171,7 +169,7 @@ export function addDiskCommands(command: Command, credentialsFrom: Command): voi
     .description("Create a new disk")
     .action(async (name: string) => {
       try {
-        const result = await createDisk({ name } as CreateDiskRequest);
+        const result = await ui.step(`Creating disk ${name}`, () => createDisk({ name } as CreateDiskRequest), `Created disk ${ui.style.bold(name)}`);
         console.log(`Created disk ${result.disk.organization}/${result.disk.name}`);
         console.log(`  id:     ${result.disk.id}`);
         console.log(`  status: ${result.disk.status}`);
@@ -194,7 +192,7 @@ export function addDiskCommands(command: Command, credentialsFrom: Command): voi
     .action(async (idOrName: string) => {
       try {
         const d = await resolveDisk(idOrName);
-        await d.delete();
+        await ui.step(`Deleting ${d.name}`, () => d.delete(), `Deleted ${ui.style.bold(d.name)}`);
         console.log(`Deleted ${d.organization}/${d.name} (${d.id})`);
       } catch (err) {
         fail(err);
@@ -207,7 +205,7 @@ export function addDiskCommands(command: Command, credentialsFrom: Command): voi
     .action(async (idOrName: string, cmd: string[]) => {
       try {
         const d = await resolveDisk(idOrName);
-        const result = await d.exec(cmd.join(" "));
+        const result = await ui.step(`Running in ${d.name}`, () => d.exec(cmd.join(" ")), (ran) => `Ran in ${d.name} (exit ${ran.exitCode})`);
         if (result.stdout) process.stdout.write(result.stdout);
         if (result.stderr) process.stderr.write(result.stderr);
         process.exit(result.exitCode);

@@ -13,10 +13,11 @@ import { accessSync, closeSync, constants, openSync, readSync, realpathSync } fr
 import { delimiter, join } from "node:path";
 import { Command } from "./command.js";
 import { addGlobalOptions, addProfileCommands } from "./common.js";
+import { completionScript } from "./completion.js";
 import { addDiskCommands } from "./disk-command.js";
 import { addSandboxCommands, type SandboxCliDependencies } from "./sandbox-command.js";
 
-const OWN_COMMANDS = new Set(["disk", "sandbox", "profile", "help"]);
+const OWN_COMMANDS = new Set(["disk", "sandbox", "profile", "completion", "help", "__complete"]);
 const GLOBAL_OPTIONS_WITH_VALUES = new Set(["-k", "--api-key", "-r", "--region", "--base-url", "--profile"]);
 const FORWARDED_ENV = "ARCHIL_CLI_FORWARDED";
 export const NATIVE_CLIENT_INSTALL = "curl https://archil.com/install | sh";
@@ -35,6 +36,16 @@ client and are passed through to it. Install it with:
   addProfileCommands(program, dependencies.validateCredential);
   addDiskCommands(program.command("disk").description("Create, inspect, and run commands against disks"), program);
   addSandboxCommands(program.command("sandbox").description("Create and manage persistent sandboxes"), program, dependencies);
+  program.command("completion <shell>")
+    .description("Print a shell completion script: bash, zsh, or fish")
+    .addHelpText("after", `
+  source <(archil completion zsh)     # add to ~/.zshrc
+  source <(archil completion bash)    # add to ~/.bashrc
+  archil completion fish > ~/.config/fish/completions/archil.fish
+`)
+    .action((shell: string) => {
+      (dependencies.stdout ?? process.stdout).write(completionScript(shell));
+    });
   return program;
 }
 

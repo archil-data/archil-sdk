@@ -1,16 +1,13 @@
 #!/usr/bin/env node
+import { printError } from "../src/cli/ui.js";
 import { createRequire } from "node:module";
-import { Archil, ArchilApiError } from "../src/index.js";
+import { Archil } from "../src/index.js";
 import { createSandboxProgram } from "../src/cli/sandbox-command.js";
 
 const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
 
 function fail(error: unknown): never {
-  if (error instanceof ArchilApiError) {
-    console.error(`Error (${error.status}): ${error.message}`);
-  } else {
-    console.error(error instanceof Error ? error.message : String(error));
-  }
+  printError(error, process.stderr, "sandbox");
   process.exit(1);
 }
 

@@ -163,6 +163,16 @@ export class Command {
     return this;
   }
 
+  /** This command's own options, for shell completion. */
+  optionList(): readonly Option[] {
+    return this._options;
+  }
+
+  /** This command's positional argument names, in order, for shell completion. */
+  argumentList(): ReadonlyArray<{ name: string; variadic: boolean }> {
+    return this._arguments;
+  }
+
   opts<T = Record<string, unknown>>(): T {
     return { ...this._values } as T;
   }

@@ -1,5 +1,8 @@
 import type { Sandbox } from "../sandbox.js";
 import { renderTable } from "./output.js";
+import { statusStyle, styles, type Styles } from "./ui.js";
+
+const plain = styles(false);
 
 export type OutputFormat = "table" | "json";
 
@@ -21,15 +24,15 @@ export function sortSandboxes(sandboxes: Sandbox[]): Sandbox[] {
   });
 }
 
-export function formatSandboxList(sandboxes: Sandbox[], format: OutputFormat): string {
+export function formatSandboxList(sandboxes: Sandbox[], format: OutputFormat, style: Styles = plain): string {
   const ordered = sortSandboxes(sandboxes);
   if (format === "json") return JSON.stringify(ordered, null, 2);
   if (ordered.length === 0) return "No sandboxes found.";
   return renderTable(
     ordered.map((sandbox) => [
       sandbox.id,
-      sandbox.name,
-      sandbox.status,
+      style.bold(sandbox.name),
+      statusStyle(style, sandbox.status),
       String(sandbox.vcpuCount),
       `${sandbox.memSizeMiB} MiB`,
       sandbox.baseImage,
@@ -39,12 +42,12 @@ export function formatSandboxList(sandboxes: Sandbox[], format: OutputFormat): s
   );
 }
 
-export function formatSandbox(sandbox: Sandbox, format: OutputFormat): string {
+export function formatSandbox(sandbox: Sandbox, format: OutputFormat, style: Styles = plain): string {
   if (format === "json") return JSON.stringify(sandbox, null, 2);
   const rows: string[][] = [
     ["id", sandbox.id],
     ["name", sandbox.name],
-    ["status", sandbox.status],
+    ["status", statusStyle(style, sandbox.status)],
     ["cpu", String(sandbox.vcpuCount)],
     ["memory", `${sandbox.memSizeMiB} MiB`],
     ["image", sandbox.baseImage],
@@ -62,5 +65,5 @@ export function formatSandbox(sandbox: Sandbox, format: OutputFormat): string {
   for (const endpoint of sandbox.endpoints ?? []) {
     rows.push([`endpoint ${endpoint.port}`, endpoint.hostname]);
   }
-  return renderTable(rows.filter(([, value]) => value !== ""));
+  return renderTable(rows.filter(([, value]) => value !== "").map(([label, value]) => [style.dim(label!), value!]));
 }

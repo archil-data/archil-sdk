@@ -7,13 +7,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import type { Sandbox } from "../src/sandbox.js";
 import { createSandboxProgram, type SandboxService } from "../src/cli/sandbox-command.js";
-import {
-  addRequestHeader,
-  DESKTOP_IMAGE,
-  DESKTOP_MAX_TTL_SECONDS,
-  openDesktopTunnel,
-  type DesktopTunnelOptions,
-} from "../src/cli/sandbox-desktop.js";
+import { DESKTOP_IMAGE, DESKTOP_MAX_TTL_SECONDS } from "../src/cli/sandbox-desktop.js";
+import { addRequestHeader, openPortTunnel, type PortTunnelOptions } from "../src/cli/port-tunnel.js";
 
 let configDirectory: string;
 
@@ -57,12 +52,12 @@ function desktopSandbox(overrides: Partial<Record<string, unknown>> = {}): Sandb
   return sandbox as unknown as Sandbox;
 }
 
-function harness(sandbox: Sandbox) {
+function harness(sandbox: Sandbox, options: { tty?: boolean } = {}) {
   const stdout = { values: [] as string[], write(data: string) { this.values.push(data); return true; } };
-  const stderr = { isTTY: false, values: [] as string[], write(data: string) { this.values.push(data); return true; } };
+  const stderr = { isTTY: options.tty ?? false, values: [] as string[], write(data: string) { this.values.push(data); return true; } };
   const signals = new EventEmitter();
   const opened: string[] = [];
-  const tunnels: DesktopTunnelOptions[] = [];
+  const tunnels: PortTunnelOptions[] = [];
   const closeTunnel = vi.fn(async () => undefined);
   const service: SandboxService = {
     list: vi.fn(async () => [sandbox]),
@@ -87,7 +82,7 @@ function harness(sandbox: Sandbox) {
 
 test("create --desktop picks the desktop image and timeouts, then starts the desktop", async () => {
   const sandbox = desktopSandbox();
-  const cli = harness(sandbox);
+  const cli = harness(sandbox, { tty: true });
   await cli.run("create", "desk", "--desktop");
   const request = (cli.service.create as ReturnType<typeof vi.fn>).mock.calls[0]![0];
   assert.equal(request.baseImage, DESKTOP_IMAGE);
@@ -142,7 +137,10 @@ test("desktop wakes a paused sandbox, tunnels privately, and cleans up on Ctrl-C
   const running = cli.run("desktop", "desk");
   await vi.waitFor(() => assert.equal(cli.opened.length, 1));
   assert.equal((sandbox.resume as ReturnType<typeof vi.fn>).mock.calls.length, 1);
-  assert.deepEqual(cli.tunnels, [{ hostname: "6080-route.example.archil.app", portToken: "secret", localPort: 6080 }]);
+  assert.deepEqual(
+    cli.tunnels.map(({ hostname, portToken, localPort }) => ({ hostname, portToken, localPort })),
+    [{ hostname: "6080-route.example.archil.app", portToken: "secret", localPort: 6080 }],
+  );
   assert.match(cli.opened[0]!, /^http:\/\/localhost:6080\/vnc\.html\?/);
   assert.equal(cli.stdout.values.join("").trim(), cli.opened[0]);
   assert.equal((sandbox.exposePort as ReturnType<typeof vi.fn>).mock.calls.length, 0);
@@ -209,7 +207,7 @@ test("the tunnel adds the port token to the first request and relays everything 
   await new Promise<void>((resolve) => upstreamServer.listen(0, "127.0.0.1", resolve));
   const upstreamPort = (upstreamServer.address() as { port: number }).port;
 
-  const tunnel = await openDesktopTunnel({
+  const tunnel = await openPortTunnel({
     hostname: "ignored.example",
     portToken: "secret",
     localPort: 0,

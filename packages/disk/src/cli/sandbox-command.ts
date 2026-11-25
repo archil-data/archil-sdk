@@ -25,18 +25,11 @@ import {
   validateSandboxName,
   type CreateSandboxCliOptions,
 } from "./sandbox-options.js";
-import {
-  DESKTOP_PORT,
-  openDesktopTunnel,
-  shareDesktop,
-  startDesktop,
-  unshareDesktop,
-  viewerPath,
-  type DesktopTunnel,
-  type DesktopTunnelOptions,
-} from "./sandbox-desktop.js";
+import { startDesktop } from "./sandbox-desktop.js";
+import { addAccessCommands, runSshProcess, wakeSandbox } from "./sandbox-access.js";
+import { openPortTunnel, type PortTunnel, type PortTunnelOptions } from "./port-tunnel.js";
 import { runSandboxShell } from "./sandbox-shell.js";
-import { spinner } from "./spinner.js";
+import { colorEnabled, createUi, styles } from "./ui.js";
 import { writeOutput, type OutputStream } from "./write-output.js";
 
 export interface SandboxService {
@@ -60,7 +53,10 @@ export interface SandboxCliDependencies {
   validateCredential?: ProfileCredentialValidator;
   forceExit?: (signal: NodeJS.Signals) => void;
   openUrl?: (url: string) => void;
-  openTunnel?: (options: DesktopTunnelOptions) => Promise<DesktopTunnel>;
+  openTunnel?: (options: PortTunnelOptions) => Promise<PortTunnel>;
+  /** argv that runs this CLI (for ssh's ProxyCommand). Defaults to this process's node and script. */
+  selfCommand?: string[];
+  runSsh?: (args: string[], env: NodeJS.ProcessEnv) => Promise<number>;
 }
 
 type LifecycleAction = "start" | "pause" | "resume" | "stop" | "fork" | "delete";
@@ -98,19 +94,10 @@ function openInBrowser(url: string): void {
   spawn(command, args, { stdio: "ignore", detached: true }).on("error", () => {}).unref();
 }
 
-function commandPath(command: Command): string {
+function commandNames(command: Command): string[] {
   const names: string[] = [];
   for (let current: Command | undefined = command; current; current = current.parent) names.unshift(current.name());
-  return names.join(" ");
-}
-
-/** Resumes a paused sandbox or cold-starts a stopped one; the desktop services come back on their own. */
-async function wakeSandbox(sandbox: Sandbox): Promise<void> {
-  if (sandbox.status === "paused") await sandbox.resume();
-  else if (sandbox.status === "stopped" || sandbox.status === "exited" || sandbox.status === "failed") await sandbox.start();
-  if (sandbox.status !== "running") {
-    throw new Error(`Sandbox '${sandbox.name}' is ${sandbox.status}; wait for it to settle and try again`);
-  }
+  return names;
 }
 
 function resultExitCode(result: SandboxProcessResult): number {
@@ -143,32 +130,29 @@ export function addSandboxCommands(program: Command, credentialsFrom: Command, d
   const now = dependencies.now ?? Date.now;
   const sleep = dependencies.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let service: SandboxService | undefined;
+  let credentials: Awaited<ReturnType<typeof resolveProgramCredentials>> | undefined;
   program.hook("preAction", async (_thisCommand, actionCommand) => {
     if (isProfileCommand(actionCommand)) return;
-    const credentials = await resolveProgramCredentials(credentialsFrom);
+    credentials = await resolveProgramCredentials(credentialsFrom);
     service = dependencies.createClient(credentials).sandboxes;
   });
 
+  const ui = createUi(stderr, { now });
+  const tableStyle = styles(colorEnabled(stdout));
   const output = (value: string) => stdout.write(`${value}\n`);
-  const withSpinner = async <T>(label: string, enabled: boolean, operation: () => Promise<T>): Promise<T> => {
-    if (!enabled || !stderr.isTTY) return operation();
-    const progress = spinner(stderr);
-    progress.start(label);
-    try {
-      return await operation();
-    } finally {
-      progress.clear();
-    }
-  };
+  const withSpinner = async <T>(label: string, enabled: boolean, operation: () => Promise<T>, done?: string | ((result: T) => string)): Promise<T> =>
+    enabled ? ui.step(label, operation, done) : operation();
   const requireService = () => {
     if (!service) throw new Error("Sandbox client was not configured");
     return service;
   };
-  const formatOption = (command: Command) => command.option(
+  // Data commands print JSON when piped; streaming commands (run, desktop,
+  // forward) stay text so their output can be piped as-is.
+  const formatOption = (command: Command, { jsonWhenPiped = true } = {}) => command.option(
     "-o, --output <format>",
-    "Output format: table | json",
+    jsonWhenPiped ? "Output format: table | json (default: table in a terminal, json when piped)" : "Output format: table | json",
     parseOutputFormat,
-    "table" as OutputFormat,
+    (stdout.isTTY || !jsonWhenPiped ? "table" : "json") as OutputFormat,
   );
   const waitOption = (command: Command) => command.option("--no-wait", "Return after the operation is accepted");
   const confirmDestructive = async (question: string, yes: boolean): Promise<boolean> => {
@@ -184,11 +168,11 @@ export function addSandboxCommands(program: Command, credentialsFrom: Command, d
   };
 
   formatOption(program.command("list").description("List sandboxes")).action(async (options: { output: OutputFormat }) => {
-    output(formatSandboxList(await requireService().list(), options.output));
+    output(formatSandboxList(await requireService().list(), options.output, tableStyle));
   });
 
   formatOption(program.command("get <id|name>").description("Show sandbox details")).action(async (target: string, options: { output: OutputFormat }) => {
-    output(formatSandbox(await resolveSandbox(requireService(), target), options.output));
+    output(formatSandbox(await resolveSandbox(requireService(), target), options.output, tableStyle));
   });
 
   const create = waitOption(formatOption(program.command("create [name]").description("Create a sandbox")))
@@ -204,75 +188,46 @@ export function addSandboxCommands(program: Command, credentialsFrom: Command, d
   create.action(async (name: string | undefined, options: CreateSandboxCliOptions & { output: OutputFormat; wait: boolean }) => {
     if (options.desktop && !options.wait) throw new Error("--desktop waits for the sandbox to start; remove --no-wait");
     const request = parseCreateSandboxOptions(name, options);
-    const sandbox = await withSpinner("Creating sandbox", options.wait, () =>
-      requireService().create(request, { wait: options.wait }));
-    if (options.desktop) await withSpinner("Starting desktop", true, () => startDesktop(sandbox));
-    output(formatSandbox(sandbox, options.output));
-    if (options.desktop && options.output === "table") {
-      stderr.write(`\nOpen the desktop with: ${commandPath(program)} desktop ${sandbox.name}\n`);
+    const label = request.name ? `Creating ${request.name}` : "Creating sandbox";
+    const sandbox = await withSpinner(label, options.wait, () =>
+      requireService().create(request, { wait: options.wait }), (created) => `Created ${ui.style.bold(created.name)}`);
+    if (options.desktop) await ui.step("Starting desktop", () => startDesktop(sandbox), "Desktop running");
+    output(formatSandbox(sandbox, options.output, tableStyle));
+    if (ui.interactive) {
+      const name = commandNames(program).join(" ");
+      ui.blank();
+      ui.info(options.desktop
+        ? `Open the desktop: ${ui.style.bold(`${name} desktop ${sandbox.name}`)}`
+        : `Open a shell: ${ui.style.bold(`${name} shell ${sandbox.name}`)}`);
     }
   });
 
-  const openUrl = dependencies.openUrl ?? openInBrowser;
-  const openTunnel = dependencies.openTunnel ?? openDesktopTunnel;
-  formatOption(program.command("desktop <id|name>")
-    .description("Open a sandbox's VNC desktop in your browser")
-    .addHelpText("after", `
-By default the desktop stays private: a short-lived Archil port token and a
-tunnel on localhost carry the connection, and the command runs until Ctrl-C.
---share instead publishes a public link that anyone can use to see and control
-the desktop until you run --unshare.
-`))
-    .option("--share", "Print a public viewer link instead of opening a private tunnel")
-    .option("--unshare", "Remove the public link, invalidate old links, and disconnect viewers")
-    .option("--port <port>", "Local tunnel port (default: 6080, or any free port if it is taken)")
-    .option("--no-open", "Print the URL without opening a browser")
-    .action(async (target: string, options: { output: OutputFormat; share?: boolean; unshare?: boolean; port?: string; open: boolean }) => {
-      if (options.share && options.unshare) throw new Error("Pass either --share or --unshare, not both");
-      const localPort = optionalInteger(options.port, "Port", 1, 65_535);
-      const sandbox = await resolveSandbox(requireService(), target);
-      await withSpinner(`Waking '${sandbox.name}'`, sandbox.status !== "running", () => wakeSandbox(sandbox));
-      const result = (url: string | undefined, shared: boolean) => options.output === "json"
-        ? output(JSON.stringify({ id: sandbox.id, name: sandbox.name, url: url ?? null, shared }, null, 2))
-        : output(url ?? `Unshared '${sandbox.name}'; old links no longer work.`);
-
-      if (options.unshare) {
-        await unshareDesktop(sandbox);
-        result(undefined, false);
-        return;
-      }
-      const token = await withSpinner("Starting desktop", true, () => startDesktop(sandbox));
-      if (options.share) {
-        result(await shareDesktop(sandbox, token), true);
-        return;
-      }
-
-      const access = await sandbox.createPortToken(DESKTOP_PORT, { ttl: "12h" });
-      let tunnel: DesktopTunnel;
-      try {
-        tunnel = await openTunnel({ hostname: access.hostname, portToken: access.token, localPort: localPort ?? DESKTOP_PORT })
-          .catch((error: NodeJS.ErrnoException) => {
-            if (localPort !== undefined || error.code !== "EADDRINUSE") throw error;
-            return openTunnel({ hostname: access.hostname, portToken: access.token, localPort: 0 });
-          });
-      } catch (error) {
-        await sandbox.deletePortToken(access.id).catch(() => {});
-        throw error;
-      }
-      const url = `http://localhost:${tunnel.port}${viewerPath(token)}`;
-      result(url, false);
-      if (options.output === "table") stderr.write("Press Ctrl-C to close the desktop tunnel.\n");
-      if (options.open) openUrl(url);
-      await new Promise<void>((resolve) => {
-        const done = () => {
-          for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) signals.off(signal, done);
-          resolve();
-        };
-        for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) signals.on(signal, done);
-      });
-      await tunnel.close();
-      await sandbox.deletePortToken(access.id).catch(() => {});
-    });
+  addAccessCommands({
+    program,
+    ui,
+    stdout,
+    stderr,
+    stdin,
+    signals,
+    now,
+    output,
+    formatOption: (command) => formatOption(command, { jsonWhenPiped: false }),
+    resolve: (target) => resolveSandbox(requireService(), target),
+    credentials: () => {
+      if (!credentials) throw new Error("Sandbox client was not configured");
+      return credentials;
+    },
+    openUrl: dependencies.openUrl ?? openInBrowser,
+    openTunnel: dependencies.openTunnel ?? openPortTunnel,
+    get selfCommand() {
+      return dependencies.selfCommand ?? [process.execPath, process.argv[1]!, ...commandNames(program).slice(1)];
+    },
+    get commandName() {
+      return commandNames(program).join(" ");
+    },
+    setExitCode,
+    runSsh: dependencies.runSsh ?? runSshProcess,
+  });
 
   const addLifecycleCommand = (action: Exclude<LifecycleAction, "fork" | "delete">) => {
     const command = waitOption(formatOption(program.command(`${action} <id|name>`).description(`${action[0]!.toUpperCase()}${action.slice(1)} a sandbox`)));
@@ -293,8 +248,14 @@ the desktop until you run --unshare.
         resume: "Resuming sandbox",
         stop: "Stopping sandbox",
       };
-      await withSpinner(labels[action], options.wait, () => sandbox[action]({ wait: options.wait }));
-      output(formatSandbox(sandbox, options.output));
+      const done: Record<Exclude<LifecycleAction, "fork" | "delete">, string> = {
+        start: "Started",
+        pause: "Paused",
+        resume: "Resumed",
+        stop: "Stopped",
+      };
+      await withSpinner(`${labels[action]} ${sandbox.name}`, options.wait, () => sandbox[action]({ wait: options.wait }), `${done[action]} ${ui.style.bold(sandbox.name)}`);
+      output(formatSandbox(sandbox, options.output, tableStyle));
     });
   };
   addLifecycleCommand("start");
@@ -308,9 +269,9 @@ the desktop until you run --unshare.
       if (!SANDBOX_ACTIONS[sandbox.status].includes("fork")) {
         throw new Error(`Cannot fork sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       }
-      const fork = await withSpinner("Forking sandbox", options.wait, () =>
-        sandbox.fork({ name: validateSandboxName(name), wait: options.wait }));
-      output(formatSandbox(fork, options.output));
+      const fork = await withSpinner(`Forking ${sandbox.name}`, options.wait, () =>
+        sandbox.fork({ name: validateSandboxName(name), wait: options.wait }), (forked) => `Forked ${ui.style.bold(sandbox.name)} into ${ui.style.bold(forked.name)}`);
+      output(formatSandbox(fork, options.output, tableStyle));
     },
   );
 
@@ -320,7 +281,7 @@ the desktop until you run --unshare.
       if (!SANDBOX_ACTIONS[sandbox.status].includes("delete")) {
         throw new Error(`Cannot delete sandbox '${sandbox.name}' while it is ${sandbox.status}`);
       }
-      await withSpinner("Deleting sandbox", true, () => sandbox.delete());
+      await withSpinner(`Deleting ${sandbox.name}`, true, () => sandbox.delete(), `Deleted ${ui.style.bold(sandbox.name)}`);
       if (options.output === "json") output(JSON.stringify({ id: sandbox.id, name: sandbox.name, deleted: true }, null, 2));
       else output(`Deleted '${sandbox.name}' (${sandbox.id}).`);
     });
@@ -352,7 +313,7 @@ the desktop until you run --unshare.
           await sandbox.refresh();
         }
       });
-      output(formatSandbox(sandbox, options.output));
+      output(formatSandbox(sandbox, options.output, tableStyle));
     });
 
   formatOption(program.command("run <id|name> <command...>")
@@ -363,7 +324,7 @@ Examples:
   sandbox run my-sandbox -- sh -c 'echo "$HOME"'
 
 Use -- before the command so its flags are not parsed as sandbox options.
-`))
+`), { jsonWhenPiped: false })
     .option("--env <name=value>", "Set an environment variable (repeatable)", (value, previous: string[]) => [...previous, value], [])
     .option("--timeout <seconds>", "Command timeout in seconds")
     .action(async (target: string, command: string[], options: { env: string[]; timeout?: string; output: OutputFormat }) => {
@@ -450,7 +411,7 @@ Use -- before the command so its flags are not parsed as sandbox options.
     });
 
   formatOption(program.command("shell <id|name>")
-    .description("Open an interactive shell in a running sandbox"))
+    .description("Open an interactive shell in a running sandbox"), { jsonWhenPiped: false })
     .action(async (target: string, options: { output: OutputFormat }) => {
       const sandbox = await resolveSandbox(requireService(), target);
       if (sandbox.status !== "running") throw new Error(`Cannot open a shell in sandbox '${sandbox.name}' while it is ${sandbox.status}`);
