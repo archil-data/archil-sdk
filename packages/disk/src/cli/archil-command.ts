@@ -171,9 +171,18 @@ export function loginProfileName(
   profiles: Record<string, { region: string; baseUrl?: string; apiKeyId?: string; account?: string }>,
   region: string,
   baseUrl: string | undefined,
+  account: string | undefined,
+  requested?: string,
 ): string {
+  if (requested !== undefined) {
+    const existing = profiles[requested];
+    if (existing && existing.apiKeyId === undefined) {
+      throw new Error(`Profile '${requested}' already exists and wasn't created by 'archil login'; pick another name with --profile, or delete it with 'archil profile delete ${requested}'`);
+    }
+    return requested;
+  }
   const previousLogin = Object.entries(profiles).find(([, profile]) =>
-    profile.apiKeyId !== undefined && profile.region === region && profile.baseUrl === baseUrl);
+    profile.apiKeyId !== undefined && profile.region === region && profile.baseUrl === baseUrl && profile.account === account);
   if (previousLogin) return previousLogin[0];
   let name = region;
   for (let suffix = 2; profiles[name]; suffix++) name = `${region}-${suffix}`;
@@ -222,7 +231,7 @@ console and run 'archil profile create', or set ARCHIL_API_KEY and ARCHIL_REGION
           validate({ apiKey: grant.apiKey, region: grant.region, baseUrl: grant.baseUrl }), "Key works");
 
         const config = await loadProfiles();
-        const name = global.profile ?? loginProfileName(config.profiles, region, grant.baseUrl);
+        const name = loginProfileName(config.profiles, region, grant.baseUrl, grant.account, global.profile);
         await writeProfileCredential(name, grant.apiKey);
         config.profiles[name] = { region, baseUrl: grant.baseUrl, apiKeyId: grant.keyId, account: grant.account };
         config.currentProfile = name;

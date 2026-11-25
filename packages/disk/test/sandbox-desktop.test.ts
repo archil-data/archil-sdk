@@ -8,7 +8,7 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 import type { Sandbox } from "../src/sandbox.js";
 import { createSandboxProgram, type SandboxService } from "../src/cli/sandbox-command.js";
 import { DESKTOP_IMAGE, DESKTOP_MAX_TTL_SECONDS, SandboxDesktop } from "../src/sandbox-desktop.js";
-import { addRequestHeader, openPortTunnel, type PortTunnelOptions } from "../src/tunnel.js";
+import { addRequestHeader, isLocalHost, openPortTunnel, type PortTunnelOptions } from "../src/tunnel.js";
 
 let configDirectory: string;
 
@@ -24,9 +24,15 @@ afterEach(async () => {
 
 const TOKEN = "ab".repeat(32);
 
-const keepalive = { kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined) };
+function makeKeepalive() {
+  let ended!: () => void;
+  const finished = new Promise<void>((resolve) => { ended = resolve; });
+  return { wait: vi.fn(() => finished), kill: vi.fn(async () => { ended(); }), disconnect: vi.fn(async () => undefined) };
+}
+let keepalive = makeKeepalive();
 
 function desktopSandbox(overrides: Partial<Record<string, unknown>> = {}): Sandbox {
+  keepalive = makeKeepalive();
   const sandbox = {
     id: "0198aabb-1234-7abc-8def-0123456789ab",
     name: "desk",
@@ -148,7 +154,7 @@ test("desktop wakes a paused sandbox, tunnels privately, and cleans up on Ctrl-C
     cli.tunnels.map(({ hostname, portToken, localPort }) => ({ hostname, portToken, localPort })),
     [{ hostname: "6080-route.example.archil.app", portToken: "secret", localPort: 6080 }],
   );
-  assert.match(cli.opened[0]!, /^http:\/\/localhost:6080\/vnc\.html\?/);
+  assert.match(cli.opened[0]!, /^http:\/\/127.0.0.1:6080\/vnc\.html\?/);
   assert.equal(cli.stdout.values.join("").trim(), cli.opened[0]);
   assert.equal((sandbox.exposePort as ReturnType<typeof vi.fn>).mock.calls.length, 0);
 
@@ -180,7 +186,7 @@ test("desktop falls back to a free port only when the default one is taken", asy
     },
   });
   const running = program.parseAsync(["node", "sandbox", "--api-key", "k", "--region", "r", "desktop", "desk", "--no-open"]);
-  await vi.waitFor(() => assert.match(stdout.values.join(""), /localhost:51000/));
+  await vi.waitFor(() => assert.match(stdout.values.join(""), /127.0.0.1:51000/));
   signals.emit("SIGTERM");
   await running;
   assert.deepEqual(ports, [6080, 0]);
@@ -229,14 +235,14 @@ test("the tunnel adds the port token to the first request and relays everything 
       client.on("data", (chunk) => { data += chunk.toString(); });
       client.on("close", () => resolve(data));
     });
-    client.write("GET /a HTTP/1.1\r\nHost: x\r\n");
+    client.write(`GET /a HTTP/1.1\r\nHost: 127.0.0.1:${tunnel.port}\r\n`);
     client.write("\r\n");
     await vi.waitFor(() => assert.ok(Buffer.concat(received).includes("\r\n\r\n")));
     client.write("second request bytes");
     assert.equal(await reply, "pong");
     assert.equal(
       Buffer.concat(received).toString(),
-      "GET /a HTTP/1.1\r\nX-Archil-Token: secret\r\nHost: x\r\n\r\nsecond request bytes",
+      `GET /a HTTP/1.1\r\nX-Archil-Token: secret\r\nHost: 127.0.0.1:${tunnel.port}\r\n\r\nsecond request bytes`,
     );
   } finally {
     await tunnel.close();
@@ -245,7 +251,7 @@ test("the tunnel adds the port token to the first request and relays everything 
 });
 
 test("a token renewal in flight when the tunnel closes doesn't leave a token behind", async () => {
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
   try {
     let finishRenewal!: () => void;
     const created: string[] = [];
@@ -260,7 +266,7 @@ test("a token renewal in flight when the tunnel closes doesn't leave a token beh
     const cli = harness(sandbox);
     const running = cli.run("desktop", "desk", "--no-open");
     await vi.waitFor(() => assert.equal(cli.tunnels.length, 1));
-    vi.advanceTimersByTime(11 * 60 * 60 * 1000);
+    vi.advanceTimersByTime(10 * 60 * 60 * 1000 + 30_000);
     await vi.waitFor(() => assert.equal(created.length, 2, "the renewal started"));
     cli.signals.emit("SIGINT");
     finishRenewal();
@@ -269,5 +275,34 @@ test("a token renewal in flight when the tunnel closes doesn't leave a token beh
     assert.deepEqual(deleted, ["tok-1", "tok-2"], "both the original and the in-flight token are revoked");
   } finally {
     vi.useRealTimers();
+  }
+});
+
+test("the tunnel refuses requests addressed to another host (DNS rebinding)", async () => {
+  let upstreamConnections = 0;
+  const tunnel = await openPortTunnel({
+    hostname: "ignored.example",
+    portToken: "secret",
+    localPort: 0,
+    connectUpstream: () => { upstreamConnections++; return connect(1, "127.0.0.1"); },
+  });
+  try {
+    const response = await new Promise<string>((resolve) => {
+      const client = connect(tunnel.port, "127.0.0.1");
+      let data = "";
+      client.on("data", (chunk) => { data += chunk.toString(); });
+      client.on("close", () => resolve(data));
+      client.write(`GET / HTTP/1.1\r\nHost: attacker.example:${tunnel.port}\r\n\r\n`);
+    });
+    assert.match(response, /^HTTP\/1\.1 421 Misdirected Request/);
+    assert.equal(upstreamConnections, 0, "the token never leaves for a foreign Host");
+    for (const host of [`localhost:${tunnel.port}`, `127.0.0.1:${tunnel.port}`, `[::1]:${tunnel.port}`]) {
+      assert.ok(isLocalHost(host, tunnel.port), host);
+    }
+    assert.ok(!isLocalHost(undefined, tunnel.port));
+    assert.ok(!isLocalHost("localhost", tunnel.port));
+    assert.ok(isLocalHost("localhost", 80));
+  } finally {
+    await tunnel.close();
   }
 });

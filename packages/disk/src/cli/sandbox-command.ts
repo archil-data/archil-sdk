@@ -145,7 +145,8 @@ export function addSandboxCommands(program: Command, credentialsFrom: Command, d
   });
 
   const ui = createUi(stderr, { now });
-  const tableStyle = styles(colorEnabled(stdout));
+  // The standalone `sandbox` executable never colored its tables; keep it that way even under FORCE_COLOR.
+  const tableStyle = styles(dependencies.jsonWhenPiped !== false && colorEnabled(stdout));
   const output = (value: string) => stdout.write(`${value}\n`);
   const withSpinner = async <T>(label: string, enabled: boolean, operation: () => Promise<T>, done?: string | ((result: T) => string)): Promise<T> =>
     enabled ? ui.step(label, operation, done) : operation();

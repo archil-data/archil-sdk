@@ -58,7 +58,7 @@ export async function openPortTunnel(options: PortTunnelOptions): Promise<PortTu
       websockets.delete(client);
       report();
     });
-    relay(client, () => connectUpstream(options.hostname), portToken, (head) => {
+    relay(client, () => connectUpstream(options.hostname), portToken, () => (server.address() as { port: number }).port, (head) => {
       if (UPGRADE.test(head.toString("latin1"))) {
         websockets.add(client);
         report();
@@ -76,8 +76,22 @@ export async function openPortTunnel(options: PortTunnelOptions): Promise<PortTu
   };
 }
 
-async function relay(client: Socket, connectUpstream: () => Duplex, portToken: string, onHead: (head: Buffer) => void): Promise<void> {
+async function relay(
+  client: Socket,
+  connectUpstream: () => Duplex,
+  portToken: string,
+  localPort: () => number,
+  onHead: (head: Buffer) => void,
+): Promise<void> {
   const head = await readRequestHead(client);
+  // A web page can point its own hostname at 127.0.0.1 (DNS rebinding) and
+  // reach this listener; only relay requests addressed to the tunnel itself,
+  // so the access token is never added to someone else's request.
+  if (!isLocalHost(requestHost(head), localPort())) {
+    const body = "This tunnel only serves requests to localhost.\n";
+    client.end(`HTTP/1.1 421 Misdirected Request\r\nContent-Type: text/plain\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+    return;
+  }
   onHead(head);
   const upstream = connectUpstream();
   upstream.on("error", () => client.destroy());
@@ -86,6 +100,18 @@ async function relay(client: Socket, connectUpstream: () => Duplex, portToken: s
   client.on("close", () => upstream.destroy());
   upstream.write(addRequestHeader(head, `${PORT_TOKEN_HEADER}: ${portToken}`));
   client.pipe(upstream).pipe(client);
+}
+
+function requestHost(head: Buffer): string | undefined {
+  const match = /^host:[ \t]*([^\r\n]*?)[ \t]*$/im.exec(head.toString("latin1"));
+  return match?.[1]?.toLowerCase();
+}
+
+/** Whether `host` (a Host header) names this machine's loopback on `port`. */
+export function isLocalHost(host: string | undefined, port: number): boolean {
+  if (!host) return false;
+  const names = ["127.0.0.1", "localhost", "[::1]"];
+  return names.some((name) => host === `${name}:${port}` || (port === 80 && host === name));
 }
 
 /** Inserts `header` after the request line of the buffered request head. */
@@ -135,7 +161,10 @@ function listen(server: Server, port: number): Promise<void> {
 }
 
 const TOKEN_TTL = "12h";
-const TOKEN_RENEW_MS = 11 * 60 * 60 * 1000;
+/** Renew two hours before the 12-hour TTL, leaving room for retries. */
+const TOKEN_RENEW_AFTER_MS = 10 * 60 * 60 * 1000;
+const TOKEN_RENEW_CHECK_MS = 30 * 1000;
+const KEEPALIVE_RETRY_MS = 5 * 1000;
 /** The keepalive ends on its own after this, in case the process dies without cleaning up. */
 const KEEPALIVE_MAX_SECONDS = 36 * 60 * 60;
 
@@ -159,9 +188,15 @@ export interface ForwardPortOptions {
 export interface ForwardedPort {
   /** Port listening on 127.0.0.1. */
   localPort: number;
-  /** `http://localhost:<localPort>` */
+  /**
+   * `http://127.0.0.1:<localPort>`. Not `localhost`, which can resolve to ::1,
+   * where another local server may hold the same port.
+   */
   url: string;
-  /** Stops listening, ends the keepalive, and revokes the access token. */
+  /**
+   * Stops listening, ends the keepalive, and revokes the access token. The
+   * sandbox's other process connections are left alone.
+   */
   close(): Promise<void>;
 }
 
@@ -192,18 +227,40 @@ export async function forwardPort(sandbox: Sandbox, port: number, options: Forwa
     throw error;
   }
 
-  const keepalive = options.keepAwake === false
-    ? undefined
-    : await sandbox.run("exec tail -f /dev/null", { collectOutput: false, timeoutSeconds: KEEPALIVE_MAX_SECONDS })
-      .catch(() => {
-        warn("Couldn't keep the sandbox awake; it may pause after its idle timeout.");
-        return undefined;
-      });
-
   let closing = false;
+  let wakeSleeper: (() => void) | undefined;
+  const pause = (ms: number) => new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+    wakeSleeper = () => { clearTimeout(timer); resolve(); };
+  });
+
+  // Hold a do-nothing process so the sandbox's idle timer stays off, and start
+  // another whenever it ends or its connection drops.
+  let keepalive: Awaited<ReturnType<Sandbox["run"]>> | undefined;
+  const keepAwake = options.keepAwake === false ? undefined : (async () => {
+    let failures = 0;
+    while (!closing) {
+      try {
+        keepalive = await sandbox.run("exec tail -f /dev/null", { collectOutput: false, timeoutSeconds: KEEPALIVE_MAX_SECONDS });
+        if (failures > 0) warn("The sandbox is being kept awake again.");
+        failures = 0;
+        await keepalive.wait();
+      } catch {
+        // Ended or disconnected; handled below.
+      }
+      if (closing) break;
+      if (failures++ === 0) warn("Lost the connection keeping the sandbox awake; retrying. It may pause after its idle timeout until then.");
+      await pause(Math.min(KEEPALIVE_RETRY_MS * failures, 60_000));
+    }
+  })();
+
+  // Renew on a wall-clock schedule, checked often, so a failed renewal is
+  // retried within minutes and a laptop waking from sleep renews right away.
+  let renewAt = Date.now() + TOKEN_RENEW_AFTER_MS;
+  let renewFailures = 0;
   let renewing: Promise<void> | undefined;
-  const renewal = setInterval(() => {
-    if (renewing) return;
+  const renew = () => {
     renewing = (async () => {
       const next = await sandbox.createPortToken(port, { ttl: TOKEN_TTL });
       if (closing) {
@@ -214,33 +271,43 @@ export async function forwardPort(sandbox: Sandbox, port: number, options: Forwa
       tunnel.setPortToken(next.token);
       const previous = access;
       access = next;
+      renewAt = Date.now() + TOKEN_RENEW_AFTER_MS;
+      if (renewFailures > 0) warn("Renewed the tunnel's access token.");
+      renewFailures = 0;
       await sandbox.deletePortToken(previous.id).catch(() => {});
     })()
-      .catch(() => warn("Couldn't renew the tunnel's access token; new connections may fail once it expires."))
+      .catch(() => {
+        if (renewFailures++ === 0) warn("Couldn't renew the tunnel's access token; retrying. New connections fail if it expires first.");
+        renewAt = Date.now() + Math.min(60_000 * renewFailures, 10 * 60_000);
+      })
       .finally(() => { renewing = undefined; });
-  }, TOKEN_RENEW_MS);
+  };
+  const renewal = setInterval(() => {
+    if (!renewing && !closing && Date.now() >= renewAt) renew();
+  }, TOKEN_RENEW_CHECK_MS);
   renewal.unref?.();
 
   let closed: Promise<void> | undefined;
   return {
     localPort: tunnel.port,
-    url: `http://localhost:${tunnel.port}`,
+    url: `http://127.0.0.1:${tunnel.port}`,
     close: () => closed ??= (async () => {
       clearInterval(renewal);
       closing = true;
+      wakeSleeper?.();
       // Let a renewal already in flight finish, so the token it made is revoked below (or by itself).
       await renewing;
       await tunnel.close();
       await keepalive?.kill().catch(() => {});
       await keepalive?.disconnect().catch(() => {});
+      await keepAwake;
       await sandbox.deletePortToken(access.id).catch(() => {});
-      await sandbox.processes.disconnect().catch(() => {});
     })(),
   };
 }
 
 /**
- * Starts a sandbox's desktop and serves it on localhost (port 6080 unless
+ * Starts a sandbox's desktop and serves it on 127.0.0.1 (port 6080 unless
  * taken). Open `viewerUrl` in a browser on this machine.
  */
 export async function openDesktopTunnel(

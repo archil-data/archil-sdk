@@ -104,12 +104,16 @@ test("disk exec sugar is rewritten after the disk command word", () => {
 });
 
 test("login never overwrites a profile someone created by hand", () => {
-  assert.equal(loginProfileName({}, "aws-us-east-1", undefined), "aws-us-east-1");
+  assert.equal(loginProfileName({}, "aws-us-east-1", undefined, "Acme"), "aws-us-east-1");
   const manual = { "aws-us-east-1": { region: "aws-us-east-1" } };
-  assert.equal(loginProfileName(manual, "aws-us-east-1", undefined), "aws-us-east-1-2");
-  const relogin = { ...manual, "aws-us-east-1-2": { region: "aws-us-east-1", apiKeyId: "tok-1" } };
-  assert.equal(loginProfileName(relogin, "aws-us-east-1", undefined), "aws-us-east-1-2", "a later login replaces the earlier login's profile");
-  assert.equal(loginProfileName(relogin, "aws-us-east-1", "https://control.example.com"), "aws-us-east-1-3", "a different endpoint gets its own");
+  assert.equal(loginProfileName(manual, "aws-us-east-1", undefined, "Acme"), "aws-us-east-1-2");
+  const relogin = { ...manual, "aws-us-east-1-2": { region: "aws-us-east-1", apiKeyId: "tok-1", account: "Acme" } };
+  assert.equal(loginProfileName(relogin, "aws-us-east-1", undefined, "Acme"), "aws-us-east-1-2", "a later login replaces the same account's profile");
+  assert.equal(loginProfileName(relogin, "aws-us-east-1", undefined, "Other Co"), "aws-us-east-1-3", "another account gets its own");
+  assert.equal(loginProfileName(relogin, "aws-us-east-1", "https://control.example.com", "Acme"), "aws-us-east-1-3", "a different endpoint gets its own");
+  assert.equal(loginProfileName(relogin, "aws-us-east-1", undefined, "Acme", "aws-us-east-1-2"), "aws-us-east-1-2", "--profile may name an earlier login's profile");
+  assert.equal(loginProfileName(relogin, "aws-us-east-1", undefined, "Acme", "fresh"), "fresh");
+  assert.throws(() => loginProfileName(relogin, "aws-us-east-1", undefined, "Acme", "aws-us-east-1"), /already exists and wasn't created by 'archil login'/);
 });
 
 test("the standalone sandbox executable keeps tables when piped; archil switches to JSON", async () => {
@@ -121,6 +125,12 @@ test("the standalone sandbox executable keeps tables when piped; archil switches
   const legacy = createSandboxProgram({ version: "test", createClient: () => ({ sandboxes: service }), stdout: legacyOut, stderr: { write: () => true } });
   await legacy.parseAsync(["node", "sandbox", "--api-key", "key-test", "--region", "r", "list"]);
   assert.match(legacyOut.values.join(""), /│ id\s+│ name/, "unchanged: a table, even when piped");
+
+  vi.stubEnv("FORCE_COLOR", "1");
+  const forced = piped();
+  const legacyForced = createSandboxProgram({ version: "test", createClient: () => ({ sandboxes: service }), stdout: forced, stderr: { write: () => true } });
+  await legacyForced.parseAsync(["node", "sandbox", "--api-key", "key-test", "--region", "r", "list"]);
+  assert.ok(!forced.values.join("").includes("\x1b["), "never colored, even with FORCE_COLOR");
 
   const archilOut = piped();
   const archil = createArchilProgram({ version: "test", createClient: () => ({ sandboxes: service }), stdout: archilOut, stderr: { write: () => true } });

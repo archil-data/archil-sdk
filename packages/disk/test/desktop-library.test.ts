@@ -8,7 +8,13 @@ import { forwardPort, openDesktopTunnel, type PortTunnelOptions } from "../src/t
 const TOKEN = "cd".repeat(32);
 
 function fakeSandbox(handler: (command: string, env?: Record<string, string>) => { exitCode: number; stdout?: string; stderr?: string }) {
-  const keepalive = { kill: vi.fn(async () => undefined), disconnect: vi.fn(async () => undefined) };
+  let ended!: () => void;
+  const finished = new Promise<void>((resolve) => { ended = resolve; });
+  const keepalive = {
+    wait: vi.fn(() => finished),
+    kill: vi.fn(async () => { ended(); }),
+    disconnect: vi.fn(async () => undefined),
+  };
   let tokens = 0;
   const sandbox = {
     name: "desk",
@@ -115,7 +121,7 @@ test("forwardPort falls back to a free port only when it picked the port itself"
       },
     });
     assert.deepEqual(ports, [80, 0]);
-    assert.equal(forwarded.url, "http://localhost:50123");
+    assert.equal(forwarded.url, "http://127.0.0.1:50123");
   }
   const { sandbox, raw } = fakeSandbox(desktopUp);
   await assert.rejects(forwardPort(sandbox, 80, {
@@ -131,6 +137,41 @@ test("openDesktopTunnel starts the desktop and returns a viewer URL", async () =
     keepAwake: false,
     openTunnel: async () => ({ port: 6080, setPortToken: () => {}, close: async () => {} }),
   });
-  assert.equal(tunnel.viewerUrl, `http://localhost:6080${desktopViewerPath(TOKEN)}`);
+  assert.equal(tunnel.viewerUrl, `http://127.0.0.1:6080${desktopViewerPath(TOKEN)}`);
   await tunnel.close();
+});
+
+test("forwardPort restarts the keepalive when it ends unexpectedly", async () => {
+  const { sandbox, raw } = fakeSandbox(desktopUp);
+  const warnings: string[] = [];
+  let endFirst!: () => void;
+  const first = { wait: () => new Promise<void>((resolve) => { endFirst = resolve; }), kill: vi.fn(async () => {}), disconnect: vi.fn(async () => {}) };
+  let endSecond!: () => void;
+  const second = { wait: () => new Promise<void>((resolve) => { endSecond = resolve; }), kill: vi.fn(async () => { endSecond(); }), disconnect: vi.fn(async () => {}) };
+  raw.run.mockResolvedValueOnce(first as never).mockResolvedValueOnce(second as never);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const forwarded = await forwardPort(sandbox, 8080, {
+      onWarning: (message) => warnings.push(message),
+      openTunnel: async () => ({ port: 50_124, setPortToken: () => {}, close: async () => {} }),
+    });
+    endFirst();
+    await vi.waitFor(() => assert.equal(warnings.length, 1));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => assert.equal(raw.run.mock.calls.length, 2, "a new keepalive replaces the one that ended"));
+    assert.match(warnings[0]!, /Lost the connection keeping the sandbox awake/);
+    await forwarded.close();
+    assert.equal(second.kill.mock.calls.length, 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("forwardPort.close leaves the sandbox's other process connections alone", async () => {
+  const { sandbox, raw } = fakeSandbox(desktopUp);
+  const forwarded = await forwardPort(sandbox, 8080, {
+    openTunnel: async () => ({ port: 50_125, setPortToken: () => {}, close: async () => {} }),
+  });
+  await forwarded.close();
+  assert.equal(raw.processes.disconnect.mock.calls.length, 0);
 });

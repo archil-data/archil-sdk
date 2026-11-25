@@ -25,6 +25,8 @@ import {
 } from "./sandbox-ssh.js";
 import { formatDuration, type Ui } from "./ui.js";
 import type { OutputStream } from "./write-output.js";
+import { readProfileCredential } from "./credentials.js";
+import { loadProfiles } from "./profiles.js";
 
 const SSH_INCLUDE_FILE = "archil_config";
 const SSH_INCLUDE_LINE = `Include ~/.ssh/${SSH_INCLUDE_FILE}`;
@@ -146,6 +148,8 @@ async function serveTunnel(
   }
   const uptime = formatDuration(now() - started);
   await forwarded.close();
+  // This CLI owns the sandbox object, so it can drop its idle process connection too.
+  await sandbox.processes.disconnect().catch(() => {});
   ui.success(`Closed tunnel after ${uptime} and revoked its access token`);
 }
 
@@ -229,7 +233,7 @@ async function openDesktop(
     DESKTOP_PORT,
     localPort,
     (port) => {
-      const url = `http://localhost:${port}${desktopViewerPath(token)}`;
+      const url = `http://127.0.0.1:${port}${desktopViewerPath(token)}`;
       return {
         url,
         rows: [
@@ -275,7 +279,7 @@ Examples:
         port,
         localPort,
         (actual) => {
-          const url = `http://localhost:${actual}`;
+          const url = `http://127.0.0.1:${actual}`;
           return {
             url,
             rows: [
@@ -294,9 +298,25 @@ Examples:
 
 function addSshCommands(context: AccessContext): void {
   const { program, ui } = context;
-  const proxyArgs = () => {
-    const { profile } = context.credentials();
-    return [...context.selfCommand, ...(profile ? ["--profile", profile] : [])];
+  /**
+   * The CLI arguments a persisted ProxyCommand needs to reach the same
+   * account later, from an editor that has none of this shell's environment.
+   * A key saved in a profile is referenced by --profile. A key that only exists
+   * in ARCHIL_API_KEY or --api-key is never written to disk; `persistsKey` says
+   * whether the config works without it. Region and base URL aren't secret, so
+   * they're written whenever the profile doesn't already supply them.
+   */
+  const persistentProxyArgs = async (): Promise<{ args: string[]; persistsKey: boolean }> => {
+    const credentials = context.credentials();
+    const config = await loadProfiles();
+    const profile = credentials.profile ? config.profiles[credentials.profile] : undefined;
+    const savedKey = profile ? await readProfileCredential(credentials.profile!).catch(() => undefined) : undefined;
+    const persistsKey = savedKey !== undefined && savedKey === credentials.apiKey;
+    const args = [...context.selfCommand];
+    if (persistsKey) args.push("--profile", credentials.profile!);
+    if (!persistsKey || credentials.region !== profile?.region) args.push("--region", credentials.region);
+    if (credentials.baseUrl && (!persistsKey || credentials.baseUrl !== profile?.baseUrl)) args.push("--base-url", credentials.baseUrl);
+    return { args, persistsKey };
   };
 
   program.command("ssh <id|name> [command...]")
@@ -319,7 +339,8 @@ the host <sandbox-name>${SSH_HOST_SUFFIX}.
       // OpenSSH reads options after the host too, so `-L ...` and a remote
       // command can both follow it.
       const code = await context.runSsh(
-        [...sshOptions(proxyArgs()), `${sshTarget(target)}${SSH_HOST_SUFFIX}`, ...command],
+        // The proxy inherits ssh's environment, which carries these credentials.
+        [...sshOptions(context.selfCommand), `${sshTarget(target)}${SSH_HOST_SUFFIX}`, ...command],
         {
           ...process.env,
           ARCHIL_API_KEY: credentials.apiKey,
@@ -347,7 +368,11 @@ the host <sandbox-name>${SSH_HOST_SUFFIX}.
     .option("--install", "Write ~/.ssh/archil_config and include it from the top of ~/.ssh/config")
     .action(async (options: { install?: boolean }) => {
       await ensureKeyWithProgress(ui);
-      const block = sshConfigBlock(proxyArgs());
+      const { args, persistsKey } = await persistentProxyArgs();
+      const block = sshConfigBlock(args);
+      if (!persistsKey) {
+        ui.warn("Your API key comes from ARCHIL_API_KEY or --api-key, which this config can't store. ssh needs that variable set wherever it runs, and editors usually don't have it. Run 'archil login' to save a profile instead.");
+      }
       if (context.selfCommand.some((part) => part.includes(`${"/"}_npx${"/"}`))) {
         ui.warn("This config points at a temporary npx copy of the CLI. Install it first so the path stays valid: npm install -g archil");
       }
@@ -360,7 +385,7 @@ the host <sandbox-name>${SSH_HOST_SUFFIX}.
       // ssh_config takes the first value it finds for each option, so the
       // archil hosts go in their own file, included from the top of the
       // user's config, ahead of any `Host *` block that would override them.
-      await writeFile(join(sshDir, SSH_INCLUDE_FILE), sshConfigBlock(proxyArgs()), { mode: 0o600 });
+      await writeFile(join(sshDir, SSH_INCLUDE_FILE), block, { mode: 0o600 });
       const path = join(sshDir, "config");
       let existing = "";
       try {

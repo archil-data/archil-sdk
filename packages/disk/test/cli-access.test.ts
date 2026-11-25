@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { createArchilProgram } from "../src/cli/archil-command.js";
+import { writeProfileCredential } from "../src/cli/credentials.js";
+import { saveProfiles } from "../src/cli/profiles.js";
 import { withArchilInclude } from "../src/cli/sandbox-access.js";
 import {
   cachedSandboxNames,
@@ -111,6 +113,15 @@ test("rememberHostKey keeps one current entry per host", async () => {
   assert.equal(await readFile(path, "utf8"), "other.archil ssh-ed25519 OTHER\ndev.archil ssh-ed25519 NEW\n");
 });
 
+test("concurrent host key pins don't drop each other", async () => {
+  const path = join(directory, "known_hosts");
+  await Promise.all(Array.from({ length: 12 }, (_, index) =>
+    rememberHostKey(path, `box-${index}.archil`, `ssh-ed25519 KEY${index} root@box`)));
+  const lines = (await readFile(path, "utf8")).trim().split("\n").sort();
+  assert.equal(lines.length, 12);
+  for (let index = 0; index < 12; index++) assert.ok(lines.includes(`box-${index}.archil ssh-ed25519 KEY${index}`));
+});
+
 test("ssh runs OpenSSH against <name>.archil with the proxy and credentials", async () => {
   const { sandbox } = sshSandbox();
   const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
@@ -173,6 +184,38 @@ test("ssh-config --install includes the archil hosts ahead of the user's own con
   assert.equal(config, `Include ~/.ssh/archil_config\n\n${userConfig}`, "one Include first, the user's config untouched, the old appended block gone");
   assert.match(await readFile(join(sshDir, "archil_config"), "utf8"), /^Host \*\.archil$/m);
   assert.equal(withArchilInclude(""), "Include ~/.ssh/archil_config\n");
+});
+
+test("ssh-config never writes an API key; it references a saved profile or warns", async () => {
+  const { sandbox } = sshSandbox();
+  // Key only from --api-key: the config gets the region but no key, plus a warning.
+  const envOnly = program(sandbox);
+  await envOnly.run("sandbox", "ssh-config");
+  const printed = envOnly.stdout.values.join("");
+  assert.match(printed, /ssh-proxy %n/);
+  assert.match(printed, /--region aws-us-east-1 ssh-proxy/);
+  assert.ok(!printed.includes("key-test"), "the API key is never written");
+  assert.match(envOnly.stderr.values.join(""), /can't store/);
+
+  // Key from a saved profile: referenced by name. The shell running the tests
+  // may export real credentials, which would (rightly) take precedence.
+  for (const name of ["ARCHIL_API_KEY", "ARCHIL_REGION", "ARCHIL_BASE_URL", "ARCHIL_PROFILE"]) vi.stubEnv(name, undefined);
+  await writeProfileCredential("work", "key-saved");
+  await saveProfiles({ version: 1, currentProfile: "work", profiles: { work: { region: "aws-us-west-2" } } });
+  const stdout = sink();
+  const stderr = sink();
+  const root = createArchilProgram({
+    version: "test",
+    createClient: () => ({ sandboxes: { list: async () => [sandbox], get: async () => sandbox, create: async () => sandbox } }),
+    stdout,
+    stderr,
+    selfCommand: ["/usr/bin/node", "/opt/archil.mjs", "sandbox"],
+  });
+  await root.parseAsync(["node", "archil", "sandbox", "ssh-config"]);
+  const config = stdout.values.join("");
+  assert.match(config, /ProxyCommand \/usr\/bin\/node \/opt\/archil\.mjs sandbox --profile work ssh-proxy %n/);
+  assert.ok(!config.includes("key-saved"));
+  assert.ok(!stderr.values.join("").includes("can't store"));
 });
 
 test("completion walks the command tree and fills in sandbox names and option values", async () => {

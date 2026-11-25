@@ -5,7 +5,7 @@
 // remotes (VS Code, Cursor) all work.
 
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -46,24 +46,70 @@ export async function ensureSshKey(keyPath = sshKeyPath()): Promise<string> {
 
 /** Records `hostKey` for `host` in the CLI's known_hosts file, replacing any older entry. */
 export async function rememberHostKey(knownHostsPath: string, host: string, hostKey: string): Promise<void> {
-  let lines: string[] = [];
-  try {
-    lines = (await readFile(knownHostsPath, "utf8")).split("\n").filter(Boolean);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  const entry = `${host} ${hostKey.trim().split(/\s+/).slice(0, 2).join(" ")}`;
-  const kept = lines.filter((line) => line.split(" ")[0] !== host);
   await mkdir(dirname(knownHostsPath), { recursive: true });
-  const temporary = `${knownHostsPath}.${process.pid}.tmp`;
-  await writeFile(temporary, `${[...kept, entry].join("\n")}\n`, { mode: 0o600 });
-  await rename(temporary, knownHostsPath);
+  // Several ssh-proxy processes can pin keys at once; serialize the read-modify-write.
+  await withFileLock(`${knownHostsPath}.lock`, async () => {
+    let lines: string[] = [];
+    try {
+      lines = (await readFile(knownHostsPath, "utf8")).split("\n").filter(Boolean);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const entry = `${host} ${hostKey.trim().split(/\s+/).slice(0, 2).join(" ")}`;
+    const kept = lines.filter((line) => line.split(" ")[0] !== host);
+    const temporary = `${knownHostsPath}.${process.pid}.tmp`;
+    await writeFile(temporary, `${[...kept, entry].join("\n")}\n`, { mode: 0o600 });
+    await rename(temporary, knownHostsPath);
+  });
 }
+
+const LOCK_WAIT_MS = 10_000;
+const LOCK_STALE_MS = 10_000;
+
+/** Runs `operation` while holding an exclusive lock file; a lock older than LOCK_STALE_MS is taken over. */
+async function withFileLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      await (await open(path, "wx")).close();
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const age = await stat(path).then((info) => Date.now() - info.mtimeMs, () => 0);
+      if (age > LOCK_STALE_MS) {
+        await unlink(path).catch(() => {});
+        continue;
+      }
+      if (Date.now() > deadline) throw new Error(`Timed out waiting for ${path}`);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  try {
+    return await operation();
+  } finally {
+    await unlink(path).catch(() => {});
+  }
+}
+
+// Serializes first-time setup across concurrent ssh-proxy connections in the
+// sandbox. A lock left by a killed setup is ignored after five minutes.
+const SETUP_LOCK = `
+lock=/tmp/.archil-ssh-setup.lock
+i=0
+until mkdir "$lock" 2>/dev/null; do
+  i=$((i + 1))
+  [ "$i" -ge 600 ] && break
+  sleep 0.5
+done
+trap 'rmdir "$lock" 2>/dev/null' EXIT`;
 
 const FIND_SSHD = "command -v sshd || { [ -x /usr/sbin/sshd ] && echo /usr/sbin/sshd; }";
 
-const INSTALL_SSHD = `
-if command -v apt-get >/dev/null; then
+const INSTALL_SSHD = `${SETUP_LOCK}
+# Another connection may have installed it while this one waited.
+if command -v sshd >/dev/null || [ -x /usr/sbin/sshd ]; then
+  exit 0
+elif command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-server
 elif command -v apk >/dev/null; then
@@ -76,7 +122,7 @@ else
 fi`;
 
 // Authorizes the CLI's key for root and prints the sshd path and host key.
-const PREPARE_SSHD = `
+const PREPARE_SSHD = `${SETUP_LOCK}
 set -e
 sshd=$(${FIND_SSHD})
 mkdir -p /run/sshd /root/.ssh
