@@ -1,5 +1,17 @@
 # disk
 
+## 1.15.1
+
+### Patch Changes
+
+- ef0aa63: `archil login` fixes and polish:
+  
+  - Accept `Origin: null` on the sign-in callback. Some browsers send it when the HTTPS console posts to the CLI's `http://127.0.0.1` listener. The callback is still authenticated by its single-use state, and sites that send their own origin are still turned away.
+  - Exit right after signing in. Previously the browser's idle keep-alive connection could hold the command open for a minute or two.
+  - Warn after signing in when `ARCHIL_API_KEY`, `ARCHIL_REGION`, `ARCHIL_BASE_URL`, or `ARCHIL_PROFILE` is set, since those take precedence over the new profile. A 401 or 403 now says when the rejected key came from `ARCHIL_API_KEY`.
+  - `archil sandbox` (or `archil disk`) without a subcommand prints its help without an error marker.
+- 6321093: `archil sandbox ssh` now turns off mouse reporting, focus events, and bracketed paste, and shows the cursor, after ssh exits on a terminal. A remote program such as tmux or vim could leave these on when the connection dropped (for example when the sandbox paused at its timeout), so moving the mouse at the local prompt typed text like `35;26;11M`. The command also passes Ctrl-C, SIGTERM, and SIGHUP to ssh instead of exiting before it, so the shell never gets the terminal back while ssh still holds it. Plain `ssh <sandbox>.archil` sessions don't go through the CLI after ssh exits, so this doesn't cover them.
+
 ## 1.15.0
 
 ### Minor Changes
