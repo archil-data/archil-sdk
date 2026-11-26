@@ -5,21 +5,33 @@
 // creates an API key for their account and submits it, with the same `state`,
 // as a form POST to http://127.0.0.1:<port>/callback. The CLI accepts exactly
 // one callback whose state matches, then saves the key as a profile.
+//
+// The callback's `apiKey`, `keyId`, `region` and `baseUrl` fields describe the
+// key for the account's default region; that is all 0.1.0 CLIs read. Keys only
+// work in the region that created them, so the console may also send `keys`, a
+// JSON list of `{region, apiKey, keyId?, baseUrl?}` covering every region, and
+// `accountId`, a stable id that finds this account's profile on the next login.
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { hostname } from "node:os";
 
 export const DEFAULT_CONSOLE_URL = "https://console.archil.com";
-const MAX_CALLBACK_BYTES = 16 * 1024;
+const MAX_CALLBACK_BYTES = 64 * 1024;
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 
-export interface LoginGrant {
-  apiKey: string;
+export interface RegionKey {
   region: string;
-  baseUrl?: string;
+  apiKey: string;
   keyId?: string;
+  baseUrl?: string;
+}
+
+/** The default region's key, plus `keys`: every region's key, the default's first. */
+export interface LoginGrant extends RegionKey {
   account?: string;
+  accountId?: string;
+  keys: RegionKey[];
 }
 
 export class LoginDeniedError extends Error {}
@@ -37,7 +49,7 @@ export function consoleUrl(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** Starts the loopback listener and returns the URL the user should open. */
-export async function startLoginSession(options: { console?: string; timeoutMs?: number; machine?: string } = {}): Promise<LoginSession> {
+export async function startLoginSession(options: { console?: string; timeoutMs?: number; machine?: string; region?: string } = {}): Promise<LoginSession> {
   const base = options.console ?? consoleUrl();
   const state = randomBytes(32).toString("hex");
   let settle!: { resolve: (grant: LoginGrant) => void; reject: (error: Error) => void };
@@ -74,6 +86,7 @@ export async function startLoginSession(options: { console?: string; timeoutMs?:
 
   const port = (server.address() as { port: number }).port;
   const params = new URLSearchParams({ port: String(port), state, hostname: options.machine ?? hostname() });
+  if (options.region) params.set("region", options.region);
   return {
     url: `${base}/cli/login?${params}`,
     grant,
@@ -117,7 +130,20 @@ async function handleCallback(
     respond(response, 400, page("Something went wrong", "The console didn't send a key. Run archil login again."));
     return { error: new Error("The console didn't send an API key") };
   }
-  const account = fields.get("account");
+  const defaultKey: RegionKey = {
+    region,
+    apiKey,
+    keyId: fields.get("keyId") || undefined,
+    baseUrl: fields.get("baseUrl") || undefined,
+  };
+  let otherKeys: RegionKey[];
+  try {
+    otherKeys = parseRegionKeys(fields.get("keys")).filter((key) => key.region !== region);
+  } catch (error) {
+    respond(response, 400, page("Something went wrong", "The console sent keys the CLI couldn't read. Run archil login again."));
+    return { error: new Error(`The console sent malformed keys: ${(error as Error).message}`) };
+  }
+  const account = fields.get("account") || undefined;
   respond(response, 200, page(
     "You're signed in",
     `${account ? `The CLI is now signed in to ${account}. ` : ""}Return to your terminal; you can close this tab.`,
@@ -125,13 +151,31 @@ async function handleCallback(
   ));
   return {
     grant: {
-      apiKey,
-      region,
-      baseUrl: fields.get("baseUrl") || undefined,
-      keyId: fields.get("keyId") || undefined,
-      account: fields.get("account") || undefined,
+      ...defaultKey,
+      account,
+      accountId: fields.get("accountId") || undefined,
+      keys: [defaultKey, ...otherKeys],
     },
   };
+}
+
+/** Parses the `keys` field; a missing field means the scalar fields are the only key. */
+export function parseRegionKeys(value: string | null): RegionKey[] {
+  if (value === null) return [];
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed)) throw new Error("keys must be a JSON array");
+  const seen = new Set<string>();
+  return parsed.map((entry: unknown, index) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) throw new Error(`keys[${index}] must be an object`);
+    const { region, apiKey, keyId, baseUrl } = entry as Record<string, unknown>;
+    if (typeof region !== "string" || !region) throw new Error(`keys[${index}] has no region`);
+    if (typeof apiKey !== "string" || !apiKey) throw new Error(`keys[${index}] has no apiKey`);
+    if (keyId !== undefined && typeof keyId !== "string") throw new Error(`keys[${index}].keyId must be a string`);
+    if (baseUrl !== undefined && typeof baseUrl !== "string") throw new Error(`keys[${index}].baseUrl must be a string`);
+    if (seen.has(region)) throw new Error(`keys lists ${region} twice`);
+    seen.add(region);
+    return { region, apiKey, keyId: keyId || undefined, baseUrl: baseUrl || undefined };
+  });
 }
 
 function sameSecret(given: string, expected: string): boolean {

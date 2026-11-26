@@ -12,11 +12,17 @@ import { spawn } from "node:child_process";
 import { accessSync, closeSync, constants, openSync, readSync, realpathSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { Command } from "./command.js";
-import { addGlobalOptions, addProfileCommands, type CliGlobalOptions } from "./common.js";
+import { addGlobalOptions, addProfileCommands, credentialFlags, resolveProgramCredentials, type CliGlobalOptions } from "./common.js";
 import { validateCredentialAndResolveRegion } from "./credential-validation.js";
-import { deleteProfileCredential, resolveCliCredentials, writeProfileCredential } from "./credentials.js";
-import { consoleUrl, LoginDeniedError, startLoginSession } from "./login.js";
-import { deleteProfile, loadProfiles, saveProfiles } from "./profiles.js";
+import {
+  deleteProfileCredential,
+  pruneRegionCredentials,
+  validateApiKey,
+  writeProfileCredential,
+  type CredentialSource,
+} from "./credentials.js";
+import { consoleUrl, LoginDeniedError, startLoginSession, type LoginGrant } from "./login.js";
+import { deleteProfile, loadProfiles, profileRegions, saveProfiles, type DiskProfile } from "./profiles.js";
 import { createUi } from "./ui.js";
 import { completionScript } from "./completion.js";
 import { addDiskCommands } from "./disk-command.js";
@@ -162,16 +168,29 @@ function isNodeScript(path: string): boolean {
   }
 }
 
+export interface LoginIdentity {
+  /** The default region. */
+  region: string;
+  /** The default region's base URL. */
+  baseUrl?: string;
+  account?: string;
+  accountId?: string;
+}
+
+/** A profile name from an account's display name: "Acme Inc" becomes "acme-inc". */
+export function profileSlug(account: string): string {
+  return account.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 /**
- * Where `archil login` saves a key when no --profile is given: replace the
- * profile an earlier login made for this endpoint, otherwise use the region's
- * name, and never overwrite a profile someone created by hand.
+ * Where `archil login` saves an account's keys when no --profile is given:
+ * the profile an earlier login made for the same account, otherwise a fresh
+ * one named after the account (or the default region). It never overwrites a
+ * profile someone created by hand.
  */
 export function loginProfileName(
-  profiles: Record<string, { region: string; baseUrl?: string; apiKeyId?: string; account?: string }>,
-  region: string,
-  baseUrl: string | undefined,
-  account: string | undefined,
+  profiles: Record<string, DiskProfile>,
+  login: LoginIdentity,
   requested?: string,
 ): string {
   if (requested !== undefined) {
@@ -181,12 +200,43 @@ export function loginProfileName(
     }
     return requested;
   }
-  const previousLogin = Object.entries(profiles).find(([, profile]) =>
-    profile.apiKeyId !== undefined && profile.region === region && profile.baseUrl === baseUrl && profile.account === account);
-  if (previousLogin) return previousLogin[0];
-  let name = region;
-  for (let suffix = 2; profiles[name]; suffix++) name = `${region}-${suffix}`;
+  const logins = Object.entries(profiles).filter(([, profile]) => profile.apiKeyId !== undefined);
+  const sameAccount = (login.accountId !== undefined
+    ? logins.find(([, profile]) => profile.accountId === login.accountId)
+    : undefined)
+    ?? logins.find(([, profile]) =>
+      (profile.accountId === undefined || login.accountId === undefined)
+      && profile.account === login.account
+      && profile.baseUrl === login.baseUrl);
+  if (sameAccount) return sameAccount[0];
+  const base = (login.account && profileSlug(login.account)) || login.region;
+  let name = base;
+  for (let suffix = 2; profiles[name]; suffix++) name = `${base}-${suffix}`;
   return name;
+}
+
+/** Saves every key from a login as one profile, replacing what an earlier login saved there. */
+async function saveLogin(name: string, grant: LoginGrant): Promise<DiskProfile> {
+  const [defaultKey, ...otherKeys] = grant.keys;
+  for (const key of grant.keys) validateApiKey(key.apiKey);
+  await writeProfileCredential(name, defaultKey!.apiKey);
+  for (const key of otherKeys) await writeProfileCredential(name, key.apiKey, undefined, key.region);
+  const profile: DiskProfile = {
+    region: defaultKey!.region,
+    baseUrl: defaultKey!.baseUrl,
+    apiKeyId: defaultKey!.keyId,
+    account: grant.account,
+    accountId: grant.accountId,
+    ...(otherKeys.length > 0
+      ? { regions: Object.fromEntries(otherKeys.map((key) => [key.region, { baseUrl: key.baseUrl, apiKeyId: key.keyId }])) }
+      : {}),
+  };
+  const config = await loadProfiles();
+  config.profiles[name] = profile;
+  config.currentProfile = name;
+  await saveProfiles(config);
+  await pruneRegionCredentials(name, otherKeys.map((key) => key.region));
+  return profile;
 }
 
 function addAccountCommands(program: Command, dependencies: SandboxCliDependencies): void {
@@ -202,15 +252,18 @@ function addAccountCommands(program: Command, dependencies: SandboxCliDependenci
     .addHelpText("after", `
 Opens the Archil console, where you approve access for this machine. The
 console creates an API key named "CLI on <hostname>" and hands it back to this
-command, which saves it as a profile (named after its region unless you pass
---profile) and makes that profile the default.
+command, which saves it as a profile (named after the account unless you pass
+--profile) and makes that profile the default. Keys work only in the region
+that created them; a profile holds one for each region the console signed in
+to, and --region picks one per command. With --region, login asks the console
+to make that region the profile's default.
 
 Without a browser on this machine (CI, a remote shell), create a key in the
 console and run 'archil profile create', or set ARCHIL_API_KEY and ARCHIL_REGION.
 `)
     .action(async (options: { browser: boolean }) => {
       const global = program.opts<CliGlobalOptions>();
-      const session = await startLoginSession();
+      const session = await startLoginSession({ region: credentialFlags(program).region });
       const cancel = () => session.close();
       signals.once("SIGINT", cancel);
       try {
@@ -227,22 +280,22 @@ console and run 'archil profile create', or set ARCHIL_API_KEY and ARCHIL_REGION
             if (error instanceof LoginDeniedError) throw new Error("Sign-in was cancelled in the browser; nothing was saved");
             throw error;
           });
-        const region = await ui.step("Checking the new key", () =>
+        await ui.step("Checking the new key", () =>
           validate({ apiKey: grant.apiKey, region: grant.region, baseUrl: grant.baseUrl }), "Key works");
 
         const config = await loadProfiles();
-        const name = loginProfileName(config.profiles, region, grant.baseUrl, grant.account, global.profile);
-        await writeProfileCredential(name, grant.apiKey);
-        config.profiles[name] = { region, baseUrl: grant.baseUrl, apiKeyId: grant.keyId, account: grant.account };
-        config.currentProfile = name;
-        await saveProfiles(config);
+        const name = loginProfileName(config.profiles, grant, global.profile);
+        const profile = await saveLogin(name, grant);
 
-        const where = name === region ? "" : `, ${region}`;
-        ui.success(`Signed in${grant.account ? ` to ${style.bold(grant.account)}` : ""} as profile ${style.bold(name)} ${style.dim(`(now the default${where})`)}`);
+        const regions = profileRegions(profile);
+        const summary = regions.length === 1 ? `region ${regions[0]}` : `regions: ${regions.join(", ")}; default ${profile.region}`;
+        ui.success(`Signed in${grant.account ? ` to ${style.bold(grant.account)}` : ""} as profile ${style.bold(name)} ${style.dim(`(${summary})`)}`);
         ui.blank();
         ui.details([["Try", "archil sandbox create my-desk --desktop"], ["", "archil sandbox list"]]);
         // ARCHIL_PROFILE usually chose `name` itself; it only overrides when it names another profile.
-        const overriding = ["ARCHIL_API_KEY", "ARCHIL_REGION", "ARCHIL_BASE_URL"].filter((variable) => process.env[variable]);
+        // ARCHIL_BASE_URL only matters next to ARCHIL_API_KEY; profiles carry their own endpoints.
+        const overriding = (process.env.ARCHIL_API_KEY ? ["ARCHIL_API_KEY", "ARCHIL_REGION", "ARCHIL_BASE_URL"] : ["ARCHIL_REGION"])
+          .filter((variable) => process.env[variable]);
         if (process.env.ARCHIL_PROFILE && process.env.ARCHIL_PROFILE !== name) overriding.push("ARCHIL_PROFILE");
         if (overriding.length > 0) {
           ui.blank();
@@ -256,7 +309,7 @@ console and run 'archil profile create', or set ARCHIL_API_KEY and ARCHIL_REGION
     });
 
   program.command("logout")
-    .description("Delete the current profile and its saved key from this machine")
+    .description("Delete the current profile and its saved keys from this machine")
     .action(async () => {
       const global = program.opts<CliGlobalOptions>();
       const config = await loadProfiles();
@@ -267,31 +320,39 @@ console and run 'archil profile create', or set ARCHIL_API_KEY and ARCHIL_REGION
       } else {
         await deleteProfileCredential(name);
         await deleteProfile(name);
-        ui.success(`Signed out of ${style.bold(name)}; its key is no longer saved on this machine`);
+        const several = profileRegions(profile).length > 1;
+        ui.success(`Signed out of ${style.bold(name)}; its ${several ? "keys are" : "key is"} no longer saved on this machine`);
         // API keys can't revoke themselves; only a signed-in console session can.
         if (profile.apiKeyId) {
-          ui.info(`The key still works until you revoke it: ${style.cyan(style.underline(`${consoleUrl()}/api-keys`))}`);
+          ui.info(`${several ? "The keys still work until you revoke them" : "The key still works until you revoke it"}: ${style.cyan(style.underline(`${consoleUrl()}/api-keys`))}`);
         }
       }
       if (process.env.ARCHIL_API_KEY) ui.warn("ARCHIL_API_KEY is still set in your environment, so commands keep using it.");
     });
 
   program.command("whoami")
-    .description("Show which account and profile commands use, and check the credentials")
+    .description("Show which account, profile, and region commands use, and check the credentials")
     .action(async () => {
-      const global = program.opts<CliGlobalOptions>();
+      const credentials = await resolveProgramCredentials(program);
       const config = await loadProfiles();
-      const credentials = await resolveCliCredentials(global, config);
-      const profile = credentials.profile ? config.profiles[credentials.profile] : undefined;
-      const fromEnvironment = Boolean(global.apiKey ?? process.env.ARCHIL_API_KEY);
+      const profile = credentials.source === "profile" ? config.profiles[credentials.profile!] : undefined;
       await ui.step("Checking credentials", () => validate(credentials), "Credentials work");
+      const otherRegions = profile ? profileRegions(profile).filter((region) => region !== credentials.region) : [];
       ui.blank();
       ui.details([
         ...(profile?.account ? [["Account", style.bold(profile.account)] as [string, string]] : []),
-        ["Profile", fromEnvironment ? style.dim("none (ARCHIL_API_KEY)") : credentials.profile ?? style.dim("none")],
-        ["Region", credentials.region],
+        ["Profile", credentials.profile ?? style.dim("none")],
+        ["Region", `${credentials.region}${profile && credentials.region === profile.region ? style.dim(" (default)") : ""}`],
+        ...(otherRegions.length > 0 ? [["Also", otherRegions.join(", ")] as [string, string]] : []),
         ...(credentials.baseUrl ? [["Endpoint", credentials.baseUrl] as [string, string]] : []),
+        ["Source", SOURCE_LABELS[credentials.source]],
         ["Key", `…${credentials.apiKey.slice(-4)}`],
       ]);
     });
 }
+
+const SOURCE_LABELS: Record<CredentialSource, string> = {
+  flag: "--api-key",
+  env: "ARCHIL_API_KEY",
+  profile: "saved profile",
+};

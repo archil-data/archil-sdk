@@ -14,8 +14,9 @@ import {
   type CompletionSource,
 } from "../src/cli/completion.js";
 import { resolveCliCredentials } from "../src/cli/credentials.js";
-import { loadProfiles } from "../src/cli/profiles.js";
+import { loadProfiles, profileRegions } from "../src/cli/profiles.js";
 import { Archil } from "../src/index.js";
+import { REGION_URLS } from "../src/regions.js";
 
 const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
 
@@ -51,6 +52,11 @@ async function main(argv: string[]): Promise<void> {
 async function completionLookup(source: CompletionSource, options: CompletionCredentials): Promise<string[]> {
   const profiles = await loadProfiles();
   if (source === "profiles") return Object.keys(profiles.profiles);
+  if (source === "regions") {
+    const name = options.profile ?? (process.env.ARCHIL_PROFILE || profiles.currentProfile);
+    const profile = name ? profiles.profiles[name] : undefined;
+    return profile ? profileRegions(profile) : Object.keys(REGION_URLS);
+  }
   const credentials = await resolveCliCredentials(options, profiles);
   const account = createHash("sha256")
     .update([credentials.apiKey, credentials.region, credentials.baseUrl ?? ""].join("\n"))

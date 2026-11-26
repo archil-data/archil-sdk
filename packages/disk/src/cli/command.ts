@@ -10,6 +10,7 @@
 /** A usage problem with the command line itself (unknown option, missing argument). */
 export class CliUsageError extends Error {}
 
+export type OptionValueSource = "cli" | "env" | "default";
 type OptionParser = (value: string, previous: unknown) => unknown;
 type ActionHandler = (...args: any[]) => void | Promise<void>;
 type PreActionHook = (thisCommand: Command, actionCommand: Command) => void | Promise<void>;
@@ -91,7 +92,7 @@ export class Command {
   private _helpAfter = "";
   private _showGlobalOptions = false;
   private _values: Record<string, unknown> = {};
-  private readonly _fromCli = new Set<string>();
+  private readonly _sources = new Map<string, OptionValueSource>();
 
   constructor(name = "") {
     this._name = name;
@@ -177,6 +178,12 @@ export class Command {
     return { ...this._values } as T;
   }
 
+  /** Where an option's current value came from: the command line, its environment variable, or its default. */
+  getOptionValueSource(attribute: string): OptionValueSource | undefined {
+    if (this._sources.has(attribute)) return this._sources.get(attribute);
+    return attribute in this._values ? "default" : undefined;
+  }
+
   /** Parse `argv` (`[node, script, ...args]`) and run the selected command's action. */
   async parseAsync(argv: string[]): Promise<this> {
     await this._run(argv.slice(2));
@@ -199,7 +206,7 @@ export class Command {
 
   private _reset(): void {
     this._values = {};
-    this._fromCli.clear();
+    this._sources.clear();
     for (const option of this._options) {
       if (option.defaultValue !== undefined) this._values[option.attribute] = option.defaultValue;
     }
@@ -221,15 +228,16 @@ export class Command {
       const previous = owner._values[option.attribute];
       owner._values[option.attribute] = option.parser ? option.parser(value!, previous) : value;
     }
-    owner._fromCli.add(option.attribute);
+    owner._sources.set(option.attribute, "cli");
   }
 
   private _applyEnvironment(): void {
     for (const option of this._options) {
-      if (!option.envVar || this._fromCli.has(option.attribute)) continue;
+      if (!option.envVar || this._sources.get(option.attribute) === "cli") continue;
       const value = process.env[option.envVar];
       if (value === undefined) continue;
       this._values[option.attribute] = option.parser ? option.parser(value, this._values[option.attribute]) : value;
+      this._sources.set(option.attribute, "env");
     }
   }
 

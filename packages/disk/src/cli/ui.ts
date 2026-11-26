@@ -4,6 +4,7 @@
 // a terminal, so piped stdout stays clean and scripts see no escape codes.
 
 import { ArchilApiError } from "../errors.js";
+import { lastCredentialChoice, type CredentialChoice } from "./credentials.js";
 
 export interface UiStream {
   write(data: string): unknown;
@@ -175,7 +176,7 @@ export function printError(
   error: unknown,
   stream: UiStream = process.stderr,
   commandName = "archil",
-  { legacy = false, env = process.env }: { legacy?: boolean; env?: NodeJS.ProcessEnv } = {},
+  { legacy = false, credentials = lastCredentialChoice() }: { legacy?: boolean; credentials?: CredentialChoice | null } = {},
 ): void {
   const status = typeof error === "object" && error !== null && "status" in error ? (error as { status?: number }).status : undefined;
   const message = error instanceof Error ? error.message : String(error);
@@ -191,9 +192,14 @@ export function printError(
   }
   const style = styles(colorEnabled(stream));
   stream.write(`${style.red("✗")} ${message}${status ? style.dim(` (HTTP ${status})`) : ""}\n`);
-  if ((status === 401 || status === 403) && env.ARCHIL_API_KEY) {
+  const rejected = status === 401 || status === 403;
+  if (rejected && credentials?.source === "env") {
     stream.write(`  ${style.dim(`The key in ${style.bold("ARCHIL_API_KEY")} was used; it takes precedence over saved profiles.`)}\n`);
     stream.write(`  ${style.dim(`Unset ARCHIL_API_KEY and ARCHIL_REGION to use the profile from ${style.bold("archil login")}.`)}\n`);
+  } else if (rejected && credentials?.source === "flag") {
+    stream.write(`  ${style.dim(`The key passed with ${style.bold("--api-key")} was used.`)}\n`);
+  } else if (rejected && credentials?.source === "profile") {
+    stream.write(`  ${style.dim(`The key saved in profile ${style.bold(credentials.profile ?? "")} for ${credentials.region} was used. Sign in again with ${style.bold("archil login")}.`)}\n`);
   } else if (status === 401 || status === 403 || /Not signed in|Missing API key|Missing region/.test(message)) {
     stream.write(`  ${style.dim(`Sign in with ${style.bold("archil login")}, or set ARCHIL_API_KEY and ARCHIL_REGION.`)}\n`);
   } else if (/^error: (unknown|missing|too many|option)/.test(message)) {

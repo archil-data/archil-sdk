@@ -104,16 +104,30 @@ test("disk exec sugar is rewritten after the disk command word", () => {
 });
 
 test("login never overwrites a profile someone created by hand", () => {
-  assert.equal(loginProfileName({}, "aws-us-east-1", undefined, "Acme"), "aws-us-east-1");
-  const manual = { "aws-us-east-1": { region: "aws-us-east-1" } };
-  assert.equal(loginProfileName(manual, "aws-us-east-1", undefined, "Acme"), "aws-us-east-1-2");
-  const relogin = { ...manual, "aws-us-east-1-2": { region: "aws-us-east-1", apiKeyId: "tok-1", account: "Acme" } };
-  assert.equal(loginProfileName(relogin, "aws-us-east-1", undefined, "Acme"), "aws-us-east-1-2", "a later login replaces the same account's profile");
-  assert.equal(loginProfileName(relogin, "aws-us-east-1", undefined, "Other Co"), "aws-us-east-1-3", "another account gets its own");
-  assert.equal(loginProfileName(relogin, "aws-us-east-1", "https://control.example.com", "Acme"), "aws-us-east-1-3", "a different endpoint gets its own");
-  assert.equal(loginProfileName(relogin, "aws-us-east-1", undefined, "Acme", "aws-us-east-1-2"), "aws-us-east-1-2", "--profile may name an earlier login's profile");
-  assert.equal(loginProfileName(relogin, "aws-us-east-1", undefined, "Acme", "fresh"), "fresh");
-  assert.throws(() => loginProfileName(relogin, "aws-us-east-1", undefined, "Acme", "aws-us-east-1"), /already exists and wasn't created by 'archil login'/);
+  const acme = { region: "aws-us-east-1", account: "Acme" };
+  assert.equal(loginProfileName({}, acme), "acme");
+  const manual = { acme: { region: "aws-us-east-1" } };
+  assert.equal(loginProfileName(manual, acme), "acme-2");
+  const relogin = { ...manual, "acme-2": { region: "aws-us-east-1", apiKeyId: "tok-1", account: "Acme" } };
+  assert.equal(loginProfileName(relogin, acme), "acme-2", "a later login replaces the same account's profile");
+  assert.equal(loginProfileName(relogin, { region: "aws-us-west-2", account: "Acme" }), "acme-2", "even when its default region changed");
+  assert.equal(loginProfileName(relogin, { region: "aws-us-east-1", account: "Other Co" }), "other-co", "another account gets its own");
+  assert.equal(loginProfileName(relogin, { ...acme, baseUrl: "https://control.example.com" }), "acme-3", "a different endpoint gets its own");
+  assert.equal(loginProfileName(relogin, acme, "acme-2"), "acme-2", "--profile may name an earlier login's profile");
+  assert.equal(loginProfileName(relogin, acme, "fresh"), "fresh");
+  assert.throws(() => loginProfileName(relogin, acme, "acme"), /already exists and wasn't created by 'archil login'/);
+  assert.equal(loginProfileName({}, { region: "aws-us-east-1" }), "aws-us-east-1", "no account: named after the region");
+  assert.equal(loginProfileName({}, { region: "aws-us-east-1", account: "!!!" }), "aws-us-east-1");
+});
+
+test("an account id finds the account's profile even after a rename, and tells same-named accounts apart", () => {
+  const profiles = {
+    "acme": { region: "aws-us-east-1", apiKeyId: "tok-1", account: "Acme", accountId: "org_1" },
+    "legacy": { region: "aws-us-east-1", apiKeyId: "tok-2", account: "Legacy Co" },
+  };
+  assert.equal(loginProfileName(profiles, { region: "aws-us-east-1", account: "Acme Renamed", accountId: "org_1" }), "acme");
+  assert.equal(loginProfileName(profiles, { region: "aws-us-east-1", account: "Acme", accountId: "org_2" }), "acme-2");
+  assert.equal(loginProfileName(profiles, { region: "aws-us-east-1", account: "Legacy Co", accountId: "org_3" }), "legacy", "a 0.1.0 profile without an id matches by name");
 });
 
 test("the standalone sandbox executable keeps tables when piped; archil switches to JSON", async () => {
@@ -156,13 +170,21 @@ test("a command group without a subcommand prints its help plainly, not as an er
   assert.equal(lines.join(""), "Usage: archil sandbox [options] [command]\n\nCommands:\n  list\n");
 });
 
-test("a rejected key from ARCHIL_API_KEY says the environment overrode the saved profile", () => {
+test("a rejected key's hint names the source the key actually came from", () => {
   const lines: string[] = [];
   const stream = { isTTY: false, write(data: string) { lines.push(data); return true; } };
-  printError(new ArchilApiError("API request failed with status 401", 401), stream, "archil", { env: { ARCHIL_API_KEY: "key-old" } });
+  const rejected = new ArchilApiError("API request failed with status 401", 401);
+  printError(rejected, stream, "archil", { credentials: { source: "env", region: "aws-us-east-1" } });
   assert.match(lines.join(""), /ARCHIL_API_KEY was used; it takes precedence over saved profiles/);
   lines.length = 0;
-  printError(new ArchilApiError("API request failed with status 401", 401), stream, "archil", { env: {} });
+  printError(rejected, stream, "archil", { credentials: { source: "profile", profile: "acme", region: "aws-us-west-2" } });
+  assert.match(lines.join(""), /The key saved in profile acme for aws-us-west-2 was used/);
+  assert.doesNotMatch(lines.join(""), /ARCHIL_API_KEY was used/);
+  lines.length = 0;
+  printError(rejected, stream, "archil", { credentials: { source: "flag", region: "aws-us-east-1" } });
+  assert.match(lines.join(""), /--api-key was used/);
+  lines.length = 0;
+  printError(rejected, stream, "archil", { credentials: null });
   assert.match(lines.join(""), /Sign in with archil login/);
 });
 

@@ -25,8 +25,10 @@ npx archil disk list
 
 `archil login` opens the Archil console, where you approve access for this machine. The
 console creates an API key named "CLI on <hostname>" and hands it back to the CLI, which
-saves it as the default profile. `archil whoami` shows which account and profile commands
-use, and `archil logout` removes the saved key. To revoke the key itself, delete it under
+saves it as the default profile, named after your account. An API key only works in the
+region that created it, so a profile holds one key per region and a default region; pass
+`--region` to any command to use another of its regions. `archil whoami` shows which
+account, profile, and region commands use, and `archil logout` removes the saved keys. To revoke the key itself, delete it under
 API Keys in the console. In CI or on machines without a browser, set `ARCHIL_API_KEY` and
 `ARCHIL_REGION`, or save a key with `archil profile create`.
 
@@ -140,8 +142,25 @@ npx archil profile use test-yellow
 npx archil sandbox list
 ```
 
-`profile create` securely prompts for the API key. Flags override environment variables,
-which override the selected profile. The library API does not read profiles.
+`profile create` securely prompts for the API key unless you pass `--api-key`. Run it
+again with the same `--profile` and another region's key to add that region to the
+profile.
+
+Each command takes its key from exactly one place, and the region and base URL that go
+with it:
+
+1. `--api-key`, with `--region` (else `ARCHIL_REGION`) and `--base-url` (else
+   `ARCHIL_BASE_URL`).
+2. `--profile`: the key for `--region`, else `ARCHIL_REGION`, else the profile's default
+   region. `--base-url` overrides the profile's URL for that region.
+3. `ARCHIL_API_KEY`, with `ARCHIL_REGION` and `ARCHIL_BASE_URL`. `--region` and
+   `--base-url` still override them.
+4. The profile named by `ARCHIL_PROFILE`, else the current profile, choosing the region
+   as in 2.
+
+The library API does not read profiles. It falls back to `ARCHIL_API_KEY`,
+`ARCHIL_REGION`, and (when the region also comes from the environment)
+`ARCHIL_BASE_URL`.
 
 ## Library
 

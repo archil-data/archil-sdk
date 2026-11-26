@@ -7,15 +7,18 @@ import {
 import {
   deleteProfileCredential,
   promptSecret,
+  rememberCredentialChoice,
   resolveCliCredentials,
   validateApiKey,
   writeProfileCredential,
-  type ResolveCredentialOptions,
+  type CredentialFlags,
+  type ResolvedCredentials,
 } from "./credentials.js";
 import { renderTable } from "./output.js";
-import { deleteProfile, loadProfiles, saveProfiles } from "./profiles.js";
+import { deleteProfile, loadProfiles, profileEndpoint, profileRegions, saveProfiles } from "./profiles.js";
 
-export type CliGlobalOptions = ResolveCredentialOptions;
+/** The global options' values, whether typed or taken from their environment variables. */
+export type CliGlobalOptions = CredentialFlags;
 type ProfileOutput = "table" | "text" | "json";
 export type ProfileCredentialValidator = (options: CredentialValidationOptions) => Promise<string>;
 
@@ -32,8 +35,17 @@ export function isProfileCommand(command: Command): boolean {
   return command.parent?.name() === "profile";
 }
 
-export async function resolveProgramCredentials(program: Command) {
-  return resolveCliCredentials(program.opts<CliGlobalOptions>(), await loadProfiles());
+/** The global credential options typed on the command line, leaving out values from environment variables. */
+export function credentialFlags(program: Command): CredentialFlags {
+  const options = program.opts<CredentialFlags>();
+  const typed = (name: keyof CredentialFlags) => program.getOptionValueSource(name) === "cli" ? options[name] : undefined;
+  return { apiKey: typed("apiKey"), region: typed("region"), baseUrl: typed("baseUrl"), profile: typed("profile") };
+}
+
+export async function resolveProgramCredentials(program: Command): Promise<ResolvedCredentials> {
+  const credentials = await resolveCliCredentials(credentialFlags(program), await loadProfiles());
+  rememberCredentialChoice(credentials);
+  return credentials;
 }
 
 export function addProfileCommands(
@@ -51,14 +63,14 @@ export function addProfileCommands(
   );
   const profiles = program.command("profile").description("Manage named Archil profiles and credentials");
 
-  outputOption(profiles.command("create").description("Create a named profile"))
+  outputOption(profiles.command("create").description("Create a named profile, or add a region to one"))
     .action(async (options: { output: ProfileOutput }) => {
       const global = program.opts<CliGlobalOptions>();
       const config = await loadProfiles();
-      if (global.profile && config.profiles[global.profile]) {
-        throw new Error(`Profile '${global.profile}' already exists`);
-      }
-      const apiKey = validateApiKey(global.apiKey ?? await promptSecret());
+      const existing = global.profile ? config.profiles[global.profile] : undefined;
+      const alreadyHas = (region: string) => new Error(`Profile '${global.profile}' already exists and has a key for ${region}`);
+      if (existing && global.region && profileEndpoint(existing, global.region)) throw alreadyHas(global.region);
+      const apiKey = validateApiKey(credentialFlags(program).apiKey ?? await promptSecret());
       const progress = !global.region && !global.baseUrl && process.stderr.isTTY
         ? spinner(process.stderr)
         : undefined;
@@ -75,6 +87,19 @@ export function addProfileCommands(
         progress?.error("No valid region found");
         throw error;
       }
+
+      if (existing) {
+        if (profileEndpoint(existing, region)) throw alreadyHas(region);
+        const name = global.profile!;
+        await writeProfileCredential(name, apiKey, undefined, region);
+        existing.regions = { ...existing.regions, [region]: { baseUrl: global.baseUrl } };
+        config.currentProfile = name;
+        await saveProfiles(config);
+        if (options.output === "json") console.log(JSON.stringify({ name, region, baseUrl: global.baseUrl, regions: profileRegions(existing), current: true }, null, 2));
+        else console.log(`Added ${region} to profile '${name}'`);
+        return;
+      }
+
       let name = global.profile ?? region;
       if (!global.profile) {
         let suffix = 2;
@@ -97,15 +122,17 @@ export function addProfileCommands(
           name,
           region: profile.region,
           baseUrl: profile.baseUrl,
+          regions: profileRegions(profile),
+          ...(profile.account ? { account: profile.account } : {}),
           current: config.currentProfile === name,
         }));
       if (options.output === "json") console.log(JSON.stringify(items, null, 2));
       else if (options.output === "text") {
-        for (const item of items) console.log(`${item.current ? "*" : " "} ${item.name}\t${item.region}\t${item.baseUrl ?? "default"}`);
+        for (const item of items) console.log(`${item.current ? "*" : " "} ${item.name}\t${item.region}\t${item.baseUrl ?? "default"}\t${item.regions.join(",")}`);
       } else {
         console.log(renderTable(
-          items.map((item) => [item.current ? "*" : "", item.name, item.region, item.baseUrl ?? "default"]),
-          ["current", "name", "region", "base URL"],
+          items.map((item) => [item.current ? "*" : "", item.name, item.region, item.baseUrl ?? "default", item.regions.join(", ")]),
+          ["current", "name", "region", "base URL", "regions"],
         ));
       }
     });
