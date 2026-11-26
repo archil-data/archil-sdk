@@ -1,6 +1,6 @@
 {
   "name": "archil",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The archil CLI (archil disk, archil sandbox) and an alias for disk, the Archil client for disks and sandboxes",
   "keywords": [
     "archil",

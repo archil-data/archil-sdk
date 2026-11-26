@@ -1,5 +1,13 @@
 # @archildata/mastra
 
+## 0.0.28
+
+### Patch Changes
+
+- Updated dependencies [ef0aa63]
+- Updated dependencies [6321093]
+  - disk@1.15.1
+
 ## 0.0.27
 
 ### Patch Changes
