@@ -22,6 +22,7 @@ import {
   sshKnownHostsPath,
   sshOptions,
   sshTarget,
+  TERMINAL_MODE_RESET,
 } from "../src/cli/sandbox-ssh.js";
 import { createUi, formatDuration, visibleLength } from "../src/cli/ui.js";
 import type { Sandbox } from "../src/sandbox.js";
@@ -74,8 +75,8 @@ function sshSandbox(overrides: Record<string, unknown> = {}) {
   return { sandbox, remote, sent, exec };
 }
 
-function program(sandbox: Sandbox, extra: { runSsh?: (args: string[], env: NodeJS.ProcessEnv) => Promise<number>; stdin?: NodeJS.ReadStream } = {}) {
-  const stdout = sink();
+function program(sandbox: Sandbox, extra: { runSsh?: (args: string[], env: NodeJS.ProcessEnv) => Promise<number>; stdin?: NodeJS.ReadStream; ttyStdout?: boolean } = {}) {
+  const stdout = sink(extra.ttyStdout);
   const stderr = sink();
   const exitCodes: number[] = [];
   const root = createArchilProgram({
@@ -136,6 +137,30 @@ test("ssh runs OpenSSH against <name>.archil with the proxy and credentials", as
   assert.equal(env.ARCHIL_REGION, "aws-us-east-1");
   assert.deepEqual(cli.exitCodes, [7]);
   assert.match(await readFile(join(directory, ".ssh", "archil_ed25519.pub"), "utf8"), /^ssh-ed25519 /);
+});
+
+test("ssh turns off mouse and paste modes on a terminal once ssh exits", async () => {
+  const { sandbox } = sshSandbox();
+  let written: string[] = [];
+  const cli = program(sandbox, {
+    ttyStdout: true,
+    runSsh: async () => { written = [...cli.stdout.values]; return 255; },
+  });
+  await cli.run("sandbox", "ssh", "dev");
+  assert.deepEqual(written, [], "nothing is written while ssh owns the terminal");
+  const reset = cli.stdout.values.join("");
+  assert.equal(reset, TERMINAL_MODE_RESET);
+  for (const mode of [1000, 1002, 1003, 1005, 1006, 1015, 2004]) assert.ok(reset.includes(`\x1b[?${mode}l`), `resets ${mode}`);
+  assert.ok(reset.endsWith("\x1b[?25h"));
+  assert.ok(!reset.includes("1049"), "leaves the alternate screen alone");
+  assert.deepEqual(cli.exitCodes, [255]);
+});
+
+test("ssh leaves piped stdout untouched", async () => {
+  const { sandbox } = sshSandbox();
+  const cli = program(sandbox, { runSsh: async () => 0 });
+  await cli.run("sandbox", "ssh", "dev", "--", "cat", "/etc/hostname");
+  assert.deepEqual(cli.stdout.values, []);
 });
 
 test("ssh-proxy wakes the sandbox, pins its host key, and relays sshd", async () => {
