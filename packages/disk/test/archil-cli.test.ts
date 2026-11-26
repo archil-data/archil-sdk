@@ -148,3 +148,83 @@ test("legacy error output is byte-for-byte the original format", () => {
     "Missing API key: pass --api-key, set ARCHIL_API_KEY, or run 'profile create'\n",
   ]);
 });
+
+test("a command group without a subcommand prints its help plainly, not as an error", () => {
+  const lines: string[] = [];
+  const stream = { isTTY: true, write(data: string) { lines.push(data); return true; } };
+  printError(new Error("Usage: archil sandbox [options] [command]\n\nCommands:\n  list"), stream);
+  assert.equal(lines.join(""), "Usage: archil sandbox [options] [command]\n\nCommands:\n  list\n");
+});
+
+test("a rejected key from ARCHIL_API_KEY says the environment overrode the saved profile", () => {
+  const lines: string[] = [];
+  const stream = { isTTY: false, write(data: string) { lines.push(data); return true; } };
+  printError(new ArchilApiError("API request failed with status 401", 401), stream, "archil", { env: { ARCHIL_API_KEY: "key-old" } });
+  assert.match(lines.join(""), /ARCHIL_API_KEY was used; it takes precedence over saved profiles/);
+  lines.length = 0;
+  printError(new ArchilApiError("API request failed with status 401", 401), stream, "archil", { env: {} });
+  assert.match(lines.join(""), /Sign in with archil login/);
+});
+
+test("login warns when environment variables will override the profile it saved", async () => {
+  vi.stubEnv("ARCHIL_CONSOLE_URL", "https://console.example.com");
+  vi.stubEnv("ARCHIL_API_KEY", "key-old");
+  vi.stubEnv("ARCHIL_REGION", "aws-us-west-2");
+  let output = "";
+  const stderr = { isTTY: false, write(data: string) { output += data; return true; } };
+  const program = createArchilProgram({
+    version: "test",
+    createClient: () => { throw new Error("unused"); },
+    stderr,
+    validateCredential: async ({ region }) => region!,
+    openUrl: (url) => {
+      const params = new URL(url).searchParams;
+      void fetch(`http://127.0.0.1:${params.get("port")}/callback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://console.example.com" },
+        body: new URLSearchParams({ state: params.get("state")!, apiKey: "key-new", region: "aws-us-east-1", account: "Acme" }),
+      });
+    },
+  });
+  await program.parseAsync(["node", "archil", "login"]);
+  assert.match(output, /Signed in to Acme/);
+  assert.match(output, /ARCHIL_API_KEY, ARCHIL_REGION are set in your environment and take precedence over this profile/);
+  assert.match(output, /unset ARCHIL_API_KEY ARCHIL_REGION/);
+});
+
+async function loginWith(argv: string[]): Promise<string> {
+  vi.stubEnv("ARCHIL_CONSOLE_URL", "https://console.example.com");
+  for (const variable of ["ARCHIL_API_KEY", "ARCHIL_REGION", "ARCHIL_BASE_URL"]) vi.stubEnv(variable, undefined);
+  let output = "";
+  const stderr = { isTTY: false, write(data: string) { output += data; return true; } };
+  const program = createArchilProgram({
+    version: "test",
+    createClient: () => { throw new Error("unused"); },
+    stderr,
+    validateCredential: async ({ region }) => region!,
+    openUrl: (url) => {
+      const params = new URL(url).searchParams;
+      void fetch(`http://127.0.0.1:${params.get("port")}/callback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://console.example.com" },
+        body: new URLSearchParams({ state: params.get("state")!, apiKey: "key-new", region: "aws-us-east-1", account: "Acme" }),
+      });
+    },
+  });
+  await program.parseAsync(["node", "archil", ...argv, "login"]);
+  return output;
+}
+
+test("ARCHIL_PROFILE that picked the login's own profile isn't reported as an override", async () => {
+  vi.stubEnv("ARCHIL_PROFILE", "work");
+  const output = await loginWith([]);
+  assert.match(output, /as profile work/);
+  assert.doesNotMatch(output, /precedence/);
+});
+
+test("ARCHIL_PROFILE naming a different profile than --profile is reported", async () => {
+  vi.stubEnv("ARCHIL_PROFILE", "work");
+  const output = await loginWith(["--profile", "personal"]);
+  assert.match(output, /as profile personal/);
+  assert.match(output, /ARCHIL_PROFILE is set in your environment and takes precedence over this profile/);
+});

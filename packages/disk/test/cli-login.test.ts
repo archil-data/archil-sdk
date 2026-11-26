@@ -67,3 +67,38 @@ test("the session times out", async () => {
   const session = await startLoginSession({ console: CONSOLE, timeoutMs: 20 });
   await assert.rejects(session.grant, /Timed out/);
 });
+
+test("an HTTPS console's callback arrives with Origin: null and is accepted", async () => {
+  // Browsers send `Origin: null` for a form POST from an HTTPS page to http://127.0.0.1.
+  const session = await startLoginSession({ console: "https://console.example.com" });
+  const { callback, state } = callbackOf(session.url);
+  const approved = await post(callback, { state, apiKey: "key-abc", region: "aws-us-east-1" }, "null");
+  assert.equal(approved.status, 200);
+  assert.equal((await session.grant).apiKey, "key-abc");
+});
+
+test("a foreign origin is still turned away even with Origin: null allowed", async () => {
+  const session = await startLoginSession({ console: CONSOLE });
+  const { callback, state } = callbackOf(session.url);
+  assert.equal((await post(callback, { state, apiKey: "key-x", region: "r" }, "https://evil.example")).status, 403);
+  session.close();
+  await assert.rejects(session.grant, /cancelled/);
+});
+
+test("the listener drops a browser's keep-alive connection so the CLI can exit", async () => {
+  const { request } = await import("node:http");
+  const session = await startLoginSession({ console: CONSOLE });
+  const { callback, state } = callbackOf(session.url);
+  const agent = new (await import("node:http")).Agent({ keepAlive: true });
+  const closed = new Promise<void>((resolve) => {
+    const req = request(callback, { method: "POST", agent, headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: CONSOLE } }, (res) => {
+      assert.equal(res.headers.connection, "close");
+      res.resume();
+      res.socket.once("close", () => resolve());
+    });
+    req.end(new URLSearchParams({ state, apiKey: "key-abc", region: "r" }).toString());
+  });
+  await session.grant;
+  await closed;
+  agent.destroy();
+});

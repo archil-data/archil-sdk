@@ -49,8 +49,12 @@ export async function startLoginSession(options: { console?: string; timeoutMs?:
     if (finished) return;
     finished = true;
     clearTimeout(timer);
-    // Let the browser receive its page before the listener goes away.
-    setTimeout(() => server.close(), 100).unref();
+    // Let the browser receive its page before the listener goes away. Browsers
+    // hold idle keep-alive sockets open, which would keep this process alive.
+    setTimeout(() => {
+      server.close();
+      server.closeAllConnections();
+    }, 100).unref();
     if (outcome.grant) settle.resolve(outcome.grant);
     else settle.reject(outcome.error!);
   };
@@ -88,9 +92,13 @@ async function handleCallback(
     respond(response, 404, page("Not found", "This address only receives Archil CLI sign-ins."));
     return undefined;
   }
-  // Browsers send Origin on form POSTs; anything else didn't come from the console.
+  // A form POST from the console carries its origin, except that browsers send
+  // `Origin: null` when an HTTPS page posts to plain HTTP (the default
+  // strict-origin-when-cross-origin policy), which is exactly the console
+  // reaching this listener. The single-use state below is what authenticates
+  // the callback; this only turns away other sites that name themselves.
   const origin = request.headers.origin;
-  if (origin && origin !== new URL(consoleBase).origin) {
+  if (origin && origin !== "null" && origin !== new URL(consoleBase).origin) {
     respond(response, 403, page("Not allowed", "This sign-in didn't come from the Archil console."));
     return undefined;
   }
@@ -155,6 +163,7 @@ function respond(response: ServerResponse, status: number, html: string): void {
     "Content-Type": "text/html; charset=utf-8",
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
+    Connection: "close",
   });
   response.end(html);
 }

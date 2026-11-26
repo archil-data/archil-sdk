@@ -175,7 +175,7 @@ export function printError(
   error: unknown,
   stream: UiStream = process.stderr,
   commandName = "archil",
-  { legacy = false }: { legacy?: boolean } = {},
+  { legacy = false, env = process.env }: { legacy?: boolean; env?: NodeJS.ProcessEnv } = {},
 ): void {
   const status = typeof error === "object" && error !== null && "status" in error ? (error as { status?: number }).status : undefined;
   const message = error instanceof Error ? error.message : String(error);
@@ -184,9 +184,17 @@ export function printError(
     stream.write(`${error instanceof ArchilApiError ? `Error (${error.status}): ` : ""}${message}\n`);
     return;
   }
+  if (message.startsWith("Usage: ")) {
+    // A command group run without a subcommand: its help, not a failure to dress up.
+    stream.write(`${message}\n`);
+    return;
+  }
   const style = styles(colorEnabled(stream));
   stream.write(`${style.red("✗")} ${message}${status ? style.dim(` (HTTP ${status})`) : ""}\n`);
-  if (status === 401 || status === 403 || /Not signed in|Missing API key|Missing region/.test(message)) {
+  if ((status === 401 || status === 403) && env.ARCHIL_API_KEY) {
+    stream.write(`  ${style.dim(`The key in ${style.bold("ARCHIL_API_KEY")} was used; it takes precedence over saved profiles.`)}\n`);
+    stream.write(`  ${style.dim(`Unset ARCHIL_API_KEY and ARCHIL_REGION to use the profile from ${style.bold("archil login")}.`)}\n`);
+  } else if (status === 401 || status === 403 || /Not signed in|Missing API key|Missing region/.test(message)) {
     stream.write(`  ${style.dim(`Sign in with ${style.bold("archil login")}, or set ARCHIL_API_KEY and ARCHIL_REGION.`)}\n`);
   } else if (/^error: (unknown|missing|too many|option)/.test(message)) {
     stream.write(`  ${style.dim(`See ${style.bold(`${commandName} --help`)}.`)}\n`);
