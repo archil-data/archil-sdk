@@ -22,6 +22,7 @@ import {
   sshOptions,
   sshTarget,
   SSH_HOST_SUFFIX,
+  TERMINAL_MODE_RESET,
 } from "./sandbox-ssh.js";
 import { formatDuration, type Ui } from "./ui.js";
 import type { OutputStream } from "./write-output.js";
@@ -348,6 +349,8 @@ the host <sandbox-name>${SSH_HOST_SUFFIX}.
           ...(credentials.baseUrl ? { ARCHIL_BASE_URL: credentials.baseUrl } : {}),
         },
       );
+      // A remote program's mouse or paste modes outlive a connection that drops under it.
+      if (context.stdout.isTTY) context.stdout.write(TERMINAL_MODE_RESET);
       context.setExitCode(code);
     });
 
@@ -412,12 +415,27 @@ async function ensureKeyWithProgress(ui: Ui): Promise<string> {
   }
 }
 
+/**
+ * Runs ssh on this terminal. Signals go to ssh instead of ending this process,
+ * so this process always outlives ssh: the shell doesn't get the terminal back
+ * while ssh still has it in raw mode, and the caller can restore it afterwards.
+ */
 export function runSshProcess(args: string[], env: NodeJS.ProcessEnv): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn("ssh", args, { stdio: "inherit", env });
-    child.on("error", (error: NodeJS.ErrnoException) => reject(error.code === "ENOENT"
-      ? new Error("ssh isn't installed on this machine; install OpenSSH and try again")
-      : error));
-    child.on("exit", (code, signal) => resolve(code ?? (signal ? 1 : 0)));
+    const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+    const forward = (signal: NodeJS.Signals) => { child.kill(signal); };
+    for (const signal of signals) process.on(signal, forward);
+    const stopForwarding = () => { for (const signal of signals) process.off(signal, forward); };
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      stopForwarding();
+      reject(error.code === "ENOENT"
+        ? new Error("ssh isn't installed on this machine; install OpenSSH and try again")
+        : error);
+    });
+    child.on("exit", (code, signal) => {
+      stopForwarding();
+      resolve(code ?? (signal ? 1 : 0));
+    });
   });
 }

@@ -186,6 +186,21 @@ export async function relaySshd(
   }
 }
 
+/**
+ * Turns off terminal modes that a remote program (tmux, vim, a TUI) can leave
+ * on when the connection drops before it restores them: mouse reporting
+ * (tracking modes 1000/1002/1003 and encodings 1005/1006/1015), focus events
+ * (1004), and bracketed paste (2004); it also shows the cursor. OpenSSH only
+ * restores termios, so without this, moving the mouse at the local prompt
+ * types reports like `35;26;11M`. The alternate screen is left alone: `?1049l`
+ * restores a stale saved cursor on terminals that don't check whether the
+ * alternate screen is active, and the dropped connection doesn't say whether
+ * it was.
+ */
+export const TERMINAL_MODE_RESET = [1000, 1002, 1003, 1005, 1006, 1015, 1004, 2004]
+  .map((mode) => `\x1b[?${mode}l`)
+  .join("") + "\x1b[?25h";
+
 /** The ProxyCommand that runs this CLI's `ssh-proxy` command for `%n`, the host as typed. */
 export function proxyCommand(cliArgs: string[]): string {
   return [...cliArgs, "ssh-proxy", "%n"].map(quoteForSsh).join(" ");
