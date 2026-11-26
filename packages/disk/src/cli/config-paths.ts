@@ -20,6 +20,12 @@ export function profileConfigPath(env: NodeJS.ProcessEnv = process.env): string 
   return join(diskConfigDir(env), "config.json");
 }
 
-export function credentialFilePath(profile: string, env: NodeJS.ProcessEnv = process.env): string {
+/** Where a profile's key is stored: its default region's, or with `region`, another region's. */
+export function credentialFilePath(profile: string, env: NodeJS.ProcessEnv = process.env, region?: string): string {
+  if (region !== undefined) return join(regionCredentialDir(profile, env), `${encodeURIComponent(region)}.key`);
   return join(diskConfigDir(env), "credentials", `${encodeURIComponent(profile)}.key`);
+}
+
+export function regionCredentialDir(profile: string, env: NodeJS.ProcessEnv = process.env): string {
+  return join(diskConfigDir(env), "credentials", `${encodeURIComponent(profile)}.regions`);
 }

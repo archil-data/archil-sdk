@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Command, Option } from "./command.js";
 import { diskConfigDir } from "./config-paths.js";
 
-export type CompletionSource = "sandboxes" | "profiles";
+export type CompletionSource = "sandboxes" | "profiles" | "regions";
 export type CompletionLookup = (source: CompletionSource) => Promise<string[]>;
 
 /** Mount commands the native client handles; suggested at the top level. */
@@ -66,6 +66,7 @@ export async function completeWords(root: Command, words: string[], lookup: Comp
   if (pendingOption) {
     if (pendingOption.long === "output") return matching(["table", "json"]);
     if (pendingOption.long === "profile") return matching(await lookup("profiles"));
+    if (pendingOption.long === "region") return matching(await lookup("regions"));
     return [];
   }
   if (!afterSeparator && current.startsWith("-")) {

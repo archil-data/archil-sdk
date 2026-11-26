@@ -1,7 +1,7 @@
-import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
-import { dirname } from "node:path";
-import { credentialFilePath } from "./config-paths.js";
-import type { DiskProfile } from "./profiles.js";
+import { mkdir, open, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { credentialFilePath, regionCredentialDir } from "./config-paths.js";
+import { profileEndpoint, type DiskProfile } from "./profiles.js";
 
 export function validateApiKey(value: string): string {
   const key = value.trim();
@@ -13,8 +13,9 @@ export function validateApiKey(value: string): string {
 export async function readProfileCredential(
   profile: string,
   env: NodeJS.ProcessEnv = process.env,
+  region?: string,
 ): Promise<string> {
-  const path = credentialFilePath(profile, env);
+  const path = credentialFilePath(profile, env, region);
   try {
     if (process.platform !== "win32") {
       const mode = (await stat(path)).mode & 0o777;
@@ -25,6 +26,9 @@ export async function readProfileCredential(
     return validateApiKey(await readFile(path, "utf8"));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      if (region !== undefined) {
+        throw new Error(`Missing API key for profile '${profile}' in ${region}: sign in again with 'archil login --profile ${profile}'`);
+      }
       throw new Error(`Missing API key for profile '${profile}': delete and recreate it with 'profile create --profile ${profile}'`);
     }
     throw error;
@@ -35,8 +39,9 @@ export async function writeProfileCredential(
   profile: string,
   secret: string,
   env: NodeJS.ProcessEnv = process.env,
+  region?: string,
 ): Promise<void> {
-  const path = credentialFilePath(profile, env);
+  const path = credentialFilePath(profile, env, region);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);
@@ -49,35 +54,107 @@ export async function writeProfileCredential(
   await rename(temporary, path);
 }
 
+/** Deletes every key saved for the profile, in all of its regions. */
 export async function deleteProfileCredential(
   profile: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   await rm(credentialFilePath(profile, env), { force: true });
+  await rm(regionCredentialDir(profile, env), { recursive: true, force: true });
 }
 
-export interface ResolveCredentialOptions {
+/** Deletes the profile's non-default region keys except those for `keep`. */
+export async function pruneRegionCredentials(
+  profile: string,
+  keep: Iterable<string>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const kept = new Set([...keep].map((region) => `${encodeURIComponent(region)}.key`));
+  let files: string[];
+  try {
+    files = await readdir(regionCredentialDir(profile, env));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  await Promise.all(files.filter((file) => !kept.has(file)).map((file) =>
+    rm(join(regionCredentialDir(profile, env), file), { force: true })));
+}
+
+/** Global credential options given on the command line; environment variables are read separately. */
+export interface CredentialFlags {
   apiKey?: string;
   region?: string;
   baseUrl?: string;
   profile?: string;
 }
 
+/** `flag`: --api-key. `env`: ARCHIL_API_KEY. `profile`: a key saved in a profile. */
+export type CredentialSource = "flag" | "env" | "profile";
+
+export interface ResolvedCredentials {
+  apiKey: string;
+  region: string;
+  baseUrl?: string;
+  profile?: string;
+  source: CredentialSource;
+}
+
+export type CredentialChoice = Pick<ResolvedCredentials, "source" | "profile" | "region">;
+let lastChoice: CredentialChoice | undefined;
+
+/** Records which credentials the running command uses, so an error can say where a rejected key came from. */
+export function rememberCredentialChoice({ source, profile, region }: CredentialChoice): void {
+  lastChoice = { source, profile, region };
+}
+
+export function lastCredentialChoice(): CredentialChoice | undefined {
+  return lastChoice;
+}
+
+type CredentialReader = (profile: string, env: NodeJS.ProcessEnv, region?: string) => Promise<string>;
+
+/**
+ * Picks one source for the key and takes the region and base URL that belong
+ * with it: --api-key, then --profile, then ARCHIL_API_KEY, then ARCHIL_PROFILE
+ * or the current profile. A profile holds a key per region; --region (else
+ * ARCHIL_REGION, else the profile's default) picks which one.
+ */
 export async function resolveCliCredentials(
-  options: ResolveCredentialOptions,
+  flags: CredentialFlags,
   profiles: { currentProfile?: string; profiles: Record<string, DiskProfile> },
   env: NodeJS.ProcessEnv = process.env,
-  readCredential: (profile: string, env: NodeJS.ProcessEnv) => Promise<string> = readProfileCredential,
-): Promise<{ apiKey: string; region: string; baseUrl?: string; profile?: string }> {
-  const selected = options.profile ?? env.ARCHIL_PROFILE ?? profiles.currentProfile;
-  const profile = selected ? profiles.profiles[selected] : undefined;
-  if (selected && !profile) throw new Error(`Profile '${selected}' does not exist`);
-  const apiKey = options.apiKey ?? env.ARCHIL_API_KEY ?? (profile && selected ? await readCredential(selected, env) : undefined);
-  const region = options.region ?? env.ARCHIL_REGION ?? profile?.region;
-  const baseUrl = options.baseUrl ?? env.ARCHIL_BASE_URL ?? profile?.baseUrl;
-  if (!apiKey) throw new Error("Missing API key: pass --api-key, set ARCHIL_API_KEY, or run 'profile create'");
-  if (!region) throw new Error("Missing region: pass --region, set ARCHIL_REGION, or select a profile");
-  return { apiKey: validateApiKey(apiKey), region, baseUrl, profile: selected };
+  readCredential: CredentialReader = readProfileCredential,
+): Promise<ResolvedCredentials> {
+  const withRegion = (source: CredentialSource, apiKey: string, missingRegion: string): ResolvedCredentials => {
+    const region = flags.region ?? (env.ARCHIL_REGION || undefined);
+    if (!region) throw new Error(`Missing region: ${missingRegion}`);
+    const baseUrl = flags.baseUrl ?? (env.ARCHIL_BASE_URL || undefined);
+    return { apiKey: validateApiKey(apiKey), region, baseUrl, source };
+  };
+
+  const fromProfile = async (name: string): Promise<ResolvedCredentials> => {
+    const profile = profiles.profiles[name];
+    if (!profile) throw new Error(`Profile '${name}' does not exist`);
+    const regionFromEnv = flags.region === undefined && Boolean(env.ARCHIL_REGION);
+    const region = flags.region ?? (env.ARCHIL_REGION || profile.region);
+    const endpoint = profileEndpoint(profile, region);
+    if (!endpoint) {
+      const chosenBy = regionFromEnv ? " (chosen by ARCHIL_REGION)" : "";
+      throw new Error(profile.apiKeyId !== undefined
+        ? `Profile '${name}' isn't signed in to ${region}${chosenBy}. Run 'archil login --region ${region}' to add it.`
+        : `Profile '${name}' has no key for ${region}${chosenBy}. Add one with 'profile create --profile ${name} --region ${region}'.`);
+    }
+    const apiKey = await readCredential(name, env, region === profile.region ? undefined : region);
+    return { apiKey: validateApiKey(apiKey), region, baseUrl: flags.baseUrl ?? endpoint.baseUrl, profile: name, source: "profile" };
+  };
+
+  if (flags.apiKey !== undefined) return withRegion("flag", flags.apiKey, "--api-key needs --region or ARCHIL_REGION");
+  if (flags.profile !== undefined) return fromProfile(flags.profile);
+  if (env.ARCHIL_API_KEY) return withRegion("env", env.ARCHIL_API_KEY, "ARCHIL_API_KEY needs ARCHIL_REGION or --region");
+  const selected = env.ARCHIL_PROFILE || profiles.currentProfile;
+  if (selected) return fromProfile(selected);
+  throw new Error("Missing API key: pass --api-key, set ARCHIL_API_KEY, or run 'profile create'");
 }
 
 interface SecretInput extends AsyncIterable<string | Uint8Array> {

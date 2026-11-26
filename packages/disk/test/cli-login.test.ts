@@ -46,13 +46,8 @@ test("only a matching state from the console's origin completes the sign-in", as
   });
   assert.equal(approved.status, 200);
   assert.match(approved.body, /You&#39;re signed in/);
-  assert.deepEqual(await session.grant, {
-    apiKey: "key-abc",
-    region: "aws-us-east-1",
-    keyId: "tok-1",
-    account: "Acme",
-    baseUrl: "https://control.example.com",
-  });
+  const defaultKey = { apiKey: "key-abc", region: "aws-us-east-1", keyId: "tok-1", baseUrl: "https://control.example.com" };
+  assert.deepEqual(await session.grant, { ...defaultKey, account: "Acme", accountId: undefined, keys: [defaultKey] });
 });
 
 test("a cancelled approval rejects without a key", async () => {

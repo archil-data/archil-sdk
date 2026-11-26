@@ -15,7 +15,11 @@ export interface ArchilOptions {
   apiKey?: string;
   /** Region. Falls back to ARCHIL_REGION env var if not provided. */
   region?: string;
-  /** Override the control plane base URL (useful for testing). */
+  /**
+   * Override the control plane base URL (useful for testing). Falls back to
+   * ARCHIL_BASE_URL when the region also comes from the environment, since a
+   * base URL belongs to its region.
+   */
   baseUrl?: string;
   /**
    * Override the S3-compatible API base URL used by Disk#getObject /
@@ -131,7 +135,8 @@ export class Archil {
     // Resolve the control-plane URL the same way the client does (explicit
     // override, else region lookup) so the S3 endpoint can be derived from it
     // even on the common region-based path.
-    const controlBaseUrl = opts.baseUrl ?? resolveBaseUrl(region);
+    const baseUrl = opts.baseUrl ?? (opts.region === undefined ? envVar("ARCHIL_BASE_URL") || undefined : undefined);
+    const controlBaseUrl = baseUrl ?? resolveBaseUrl(region);
 
     const client = createApiClient({
       apiKey,

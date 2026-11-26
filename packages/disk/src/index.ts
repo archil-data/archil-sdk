@@ -160,7 +160,7 @@ export type {
 } from "./types.js";
 
 // Module-level Archil instance backing the top-level convenience functions.
-// Defaults to env-based config (ARCHIL_API_KEY, ARCHIL_REGION); call configure()
+// Defaults to env-based config (ARCHIL_API_KEY, ARCHIL_REGION, ARCHIL_BASE_URL); call configure()
 // to pass options explicitly or to swap credentials mid-process.
 
 let _options: ArchilOptions | undefined;

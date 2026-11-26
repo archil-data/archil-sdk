@@ -25,8 +25,8 @@ import {
 } from "./sandbox-ssh.js";
 import { formatDuration, type Ui } from "./ui.js";
 import type { OutputStream } from "./write-output.js";
-import { readProfileCredential } from "./credentials.js";
-import { loadProfiles } from "./profiles.js";
+import type { ResolvedCredentials } from "./credentials.js";
+import { loadProfiles, profileEndpoint } from "./profiles.js";
 
 const SSH_INCLUDE_FILE = "archil_config";
 const SSH_INCLUDE_LINE = `Include ~/.ssh/${SSH_INCLUDE_FILE}`;
@@ -56,7 +56,7 @@ export interface AccessContext {
   output: (value: string) => void;
   formatOption: (command: Command) => Command;
   resolve: (target: string) => Promise<Sandbox>;
-  credentials: () => { apiKey: string; region: string; baseUrl?: string; profile?: string };
+  credentials: () => ResolvedCredentials;
   openUrl: (url: string) => void;
   openTunnel: (options: PortTunnelOptions) => Promise<PortTunnel>;
   /** argv prefix that runs this CLI's sandbox commands, e.g. [node, archil.mjs, "sandbox"]. */
@@ -301,22 +301,27 @@ function addSshCommands(context: AccessContext): void {
   /**
    * The CLI arguments a persisted ProxyCommand needs to reach the same
    * account later, from an editor that has none of this shell's environment.
-   * A key saved in a profile is referenced by --profile. A key that only exists
-   * in ARCHIL_API_KEY or --api-key is never written to disk; `persistsKey` says
-   * whether the config works without it. Region and base URL aren't secret, so
-   * they're written whenever the profile doesn't already supply them.
+   * A key saved in a profile is referenced by --profile, plus --region when
+   * it isn't the profile's default. A key that only exists in ARCHIL_API_KEY
+   * or --api-key is never written to disk; `persistsKey` says whether the
+   * config works without it. Region and base URL aren't secret, so they're
+   * written whenever the profile doesn't already supply them.
    */
   const persistentProxyArgs = async (): Promise<{ args: string[]; persistsKey: boolean }> => {
     const credentials = context.credentials();
-    const config = await loadProfiles();
-    const profile = credentials.profile ? config.profiles[credentials.profile] : undefined;
-    const savedKey = profile ? await readProfileCredential(credentials.profile!).catch(() => undefined) : undefined;
-    const persistsKey = savedKey !== undefined && savedKey === credentials.apiKey;
     const args = [...context.selfCommand];
-    if (persistsKey) args.push("--profile", credentials.profile!);
-    if (!persistsKey || credentials.region !== profile?.region) args.push("--region", credentials.region);
-    if (credentials.baseUrl && (!persistsKey || credentials.baseUrl !== profile?.baseUrl)) args.push("--base-url", credentials.baseUrl);
-    return { args, persistsKey };
+    const profile = credentials.source === "profile" ? (await loadProfiles()).profiles[credentials.profile!] : undefined;
+    if (!profile) {
+      args.push("--region", credentials.region);
+      if (credentials.baseUrl) args.push("--base-url", credentials.baseUrl);
+      return { args, persistsKey: false };
+    }
+    args.push("--profile", credentials.profile!);
+    if (credentials.region !== profile.region) args.push("--region", credentials.region);
+    if (credentials.baseUrl && credentials.baseUrl !== profileEndpoint(profile, credentials.region)?.baseUrl) {
+      args.push("--base-url", credentials.baseUrl);
+    }
+    return { args, persistsKey: true };
   };
 
   program.command("ssh <id|name> [command...]")
@@ -341,12 +346,7 @@ the host <sandbox-name>${SSH_HOST_SUFFIX}.
       const code = await context.runSsh(
         // The proxy inherits ssh's environment, which carries these credentials.
         [...sshOptions(context.selfCommand), `${sshTarget(target)}${SSH_HOST_SUFFIX}`, ...command],
-        {
-          ...process.env,
-          ARCHIL_API_KEY: credentials.apiKey,
-          ARCHIL_REGION: credentials.region,
-          ...(credentials.baseUrl ? { ARCHIL_BASE_URL: credentials.baseUrl } : {}),
-        },
+        proxyEnvironment(process.env, credentials),
       );
       context.setExitCode(code);
     });
@@ -402,6 +402,14 @@ the host <sandbox-name>${SSH_HOST_SUFFIX}.
         ["Editors", `Remote-SSH: Connect to Host... → my-sandbox${SSH_HOST_SUFFIX}`],
       ]);
     });
+}
+
+/** `env` with the resolved credentials as its ARCHIL_* variables, so the proxy uses exactly these and nothing stale. */
+export function proxyEnvironment(env: NodeJS.ProcessEnv, credentials: ResolvedCredentials): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = { ...env, ARCHIL_API_KEY: credentials.apiKey, ARCHIL_REGION: credentials.region };
+  if (credentials.baseUrl) result.ARCHIL_BASE_URL = credentials.baseUrl;
+  else delete result.ARCHIL_BASE_URL;
+  return result;
 }
 
 async function ensureKeyWithProgress(ui: Ui): Promise<string> {

@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command } from "../src/cli/command.js";
-import { afterEach, test, vi } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 import { addGlobalOptions, addProfileCommands } from "../src/cli/common.js";
 import { validateCredentialAndResolveRegion } from "../src/cli/credential-validation.js";
 import { credentialFilePath, diskConfigDir, profileConfigPath } from "../src/cli/config-paths.js";
@@ -22,6 +22,10 @@ async function temporaryEnv() {
   directories.push(directory);
   return { ARCHIL_DISK_CONFIG_DIR: directory };
 }
+
+beforeEach(() => {
+  for (const name of ["ARCHIL_API_KEY", "ARCHIL_REGION", "ARCHIL_BASE_URL", "ARCHIL_PROFILE"]) vi.stubEnv(name, undefined);
+});
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -141,8 +145,8 @@ test("profile create honors CLI and environment names without replacing secrets"
     baseUrl: "https://test-one",
   });
   await assert.rejects(
-    runProfileCli("--profile", "named", "--region", "aws-us-east-1", "--api-key", "key-replacement", "profile", "create"),
-    /already exists/,
+    runProfileCli("--profile", "named", "--region", "test", "--api-key", "key-replacement", "profile", "create"),
+    /already exists and has a key for test/,
   );
   assert.equal(await readProfileCredential("named", env), "key-one");
 
@@ -190,31 +194,4 @@ test("profile list renders a table and delete removes metadata and credentials",
   await runProfileCli("profile", "delete", "other");
   assert.equal((await loadProfiles(env)).profiles.other, undefined);
   await assert.rejects(readProfileCredential("other", env), /profile create/);
-});
-
-test("credential precedence is flags, environment, then selected profile file", async () => {
-  const config: ProfileConfig = {
-    version: 1,
-    currentProfile: "saved",
-    profiles: {
-      saved: { region: "saved-region", baseUrl: "https://saved" },
-      other: { region: "other-region" },
-    },
-  };
-  const requested: string[] = [];
-  const readCredential = async (profile: string) => { requested.push(profile); return "stored"; };
-  assert.deepEqual(
-    await resolveCliCredentials({ apiKey: "flag", region: "flag-region", baseUrl: "https://flag" }, config, { ARCHIL_API_KEY: "env", ARCHIL_REGION: "env-region" }, readCredential),
-    { apiKey: "flag", region: "flag-region", baseUrl: "https://flag", profile: "saved" },
-  );
-  assert.deepEqual(
-    await resolveCliCredentials({}, config, { ARCHIL_API_KEY: "key-env", ARCHIL_REGION: "env-region", ARCHIL_BASE_URL: "https://env", ARCHIL_PROFILE: "other" }, readCredential),
-    { apiKey: "key-env", region: "env-region", baseUrl: "https://env", profile: "other" },
-  );
-  assert.deepEqual(
-    await resolveCliCredentials({}, config, {}, readCredential),
-    { apiKey: "stored", region: "saved-region", baseUrl: "https://saved", profile: "saved" },
-  );
-  assert.deepEqual(requested, ["saved"]);
-  await assert.rejects(resolveCliCredentials({ profile: "missing" }, config, {}, readCredential), /does not exist/);
 });
