@@ -12,6 +12,7 @@ import {
   writeProfileCredential,
   type ResolveCredentialOptions,
 } from "./credentials.js";
+import { API_KEY_FROM_STDIN } from "./argv-secrets.js";
 import { renderTable } from "./output.js";
 import { deleteProfile, loadProfiles, saveProfiles } from "./profiles.js";
 
@@ -22,7 +23,7 @@ export type ProfileCredentialValidator = (options: CredentialValidationOptions) 
 export function addGlobalOptions(program: Command): void {
   program
     .configureHelp({ showGlobalOptions: true })
-    .addOption(new Option("-k, --api-key <key>", "Archil API key (prefer profiles, environment variables, or stdin)").env("ARCHIL_API_KEY"))
+    .addOption(new Option("-k, --api-key <key>", "Archil API key; '-' reads it from stdin. A literal key is visible to other local users, so prefer profiles or ARCHIL_API_KEY").env("ARCHIL_API_KEY"))
     .addOption(new Option("-r, --region <region>", "Archil region").env("ARCHIL_REGION"))
     .addOption(new Option("--base-url <url>", "Override control-plane base URL").env("ARCHIL_BASE_URL"))
     .addOption(new Option("--profile <name>", "Named Archil profile").env("ARCHIL_PROFILE"));
@@ -58,7 +59,7 @@ export function addProfileCommands(
       if (global.profile && config.profiles[global.profile]) {
         throw new Error(`Profile '${global.profile}' already exists`);
       }
-      const apiKey = validateApiKey(global.apiKey ?? await promptSecret());
+      const apiKey = validateApiKey(global.apiKey === undefined || global.apiKey === API_KEY_FROM_STDIN ? await promptSecret() : global.apiKey);
       const progress = !global.region && !global.baseUrl && process.stderr.isTTY
         ? spinner(process.stderr)
         : undefined;

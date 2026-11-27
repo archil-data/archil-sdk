@@ -30,6 +30,11 @@ use, and `archil logout` removes the saved key. To revoke the key itself, delete
 API Keys in the console. In CI or on machines without a browser, set `ARCHIL_API_KEY` and
 `ARCHIL_REGION`, or save a key with `archil profile create`.
 
+Avoid passing a key as `--api-key <key>`: on a shared machine, other users can read command
+lines from `ps`. The CLI scrubs the key from its command line once it starts and warns, but
+not before. To pass a key explicitly, pipe it in with `--api-key -`, for example
+`archil --api-key - disk list < key-file`.
+
 ```bash
 # Disks. `create` prints a one-time disk token you'll need to mount the disk.
 npx archil disk create my-disk
@@ -928,7 +933,7 @@ await client.close();
 
 Archil has two credential types, and the examples above use both:
 
-- **API key** — account-level credential for the control plane. You use one whenever you call `disk` (CLI or library). Create and manage them at [console.archil.com](https://console.archil.com) or with `disk api-keys create`. Goes in the `ARCHIL_API_KEY` env var or the `--api-key` flag.
+- **API key** — account-level credential for the control plane. You use one whenever you call `disk` (CLI or library). Create and manage them at [console.archil.com](https://console.archil.com) or with `disk api-keys create`. Goes in the `ARCHIL_API_KEY` env var, a saved profile, or `--api-key -` (read from stdin). A literal `--api-key <key>` is visible to other users on the machine.
 - **Disk token** — per-disk credential that lets a client mount a specific disk. Created automatically when you `disk create <name>` (the value is shown once; save it). You don't need one to run `disk` itself — only when something is actually mounting a disk.
 
 ## Support

@@ -111,7 +111,8 @@ export function credentialOptions(words: string[]): CompletionCredentials {
     if (!key) continue;
     const value = inline ?? words[index + 1];
     if (inline === undefined) index++;
-    if (value) options[key] = value;
+    // `-k -` reads the key from stdin, which completion can't do; fall back to env/profile.
+    if (value && !(key === "apiKey" && value === "-")) options[key] = value;
   }
   return options;
 }
