@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Entry point for the `archil` command, which the `archil` package installs.
+import { protectApiKeyArgument } from "../src/cli/argv-secrets.js";
 import { printError } from "../src/cli/ui.js";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,8 @@ function fail(error: unknown): never {
 
 async function main(argv: string[]): Promise<void> {
   const args = argv.slice(2);
+  // Tab completion re-sends the typed line; scrub it there too, but quietly.
+  protectApiKeyArgument(argv, { warn: args[0] !== "__complete" });
   if (isNativeCommand(args)) {
     process.exitCode = await forwardToNativeClient(args, process.env, process.argv[1] ?? fileURLToPath(import.meta.url));
     return;

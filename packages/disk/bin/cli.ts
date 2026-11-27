@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { protectApiKeyArgument } from "../src/cli/argv-secrets.js";
 import { printError } from "../src/cli/ui.js";
 import { createRequire } from "node:module";
 import { Command } from "../src/cli/command.js";
@@ -6,6 +7,8 @@ import { addGlobalOptions, addProfileCommands } from "../src/cli/common.js";
 import { addDiskCommands, rewriteDiskExecSugar } from "../src/cli/disk-command.js";
 
 const pkg = createRequire(import.meta.url)("../package.json") as { version: string };
+
+protectApiKeyArgument(process.argv);
 
 const program = new Command()
   .name("disk")

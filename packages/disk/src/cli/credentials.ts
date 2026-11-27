@@ -2,6 +2,7 @@ import { mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { credentialFilePath } from "./config-paths.js";
 import type { DiskProfile } from "./profiles.js";
+import { API_KEY_FROM_STDIN } from "./argv-secrets.js";
 
 export function validateApiKey(value: string): string {
   const key = value.trim();
@@ -68,14 +69,18 @@ export async function resolveCliCredentials(
   profiles: { currentProfile?: string; profiles: Record<string, DiskProfile> },
   env: NodeJS.ProcessEnv = process.env,
   readCredential: (profile: string, env: NodeJS.ProcessEnv) => Promise<string> = readProfileCredential,
+  readStdin: () => Promise<string> = () => promptSecret(),
 ): Promise<{ apiKey: string; region: string; baseUrl?: string; profile?: string }> {
   const selected = options.profile ?? env.ARCHIL_PROFILE ?? profiles.currentProfile;
   const profile = selected ? profiles.profiles[selected] : undefined;
   if (selected && !profile) throw new Error(`Profile '${selected}' does not exist`);
-  const apiKey = options.apiKey ?? env.ARCHIL_API_KEY ?? (profile && selected ? await readCredential(selected, env) : undefined);
+  const given = options.apiKey ?? env.ARCHIL_API_KEY;
+  const apiKey = given === API_KEY_FROM_STDIN
+    ? await readStdin()
+    : given ?? (profile && selected ? await readCredential(selected, env) : undefined);
   const region = options.region ?? env.ARCHIL_REGION ?? profile?.region;
   const baseUrl = options.baseUrl ?? env.ARCHIL_BASE_URL ?? profile?.baseUrl;
-  if (!apiKey) throw new Error("Missing API key: pass --api-key, set ARCHIL_API_KEY, or run 'profile create'");
+  if (!apiKey) throw new Error("Missing API key: set ARCHIL_API_KEY, pass '--api-key -' to read it from stdin, or run 'profile create'");
   if (!region) throw new Error("Missing region: pass --region, set ARCHIL_REGION, or select a profile");
   return { apiKey: validateApiKey(apiKey), region, baseUrl, profile: selected };
 }
