@@ -187,6 +187,48 @@ export function apiKeyAuthorization(apiKey: string): string {
   return `Bearer ${apiKey}`;
 }
 
+const socketAgents = new Map<string, Promise<InstanceType<Undici["Agent"]>>>();
+
+/**
+ * @internal Opens a WebSocket to the control plane, authenticated with the API
+ * key in its `Authorization` header as every other API request is. Only Node's
+ * WebSocket (undici) can send that header.
+ */
+export async function openControlPlaneSocket(opts: {
+  baseUrl: string;
+  path: string;
+  protocols: string[];
+  authorization: string;
+  tls?: ArchilTlsOptions;
+}): Promise<WebSocket> {
+  if (!undiciModule) {
+    throw new Error("Streaming exec requires Node.js or Bun: a browser WebSocket cannot send the API key");
+  }
+  const { Agent, WebSocket: NodeWebSocket } = await undiciModule;
+  const ca = opts.tls?.ca === undefined
+    ? undefined
+    : (Array.isArray(opts.tls.ca) ? opts.tls.ca : [opts.tls.ca]).map((cert) => Buffer.from(cert));
+  let dispatcher: InstanceType<Undici["Agent"]> | undefined;
+  if (ca !== undefined) {
+    const key = ca.map((cert) => cert.toString("base64")).join(",");
+    let agent = socketAgents.get(key);
+    if (!agent) {
+      agent = Promise.resolve(new Agent({ connect: { ca } }));
+      socketAgents.set(key, agent);
+    }
+    dispatcher = await agent;
+  }
+  const url = new URL(opts.path, opts.baseUrl);
+  url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
+  const socket = new NodeWebSocket(url, {
+    protocols: opts.protocols,
+    headers: { Authorization: opts.authorization, "User-Agent": USER_AGENT },
+    ...(dispatcher === undefined ? {} : { dispatcher }),
+  });
+  // Undici's WebSocket is the web class Node exposes; only its typings differ.
+  return socket as unknown as WebSocket;
+}
+
 export function createApiClient(opts: ApiClientOptions): ApiClient {
   const baseUrl = opts.baseUrl ?? resolveBaseUrl(opts.region);
   const authorization = apiKeyAuthorization(opts.apiKey);

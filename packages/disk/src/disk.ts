@@ -1,6 +1,7 @@
+import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
 import { buildQuery } from "./api-fetch.js";
-import { type ExecVmOptions, execVmBody } from "./exec-options.js";
+import { completedExec, type ExecVmOptions, execVmBody, restExecBody } from "./exec-options.js";
 import { unwrap, unwrapEmpty } from "./client.js";
 import { ArchilS3Error, parseS3Error } from "./errors.js";
 import { parseXml } from "./s3xml.js";
@@ -718,14 +719,16 @@ export class Disk implements FileSystem {
    * Blocks until the command completes and returns stdout, stderr, and exit code.
    */
   async exec(command: string, options?: ExecVmOptions): Promise<ExecResult> {
-    return unwrap<ExecResult>(
-      retryApiRequest(
-        () =>
-          this._client.POST("/api/disks/{id}/exec", {
-            params: { path: { id: this.id } },
-            body: { ...execVmBody(options), command },
-          }),
-        "connect",
+    return unwrap(
+      completedExec<ExecResult>(
+        retryApiRequest(
+          () =>
+            this._client.POST("/api/disks/{id}/exec", {
+              params: { path: { id: this.id } },
+              body: restExecBody<components["schemas"]["ExecDiskRequest"]>({ ...execVmBody(options), command }),
+            }),
+          "connect",
+        ),
       ),
     );
   }

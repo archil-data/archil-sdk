@@ -1,9 +1,10 @@
 import { MAX_RETRIES, retrySleep } from "./retry.js";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   ClientFrameSchema,
   Exit_Status,
   Limits,
+  SandboxSchema,
   ServerFrameSchema,
   WindowUpdateSchema,
   type ClientFrame,
@@ -42,17 +43,27 @@ export interface ProcessEndpoint {
   token: string;
 }
 
-async function openProcessSocket(
+/** A sandbox's process connection, whose token travels as a subprotocol. */
+export function openSandboxSocket(
   connectionEndpoint: () => Promise<ProcessEndpoint>,
 ): Promise<WebSocket> {
-  for (let attempt = 0; ; attempt++) {
+  return openProcessSocket(async () => {
     const endpoint = await connectionEndpoint();
+    return new WebSocket(
+      endpoint.url,
+      [PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${endpoint.token}`],
+    );
+  });
+}
+
+/** Opens a process connection, retrying a socket that fails to open. */
+export async function openProcessSocket(
+  createSocket: () => Promise<WebSocket>,
+): Promise<WebSocket> {
+  for (let attempt = 0; ; attempt++) {
     let socket: WebSocket | undefined;
     try {
-      socket = new WebSocket(
-        endpoint.url,
-        [PROTOCOL, `${TOKEN_PROTOCOL_PREFIX}${endpoint.token}`],
-      );
+      socket = await createSocket();
       socket.binaryType = "arraybuffer";
       await waitForSocketOpen(socket);
       return socket;
@@ -79,7 +90,7 @@ async function waitForProcessWrite(socket: WebSocket): Promise<void> {
   }
 }
 
-const PROTOCOL = "archil.connect.v2";
+export const PROTOCOL = "archil.connect.v2";
 const TOKEN_PROTOCOL_PREFIX = "archil.token.";
 // Flow-control limits; process.proto, which generates these, states the rules.
 const MAX_DATA: number = Limits.MAX_DATA_BYTES;
@@ -89,18 +100,30 @@ const dataCost = (length: number) => Math.max(length, MIN_DATA_COST);
 const MAX_CHANNELS = 128;
 const IDLE_MS = 5000;
 
+interface StartRequest {
+  command: string;
+  cwd?: string;
+  env: Record<string, string>;
+  terminal?: boolean | { rows: number; cols: number };
+  timeout_seconds?: number;
+}
+
+/** The VM an exec runs in, as the exec endpoint takes it. */
+export type ExecSandbox = MessageInitShape<typeof SandboxSchema>;
+
 type Request =
-  | {
-      type: "start";
-      command: string;
-      cwd?: string;
-      env: Record<string, string>;
-      terminal?: boolean | { rows: number; cols: number };
-      timeout_seconds?: number;
-    }
+  | ({ type: "start" } & StartRequest)
+  | { type: "exec"; start: StartRequest; sandbox: ExecSandbox }
   | { type: "attach"; process_id: string; offset: number; shared?: true }
   | { type: "kill"; process_id: string }
   | { type: "resize"; process_id: string; rows: number; cols: number };
+export interface ProcessConnectionOptions {
+  /** Channels one connection carries at once; another connection opens past it. */
+  maxChannels?: number;
+  /** Names the server in the error for one that does not speak the protocol. */
+  server?: string;
+}
+
 /** Owns only the client connection. A disconnected transport never retries START. */
 export class ProcessConnection {
   private opening?: Promise<BinaryConnection>;
@@ -108,7 +131,15 @@ export class ProcessConnection {
   /** Every open connection, including ones a drain or full channel table left behind. */
   private readonly live = new Set<BinaryConnection>();
   private generation = 0;
-  constructor(private readonly endpoint: () => Promise<ProcessEndpoint>) {}
+  private readonly maxChannels: number;
+  private readonly server: string;
+  constructor(
+    private readonly openSocket: () => Promise<WebSocket>,
+    options: ProcessConnectionOptions = {},
+  ) {
+    this.maxChannels = options.maxChannels ?? MAX_CHANNELS;
+    this.server = options.server ?? "Sandbox runtime";
+  }
 
   async open(): Promise<BinaryChannel> {
     for (;;) {
@@ -128,16 +159,16 @@ export class ProcessConnection {
 
   private async connect(): Promise<BinaryConnection> {
     const generation = this.generation;
-    const socket = await openProcessSocket(this.endpoint);
+    const socket = await this.openSocket();
     if (generation !== this.generation) {
       socket.close();
       throw new Error("Process connection opening cancelled");
     }
     if (socket.protocol !== PROTOCOL) {
       socket.close();
-      throw new Error(`Sandbox runtime does not support the ${PROTOCOL} process protocol`);
+      throw new Error(`${this.server} does not support the ${PROTOCOL} process protocol`);
     }
-    const binary = new BinaryConnection(socket, () => this.live.delete(binary));
+    const binary = new BinaryConnection(socket, this.maxChannels, () => this.live.delete(binary));
     this.live.add(binary);
     this.binary = binary;
     return binary;
@@ -158,10 +189,11 @@ class BinaryConnection {
   private idle?: ReturnType<typeof setTimeout>;
   get canOpen(): boolean {
     return !this.draining && this.socket.readyState === WebSocket.OPEN &&
-      this.next < 0xffffffff && this.channels.size < MAX_CHANNELS;
+      this.next < 0xffffffff && this.channels.size < this.maxChannels;
   }
   constructor(
     private readonly socket: WebSocket,
+    private readonly maxChannels: number,
     private readonly onClosed: () => void,
   ) {
     socket.addEventListener("message", (message) => {
@@ -207,6 +239,23 @@ class BinaryConnection {
   }
 }
 
+function startValue(request: StartRequest) {
+  const terminal =
+    request.terminal === true
+      ? { rows: 24, cols: 80 }
+      : request.terminal || undefined;
+  return {
+    command: request.command,
+    cwd: request.cwd,
+    terminal,
+    env: request.env,
+    timeoutSeconds:
+      request.timeout_seconds === undefined
+        ? undefined
+        : BigInt(request.timeout_seconds),
+  };
+}
+
 /** @internal WebSocket-shaped channel; generated protobuf owns all wire encoding. */
 export class BinaryChannel {
   readyState: number = WebSocket.OPEN;
@@ -229,31 +278,20 @@ export class BinaryChannel {
   ) {}
   sendRequest(request: Request): void {
     switch (request.type) {
-      case "start": {
-        const terminal =
-          request.terminal === true
-            ? { rows: 24, cols: 80 }
-            : request.terminal || undefined;
+      case "start":
+        this.connection.send(
+          this.id,
+          create(ClientFrameSchema, { body: { case: "start", value: startValue(request) } }).body,
+        );
+        break;
+      case "exec":
         this.connection.send(
           this.id,
           create(ClientFrameSchema, {
-            body: {
-              case: "start",
-              value: {
-                command: request.command,
-                cwd: request.cwd,
-                terminal,
-                env: request.env,
-                timeoutSeconds:
-                  request.timeout_seconds === undefined
-                    ? undefined
-                    : BigInt(request.timeout_seconds),
-              },
-            },
+            body: { case: "exec", value: { start: startValue(request.start), sandbox: request.sandbox } },
           }).body,
         );
         break;
-      }
       case "attach":
         this.connection.send(
           this.id,

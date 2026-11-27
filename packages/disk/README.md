@@ -186,6 +186,37 @@ await d.removeUser("token", user.identifier!);
 await d.delete();
 ```
 
+### Streaming an exec (Node.js)
+
+With `stream: true`, `archil.exec()` streams the command's input and output
+while it runs, instead of returning them when it exits. It takes the same
+options as a waiting exec, plus the process options `sandbox.run()` takes, and
+resolves once the command has started with the same handle `sandbox.run()`
+returns:
+
+```ts
+const proc = await archil.exec({
+  stream: true,
+  command: "python3 train.py",
+  disks: { data: d }, // mounted at /mnt/archil/data, as for a waiting exec
+  baseImage: "python:3.12-slim",
+  vcpuCount: 4,
+  memSizeMib: 8192,
+  timeoutSeconds: 3600,
+});
+for await (const chunk of proc.output) {
+  process.stdout.write(chunk.data);
+}
+const { exitCode } = await proc.wait();
+```
+
+Send input with `sendInput()` and end it with `closeStdin()`. Streamed execs
+share connections: up to 32 run at once on one, and later ones reuse it, so an
+exec after the first skips connection setup. `kill()` and `disconnect()` both
+stop the command and its VM. `disks` may be empty for a command that needs no
+disk, which takes the `workspace:exec` permission. Streaming needs Node.js or
+Bun, because a browser WebSocket cannot send the API key.
+
 ### Private certificate authorities (Node.js)
 
 For BYOC endpoints signed by a private CA, configure trust on the client:

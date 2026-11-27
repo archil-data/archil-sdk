@@ -1,5 +1,6 @@
+import type { components } from "@archildata/api-types";
 import type { ApiClient } from "./client.js";
-import { type ExecVmOptions, execVmBody } from "./exec-options.js";
+import { completedExec, type ExecVmOptions, execVmBody, restExecBody } from "./exec-options.js";
 import { unwrap, unwrapPage } from "./client.js";
 import { retryApiRequest } from "./retry.js";
 import { Disk, type ExecResult } from "./disk.js";
@@ -154,14 +155,16 @@ export class Disks {
    * without fetching the disk first.
    */
   async exec(id: string, command: string, options?: ExecVmOptions): Promise<ExecResult> {
-    return unwrap<ExecResult>(
-      retryApiRequest(
-        () =>
-          this._client.POST("/api/disks/{id}/exec", {
-            params: { path: { id } },
-            body: { ...execVmBody(options), command },
-          }),
-        "connect",
+    return unwrap(
+      completedExec<ExecResult>(
+        retryApiRequest(
+          () =>
+            this._client.POST("/api/disks/{id}/exec", {
+              params: { path: { id } },
+              body: restExecBody<components["schemas"]["ExecDiskRequest"]>({ ...execVmBody(options), command }),
+            }),
+          "connect",
+        ),
       ),
     );
   }
