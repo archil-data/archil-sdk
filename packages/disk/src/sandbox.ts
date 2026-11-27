@@ -363,14 +363,6 @@ export class Sandbox {
     command: string,
     options: SandboxProcessStartOptions = {},
   ): Promise<SandboxProcess> {
-    const process = new SandboxProcess(
-      "",
-      0,
-      options.collectOutput ?? true,
-      this._processOutput,
-      () => this._processConnection.open(),
-      (request) => this._control(request),
-    );
     const terminal =
       typeof options.terminal === "object"
         ? {
@@ -378,7 +370,7 @@ export class Sandbox {
             rows: options.terminal.rows ?? 24,
           }
         : options.terminal;
-    await process._connect({
+    const process = await this._connectProcess("", 0, options, {
       type: "start",
       command,
       cwd: options.cwd,
@@ -396,15 +388,7 @@ export class Sandbox {
     options: SandboxProcessConnectOptions = {},
   ): Promise<SandboxProcess> {
     const offset = options.offset ?? 0;
-    const process = new SandboxProcess(
-      processId,
-      offset,
-      options.collectOutput ?? true,
-      this._processOutput,
-      () => this._processConnection.open(),
-      (request) => this._control(request),
-    );
-    await process._connect({
+    const process = await this._connectProcess(processId, offset, options, {
       type: "attach",
       process_id: processId,
       offset,
@@ -412,6 +396,33 @@ export class Sandbox {
     });
     if (options.onOutput) process._deliverTo(options.onOutput);
     return process;
+  }
+
+  private async _connectProcess(
+    processId: string,
+    offset: number,
+    options: { collectOutput?: boolean },
+    request: Parameters<SandboxProcess["_connect"]>[0],
+  ): Promise<SandboxProcess> {
+    for (let retried = false; ; retried = true) {
+      const process = new SandboxProcess(
+        processId,
+        offset,
+        options.collectOutput ?? true,
+        this._processOutput,
+        () => this._processConnection.open(),
+        (request) => this._control(request),
+      );
+      try {
+        await process._connect(request);
+        return process;
+      } catch (error) {
+        // A connection stays bound to the host its container was on; once the sandbox
+        // restarts elsewhere, that runtime rejects every new process before it runs.
+        if (retried || !(error instanceof Error && error.message.startsWith("session_rejected:"))) throw error;
+        this._processConnection.retire();
+      }
+    }
   }
 
   private async _connectionEndpoint(): Promise<ProcessEndpoint> {
@@ -508,6 +519,7 @@ export class Sandbox {
       ),
     );
     this._apply(data);
+    this._processConnection.disconnect();
     return options.wait === false ? this : waitForSandboxStart(this);
   }
 
@@ -523,6 +535,7 @@ export class Sandbox {
       ),
     );
     this._apply(data);
+    this._processConnection.disconnect();
     return options.wait === false ? this : waitWhileSandboxStatus(this, "stopping");
   }
 
@@ -538,6 +551,7 @@ export class Sandbox {
       ),
     );
     this._apply(data);
+    this._processConnection.disconnect();
     if (options.wait === false) return this;
     await waitWhileSandboxStatus(this, "pausing");
     if (this.status !== "paused") throw new SandboxPauseError(this);
@@ -556,6 +570,7 @@ export class Sandbox {
       ),
     );
     this._apply(data);
+    this._processConnection.disconnect();
     return options.wait === false ? this : waitForSandboxStart(this);
   }
 
@@ -581,6 +596,7 @@ export class Sandbox {
       ),
     );
     this._apply(paused);
+    this._processConnection.disconnect();
     const resumeAfterFork = this.status === "pausing";
     const checkpoint = this.checkpoint;
 

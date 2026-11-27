@@ -19,6 +19,8 @@ class RuntimeSocket extends EventTarget {
   static ignoreProtocol = false;
   /** Return stdin credit as the guest would after reading it. */
   static grantStdin = true;
+  /** Refuse this many starts the way a runtime that no longer hosts the sandbox does. */
+  static rejectStarts = 0;
   readyState = 0;
   binaryType = "arraybuffer";
   readonly protocol: string;
@@ -44,6 +46,13 @@ class RuntimeSocket extends EventTarget {
     switch (frame.body.case) {
       case "start":
       case "attach":
+        if (frame.body.case === "start" && RuntimeSocket.rejectStarts > 0) {
+          RuntimeSocket.rejectStarts--;
+          queueMicrotask(() =>
+            this.emit(id, { case: "error", value: { code: "session_rejected", message: "Container not found: sandbox" } }),
+          );
+          break;
+        }
         queueMicrotask(() =>
           this.emit(id, {
             case: frame.body.case === "start" ? "started" : "attached",
@@ -101,10 +110,12 @@ class RuntimeSocket extends EventTarget {
 }
 function setup() {
   vi.stubGlobal("WebSocket", RuntimeSocket);
-  const post = vi.fn(async () => ({
+  const post = vi.fn(async (path: string) => ({
     data: {
       success: true,
-      data: { endpoint: "ws://runtime/connect", token: "signed", expires_at: "2099-01-01" },
+      data: path.endsWith("/connections")
+        ? { endpoint: "ws://runtime/connect", token: "signed", expires_at: "2099-01-01" }
+        : { sandbox_id: "sandbox", status: "running", mounts: [] },
     },
     response: new Response(null, { status: 200 }),
   }));
@@ -118,6 +129,7 @@ afterEach(() => {
   RuntimeSocket.instances = [];
   RuntimeSocket.ignoreProtocol = false;
   RuntimeSocket.grantStdin = true;
+  RuntimeSocket.rejectStarts = 0;
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -161,6 +173,32 @@ test("concurrent and sequential processes reuse one authorized binary connection
   RuntimeSocket.instances[1].exit(1);
   await fourth.wait();
   await processes.disconnect();
+});
+
+test("a process started after a lifecycle change opens a fresh connection", async () => {
+  const { sandbox, post } = setup();
+  const first = await sandbox.run("one");
+  RuntimeSocket.instances[0].exit(1);
+  await first.wait();
+  await sandbox.resume({ wait: false });
+  assert.equal(RuntimeSocket.instances[0].readyState, 3);
+  const second = await sandbox.run("two");
+  assert.equal(RuntimeSocket.instances.length, 2);
+  RuntimeSocket.instances[1].exit(1);
+  assert.equal((await second.wait()).exitCode, 0);
+  assert.equal(post.mock.calls.filter(([path]) => path.endsWith("/connections")).length, 2);
+});
+
+test("a start the runtime rejects because it no longer hosts the sandbox retries once on a fresh connection", async () => {
+  const { sandbox } = setup();
+  RuntimeSocket.rejectStarts = 1;
+  const process = await sandbox.run("one");
+  assert.equal(RuntimeSocket.instances.length, 2);
+  assert.equal(RuntimeSocket.instances[0].readyState, 3);
+  RuntimeSocket.instances[1].exit(1);
+  assert.equal((await process.wait()).exitCode, 0);
+  RuntimeSocket.rejectStarts = 2;
+  await assert.rejects(sandbox.run("two"), /session_rejected: Container not found/);
 });
 
 test("stdin chunks spend returned credit and precede EOF", async () => {

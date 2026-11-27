@@ -143,6 +143,11 @@ export class ProcessConnection {
     return binary;
   }
 
+  retire(): void {
+    this.binary?.drain();
+    this.binary = undefined;
+  }
+
   disconnect(): void {
     this.generation++;
     this.opening = undefined;
@@ -169,14 +174,16 @@ class BinaryConnection {
         const frame = fromBinary(ServerFrameSchema, new Uint8Array(message.data as ArrayBuffer));
         if (frame.channelId === 0) {
           // Other connection messages come from newer runtimes; ignore them.
-          if (frame.body.case !== "drain") return;
-          this.draining = true;
-          if (!this.channels.size) this.close();
+          if (frame.body.case === "drain") this.drain();
         } else this.channels.get(frame.channelId)?.receive(frame);
       } catch (error) { this.close(error); }
     });
     socket.addEventListener("close", () => this.close(new Error("Process connection closed before exit")), { once: true });
     socket.addEventListener("error", () => this.close(new Error("Process connection failed")), { once: true });
+  }
+  drain(): void {
+    this.draining = true;
+    if (!this.channels.size) this.close();
   }
   channel(): BinaryChannel {
     if (!this.canOpen) throw new Error("Process connection is draining or full");
