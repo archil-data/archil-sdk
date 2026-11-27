@@ -44,7 +44,8 @@ export class ImageBuildError extends ArchilError {
   readonly reason?: ImageFailureReason;
 
   constructor(readonly latest: Image) {
-    super(`Image ${latest.imageId} build failed: ${latest.failureReason}`, 409, "IMAGE_BUILD_FAILED");
+    const log = latest.buildLog ? `\n${latest.buildLog.split("\n").slice(-20).join("\n")}` : "";
+    super(`Image ${latest.imageId} build failed: ${latest.failureReason}${log}`, 409, "IMAGE_BUILD_FAILED");
     this.name = "ImageBuildError";
     this.reason = latest.failureReason;
   }

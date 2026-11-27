@@ -542,6 +542,7 @@ class Image:
     failure_reason: Optional[ImageFailureReason] = None
     vcpu_count: Optional[int] = None
     mem_size_mib: Optional[int] = None
+    build_log: Optional[str] = None
 
     @classmethod
     def from_json(cls, d: dict) -> "Image":
@@ -557,6 +558,7 @@ class Image:
             failure_reason=d.get("failure_reason"),
             vcpu_count=d.get("vcpu_count"),
             mem_size_mib=d.get("mem_size_mib"),
+            build_log=d.get("build_log"),
         )
 
 

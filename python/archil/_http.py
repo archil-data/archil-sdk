@@ -258,6 +258,12 @@ class _Transport:
     ) -> None:
         await self._request_envelope(method, path, params=params, json=json, allow_empty=True, retry=retry)
 
+    async def put_presigned(self, url: str, headers: dict[str, str], content: bytes) -> httpx.Response:
+        """PUT ``content`` to a presigned URL. The URL carries its own signature,
+        so the API key is not sent with it."""
+        async with httpx.AsyncClient(transport=self._transport, timeout=self._timeout) as client:
+            return await client.put(url, headers=headers, content=content)
+
     async def _request_envelope(
         self,
         method,

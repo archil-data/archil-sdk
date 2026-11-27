@@ -62,6 +62,7 @@ test("build retries a transient failure and returns a ready image without pollin
       digest: "sha256:abc",
       canonicalSource: "ghcr.io/acme/app@sha256:abc",
       failureReason: undefined,
+      buildLog: undefined,
       vcpuCount: 1,
       memSizeMiB: 2048,
       createdAt: new Date(now),
@@ -158,4 +159,98 @@ test("build throws once the timeout passes", async () => {
   await vi.advanceTimersByTimeAsync(12_000);
   await timedOut;
   assert.deepEqual(calls.map(({ ms }) => ms), [0, 1_000, 3_000, 7_000, 12_000]);
+});
+
+const dockerfile = "FROM alpine:3\nCOPY main.c /src/\n";
+
+async function contextDirectory(): Promise<string> {
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "archil-images-"));
+  await writeFile(join(root, "main.c"), "int main(void) { return 0; }\n");
+  return root;
+}
+
+// POST /api/images/contexts answers with `upload`; POST /api/images with a ready image.
+function fakeDockerfileImages(upload: object) {
+  const posts: Array<{ path: string; body: any }> = [];
+  const images = new Images({
+    POST: async (path: string, options: { body: unknown }) => {
+      posts.push({ path, body: options.body });
+      const data = path === "/api/images/contexts" ? upload : imageWire("ready");
+      return { data: { success: true, data }, response: new Response(null, { status: 200 }) };
+    },
+  } as unknown as ApiClient);
+  return { images, posts };
+}
+
+test("build from a Dockerfile uploads its context to the presigned URL", async () => {
+  const { packContext } = await import("../src/build-context.js");
+  const root = await contextDirectory();
+  const { data, sha256 } = await packContext(root);
+  const bucket = await startOrigin(() => ({ status: 200 }));
+  try {
+    const { images, posts } = fakeDockerfileImages({
+      present: false,
+      upload_url: `${bucket.url}/contexts/u/ctx.tar.gz?X-Amz-Signature=sig`,
+      upload_headers: { "x-amz-checksum-sha256": "c3VtCg==" },
+    });
+
+    await images.build({ dockerfile, context: root });
+
+    assert.deepEqual(posts, [
+      { path: "/api/images/contexts", body: { sha256, size_bytes: data.length } },
+      {
+        path: "/api/images",
+        body: { dockerfile, context: `sha256:${sha256}`, vcpu_count: undefined, mem_size_mib: undefined },
+      },
+    ]);
+    const [upload] = bucket.requests;
+    assert.equal(upload.method, "PUT");
+    assert.equal(upload.url.pathname, "/contexts/u/ctx.tar.gz");
+    assert.equal(upload.headers.get("content-length"), String(data.length));
+    assert.equal(upload.headers.get("x-amz-checksum-sha256"), "c3VtCg==");
+    assert.equal(upload.headers.get("authorization"), null);
+  } finally {
+    await bucket.close();
+  }
+});
+
+test("build from a Dockerfile skips a context already uploaded", async () => {
+  const { images, posts } = fakeDockerfileImages({ present: true });
+
+  await images.build({ dockerfile, context: await contextDirectory(), vcpuCount: 2 });
+
+  assert.deepEqual(posts.map(({ path }) => path), ["/api/images/contexts", "/api/images"]);
+  assert.equal(posts[1].body.vcpu_count, 2);
+});
+
+test("build from a Dockerfile without a context sends only the Dockerfile", async () => {
+  const { calls, images } = fakeImages(imageWire("ready"));
+
+  await images.build({ dockerfile });
+
+  assert.deepEqual(calls.map(({ options }) => JSON.parse(JSON.stringify(options.body))), [{ dockerfile }]);
+});
+
+test("build rejects conflicting arguments before any request", async () => {
+  const { calls, images } = fakeImages(imageWire("ready"));
+  for (const request of [{}, { source, dockerfile }, { source, context: "." }, { dockerfile, registryAuth }]) {
+    await assert.rejects(images.build(request), TypeError);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test("a failed Dockerfile build throws with the end of its log", async () => {
+  const log = `${Array.from({ length: 30 }, (_, n) => `#${n} step`).join("\n")}\nERROR: exit code: 3`;
+  const { images } = fakeImages(imageWire("failed", { failure_reason: "invalid_source", build_log: log }));
+
+  await assert.rejects(images.build({ dockerfile }), (error: unknown) => {
+    assert.ok(error instanceof ImageBuildError);
+    assert.equal(error.latest.buildLog, log);
+    assert.ok(error.message.endsWith("ERROR: exit code: 3"));
+    assert.ok(!error.message.includes("#10 step"));
+    return true;
+  });
 });
